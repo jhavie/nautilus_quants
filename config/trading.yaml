@@ -1,0 +1,29 @@
+# ============================================================================
+# Trading Configuration - MVP
+# ============================================================================
+
+# 资金配置
+capital:
+  initial: 100000.0           # 初始资金 (USDT)
+
+# 交易品种
+instruments:
+  exchange: "BINANCE"
+  market_type: "FUTURES"
+  quote_currency: "USDT"
+
+# 持仓限制
+position:
+  max_positions: 10           # 最大持仓数量 (选币池大小)
+  max_single_pct: 0.10        # 单币最大仓位 10%
+  max_total_exposure: 0.80    # 总仓位上限 80%
+
+# 杠杆
+leverage:
+  default: 3.0                # 默认杠杆倍数
+  max: 5.0                    # 最大杠杆
+
+# 数据频率
+data:
+  bar_interval: "1h"          # K线周期
+  lookback_days: 365          # 历史数据长度

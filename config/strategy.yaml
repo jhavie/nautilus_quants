@@ -1,0 +1,46 @@
+# ============================================================================
+# Strategy Configuration - MVP
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 第一阶段: 选币 (Universe Selection)
+# ----------------------------------------------------------------------------
+universe:
+  # 选币方法: 7日累计成交量排名前N
+  method: "volume_rank"
+  top_n: 10                     # 选取前10名
+
+  # 成交量因子参数
+  volume_factor:
+    period: 7                   # 7日累计
+    min_volume_usd: 5000000     # 最低日均500万USD过滤
+
+  # 更新频率
+  update_frequency: "daily"     # 每日更新选币池
+  update_time: "00:00:00"       # UTC时间
+
+# ----------------------------------------------------------------------------
+# 第二阶段: 信号生成 (Signal Generation)
+# ----------------------------------------------------------------------------
+signal:
+  # 信号方法: 量价突破 + SMA过滤
+  method: "volume_price_breakout"
+
+  # 突破参数
+  breakout:
+    lookback_bars: 60           # 60根K线回看
+
+  # 趋势过滤
+  trend_filter:
+    enabled: true
+    sma_period: 200             # SMA200均线
+    condition: "close > sma"    # 收盘价在均线之上
+
+  # 信号条件 (全部满足才做多)
+  long_conditions:
+    - "close > highest(close, 60)"
+    - "volume > highest(volume, 60)"
+    - "close > sma(close, 200)"
+
+  # 做空条件 (MVP暂不实现)
+  short_enabled: false
