@@ -15,10 +15,14 @@ authors = [
 
 dependencies = [
     "nautilus_trader==1.222.0",
-    "pandas>=2.3.0",
-    "numpy>=2.2.0",
+    "numpy>=1.26.4",
+    "pandas>=2.3.3,<3.0.0",
     "pyyaml>=6.0",
     "plotly>=5.18.0",  # For Nautilus native visualization
+    # Data pipeline dependencies
+    "python-binance>=1.0.19",  # Binance API client
+    "click>=8.0.0",  # CLI framework
+    "tenacity>=8.0.0",  # Retry logic with exponential backoff
 ]
 
 [project.optional-dependencies]
@@ -49,3 +53,7 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "network: marks tests as requiring network access (deselect with '-m \"not network\"')",
+]
