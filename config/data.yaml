@@ -1,0 +1,51 @@
+# Data Pipeline Configuration
+# See specs/feature-1-binance-data-pipeline/data-model.md for schema details
+version: "1.0"
+
+download:
+  exchange: binance
+  market_type: futures          # spot | futures
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+  timeframes:
+    - 1h
+    - 1m
+  start_date: "2025-12-01"
+  end_date: "2025-12-31"
+
+  # Rate limiting configuration
+  rate_limit:
+    max_retries: 5
+    initial_delay_seconds: 1
+    max_delay_seconds: 60
+    backoff_multiplier: 2
+
+  # Checkpoint settings
+  checkpoint:
+    enabled: true
+    batch_size: 1000            # Save checkpoint every N klines
+
+validate:
+  check_duplicates: true
+  check_gaps: true
+  check_ohlc: true
+  fail_on_warnings: false       # If true, warnings become errors
+
+process:
+  remove_duplicates: true
+  keep_duplicate: "last"        # first | last
+  fill_small_gaps: true
+  max_gap_bars: 3               # Gaps <= 3 bars are filled
+  remove_invalid_ohlc: true
+
+transform:
+  output_format: parquet
+  merge_files: true
+  catalog_path: "data/catalog"
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  catalog: "data/catalog"
+  logs: "logs/data_pipeline"

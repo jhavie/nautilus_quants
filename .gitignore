@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 build/
+/data/
 develop-eggs/
 dist/
 downloads/
@@ -16,8 +17,12 @@ parts/
 sdist/
 var/
 wheels/
+/specs/
 *.egg-info/
 .installed.cfg
+.ruff_cache
+.mypy_cache
+.pytest_cache
 *.egg
 
 # Testing
@@ -49,3 +54,6 @@ Thumbs.db
 logs/
 *.log
 .env.local
+
+# Claude Code local config
+.claude/
