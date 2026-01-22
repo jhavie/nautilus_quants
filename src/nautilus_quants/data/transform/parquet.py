@@ -5,13 +5,16 @@ Uses Nautilus Trader's native ParquetDataCatalog for compatibility.
 """
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+from nautilus_trader.model.currencies import USDT
 from nautilus_trader.model.data import Bar, BarType, BarSpecification
 from nautilus_trader.model.enums import BarAggregation, PriceType
-from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.model.objects import Price, Quantity
+from nautilus_trader.model.identifiers import InstrumentId, Symbol, Venue
+from nautilus_trader.model.instruments import CryptoPerpetual
+from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
 
 
@@ -43,6 +46,47 @@ TIMEFRAME_TO_STEP = {
     "12h": 720,
     "1d": 1440,
 }
+
+
+def _create_instrument(
+    symbol: str,
+    venue: str = "BINANCE",
+    ts_init: int = 0,
+) -> CryptoPerpetual:
+    """Create a CryptoPerpetual instrument for the catalog.
+
+    Args:
+        symbol: Trading pair symbol (e.g., "BTCUSDT")
+        venue: Exchange venue name
+        ts_init: Initialization timestamp in nanoseconds
+
+    Returns:
+        CryptoPerpetual instrument
+    """
+    return CryptoPerpetual(
+        instrument_id=InstrumentId(symbol=Symbol(symbol), venue=Venue(venue)),
+        raw_symbol=Symbol(symbol),
+        base_currency=USDT,
+        quote_currency=USDT,
+        settlement_currency=USDT,
+        is_inverse=False,
+        price_precision=2,
+        size_precision=3,
+        price_increment=Price.from_str("0.01"),
+        size_increment=Quantity.from_str("0.001"),
+        max_quantity=Quantity.from_str("10000"),
+        min_quantity=Quantity.from_str("0.001"),
+        max_notional=Money(1_000_000, USDT),
+        min_notional=Money(10, USDT),
+        max_price=Price.from_str("1000000"),
+        min_price=Price.from_str("0.01"),
+        margin_init=Decimal("0.05"),
+        margin_maint=Decimal("0.025"),
+        maker_fee=Decimal("0.0002"),
+        taker_fee=Decimal("0.0004"),
+        ts_event=ts_init,
+        ts_init=ts_init,
+    )
 
 
 def _get_bar_type(symbol: str, timeframe: str) -> BarType:
@@ -164,6 +208,14 @@ def transform_to_parquet(
         # Create catalog and write data
         catalog_path.mkdir(parents=True, exist_ok=True)
         catalog = ParquetDataCatalog(str(catalog_path))
+
+        # Write instrument definition first (required for BacktestNode)
+        instrument = _create_instrument(
+            symbol=symbol,
+            venue="BINANCE",
+            ts_init=bars[0].ts_init,
+        )
+        catalog.write_data([instrument])
 
         # Write bars to catalog
         catalog.write_data(bars)
