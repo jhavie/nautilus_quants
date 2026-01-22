@@ -57,3 +57,8 @@ logs/
 
 # Claude Code local config
 .claude/
+CLAUDE.md
+
+# Specify and OpenCode
+.specify/
+.opencode/

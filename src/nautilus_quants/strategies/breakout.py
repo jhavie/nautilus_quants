@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Optional, Set
 
 from nautilus_trader.config import StrategyConfig
-from nautilus_trader.indicators.average.sma import SimpleMovingAverage
+from nautilus_trader.indicators import SimpleMovingAverage
 from nautilus_trader.model.data import Bar, BarType, DataType
 from nautilus_trader.model.enums import OrderSide, TimeInForce
 from nautilus_trader.model.identifiers import InstrumentId
@@ -36,8 +36,17 @@ class BreakoutStrategyConfig(StrategyConfig, frozen=True):
     # 交易所
     exchange: str = "BINANCE"
 
-    # 时间周期 (用于构造 BarType)
-    bar_spec: str = "1-HOUR-LAST-EXTERNAL"
+    # 时间框架配置 (策略控制聚合)
+    # interval = 策略信号周期 (如 "1h")
+    # bar_spec = 数据源周期 (如 "1m")
+    # 当 interval != bar_spec 时，策略自动聚合
+    interval: str = "1h"
+    bar_spec: str = "1m"
+
+    # 静态标的列表 (回测模式)
+    # 如果提供，直接使用这些标的，不依赖 UniverseUpdate
+    # 空列表 = 动态模式 (等待 ScreeningActor 的 UniverseUpdate)
+    instruments: tuple[str, ...] = ()
 
 
 class BreakoutStrategy(Strategy):
@@ -69,13 +78,36 @@ class BreakoutStrategy(Strategy):
         self._breakout_indicators: dict[str, BreakoutIndicator] = {}
 
     def on_start(self) -> None:
-        """策略启动"""
+        """策略启动
+
+        支持两种模式:
+        1. 静态模式: 配置中提供 instruments 列表，直接订阅这些标的
+        2. 动态模式: 等待 ScreeningActor 发布的 UniverseUpdate 事件
+        """
         self.log.info("BreakoutStrategy starting...")
 
-        # 订阅选币池更新 (来自 ScreeningActor)
-        self.subscribe_data(DataType(UniverseUpdate))
-
-        self.log.info("Subscribed to UniverseUpdate")
+        # 模式 1: 静态标的列表 (回测模式)
+        if self.config.instruments:
+            self.log.info(
+                f"Static mode: {len(self.config.instruments)} instruments from config"
+            )
+            for symbol in self.config.instruments:
+                self._subscribe_symbol(symbol)
+                self._universe.add(symbol)
+            self.log.info(f"Subscribed to: {list(self._universe)}")
+        else:
+            # 模式 2: 动态标的 (依赖 ScreeningActor)
+            self.log.info("Dynamic mode: waiting for UniverseUpdate events")
+            # 注意: 需要 ScreeningActor 发布 UniverseUpdate 事件
+            # 如果没有 ScreeningActor，策略将不会收到任何标的
+            try:
+                self.subscribe_data(DataType(UniverseUpdate))
+                self.log.info("Subscribed to UniverseUpdate")
+            except Exception as e:
+                self.log.warning(
+                    f"Could not subscribe to UniverseUpdate: {e}. "
+                    "Strategy may not receive any instruments."
+                )
 
     def on_data(self, data) -> None:
         """处理自定义数据"""
@@ -109,40 +141,106 @@ class BreakoutStrategy(Strategy):
         )
 
     def _subscribe_symbol(self, symbol: str) -> None:
-        """订阅币种并注册指标"""
-        bar_type = BarType.from_str(
-            f"{symbol}.{self.config.exchange}-{self.config.bar_spec}"
-        )
+        """订阅币种并注册指标
+
+        支持 Bar 聚合 (参考 nautilus_trader example_03_bar_aggregation):
+        - 当 interval != bar_spec 时，使用 @ 语法进行聚合
+        - 例如: 1-HOUR-LAST-INTERNAL@1-MINUTE-EXTERNAL
+
+        聚合语法: {target_bar_type}@{source_step}-{source_unit}-EXTERNAL
+        """
+        from nautilus_quants.backtest.utils.bar_spec import format_bar_spec, parse_timeframe
+
+        signal_tf = self.config.interval   # e.g., "1h" (策略信号周期)
+        data_tf = self.config.bar_spec     # e.g., "1m" (数据源周期)
 
         # 创建指标
         sma = SimpleMovingAverage(self.config.sma_period)
         breakout = BreakoutIndicator(self.config.breakout_period)
 
-        # 注册指标到 BarType
-        self.register_indicator_for_bars(bar_type, sma)
-        self.register_indicator_for_bars(bar_type, breakout)
+        if signal_tf != data_tf:
+            # 需要聚合: 使用 @ 语法
+            # 目标: 1-HOUR-LAST-INTERNAL (引擎内部聚合)
+            target_spec = format_bar_spec(signal_tf, internal=True)
+            target_bar_type = BarType.from_str(
+                f"{symbol}.{self.config.exchange}-{target_spec}"
+            )
 
-        # 保存引用
+            # 构造聚合订阅 bar type: target@source
+            # 源格式: {step}-{unit}-EXTERNAL (不含 instrument_id 和 price_type)
+            source_step, source_unit = parse_timeframe(data_tf)
+            subscribe_bar_type = BarType.from_str(
+                f"{target_bar_type}@{source_step}-{source_unit}-EXTERNAL"
+            )
+
+            # 注册指标到目标 bar type (聚合后的 bars)
+            self.register_indicator_for_bars(target_bar_type, sma)
+            self.register_indicator_for_bars(target_bar_type, breakout)
+
+            # 保存目标 bar type 用于 on_bar 匹配
+            self._target_bar_types = getattr(self, '_target_bar_types', {})
+            self._target_bar_types[symbol] = target_bar_type
+
+            # 订阅聚合 bar type
+            self.subscribe_bars(subscribe_bar_type)
+            self._subscribed_bars.add(subscribe_bar_type)
+
+            self.log.info(f"Bar aggregation: {data_tf} -> {signal_tf}")
+            self.log.info(f"Subscribed to {subscribe_bar_type}")
+        else:
+            # 不需要聚合: 直接使用 EXTERNAL
+            target_spec = format_bar_spec(signal_tf, internal=False)
+            bar_type = BarType.from_str(
+                f"{symbol}.{self.config.exchange}-{target_spec}"
+            )
+
+            # 注册指标
+            self.register_indicator_for_bars(bar_type, sma)
+            self.register_indicator_for_bars(bar_type, breakout)
+
+            # 订阅数据
+            self.subscribe_bars(bar_type)
+            self._subscribed_bars.add(bar_type)
+
+            self.log.info(f"Subscribed to {bar_type}")
+
+        # 保存指标引用
         self._sma_indicators[symbol] = sma
         self._breakout_indicators[symbol] = breakout
 
-        # 订阅数据
-        self.subscribe_bars(bar_type)
-        self._subscribed_bars.add(bar_type)
-
     def _unsubscribe_symbol(self, symbol: str) -> None:
         """取消订阅币种"""
-        bar_type = BarType.from_str(
-            f"{symbol}.{self.config.exchange}-{self.config.bar_spec}"
-        )
+        from nautilus_quants.backtest.utils.bar_spec import format_bar_spec, parse_timeframe
 
-        if bar_type in self._subscribed_bars:
-            self.unsubscribe_bars(bar_type)
-            self._subscribed_bars.remove(bar_type)
+        signal_tf = self.config.interval
+        data_tf = self.config.bar_spec
 
-        # 清理指标
+        if signal_tf != data_tf:
+            # 聚合模式: 需要取消订阅聚合 bar type
+            target_spec = format_bar_spec(signal_tf, internal=True)
+            target_bar_type = BarType.from_str(
+                f"{symbol}.{self.config.exchange}-{target_spec}"
+            )
+            source_step, source_unit = parse_timeframe(data_tf)
+            subscribe_bar_type = BarType.from_str(
+                f"{target_bar_type}@{source_step}-{source_unit}-EXTERNAL"
+            )
+        else:
+            # 非聚合模式
+            target_spec = format_bar_spec(signal_tf, internal=False)
+            subscribe_bar_type = BarType.from_str(
+                f"{symbol}.{self.config.exchange}-{target_spec}"
+            )
+
+        if subscribe_bar_type in self._subscribed_bars:
+            self.unsubscribe_bars(subscribe_bar_type)
+            self._subscribed_bars.remove(subscribe_bar_type)
+
+        # 清理指标和 target bar types
         self._sma_indicators.pop(symbol, None)
         self._breakout_indicators.pop(symbol, None)
+        if hasattr(self, '_target_bar_types'):
+            self._target_bar_types.pop(symbol, None)
 
     def on_bar(self, bar: Bar) -> None:
         """处理 K 线 - 核心信号逻辑"""
@@ -202,10 +300,10 @@ class BreakoutStrategy(Strategy):
             self.log.warning(f"Instrument not found: {instrument_id}")
             return
 
-        # 检查是否已有持仓
-        position = self.cache.position(instrument_id)
-        if position is not None:
-            return
+        # 检查是否已有该标的的持仓
+        positions = self.cache.positions_open(instrument_id=instrument_id)
+        if positions:
+            return  # 已有持仓，不重复开仓
 
         # 检查持仓数量限制
         open_positions = len(self.cache.positions_open())
