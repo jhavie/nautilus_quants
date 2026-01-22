@@ -1,35 +1,63 @@
-# ============================================================================
-# Backtest Configuration - MVP
-# ============================================================================
+# Backtest Configuration
+# Supports bar aggregation: loads 1m data, aggregates to 1h in strategy
+# Uses @ syntax per nautilus_trader example_03_bar_aggregation
 
-# 回测时间范围
-period:
-  start_date: "2024-01-01"
-  end_date: "2024-12-31"
+strategy:
+  type: "breakout"
+  instrument_id: "BTCUSDT"
+  interval: "1h"  # Strategy signal timeframe (aggregated from bar_spec)
+  params:
+    breakout_period: 60
+    sma_period: 200
+    position_size_pct: 0.5
+    max_positions: 1
+    stop_loss_pct: 0.2
+    take_profit_pct: 0.5
 
-# 交易成本
-costs:
-  slippage_pct: 0.001           # 滑点 0.1%
-  taker_fee_pct: 0.0004         # Taker手续费 0.04%
-  maker_fee_pct: 0.0002         # Maker手续费 0.02%
+backtest:
+  catalog_path: "/Users/joe/Sync/nautilus_quants2/data/catalog"
+  instruments:
+    - "BTCUSDT"
+  bar_spec: "1m"  # Data source: load 1-minute bars, aggregate to interval
+  start_date: "2025-01-01"
+  end_date: "2025-12-31"  # Shorter period for faster testing
+  warmup_days: 3
 
-# 资金费率 (合约特有)
-funding:
-  enabled: false                # MVP不考虑资金费率
+venue:
+  name: "BINANCE"
+  oms_type: "NETTING"
+  account_type: "MARGIN"
+  base_currency: "USDT"
+  starting_balance: "100000 USDT"
+  default_leverage: 5
 
-# 基准
-benchmark:
-  symbol: "BTCUSDT"
-  method: "buy_hold"
+  # Optional: Fee structure
+  fee_model:
+    type: "maker_taker"
+    maker_fee: 0.0002
+    taker_fee: 0.0004
 
-# 绩效目标 (用于评估)
-targets:
-  min_sharpe: 1.0
-  max_drawdown: 0.25            # 最大回撤 25%
-  min_win_rate: 0.40
+report:
+  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-002/logs/backtest_runs"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Backtest Results"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
 
-# 输出
-output:
-  report_dir: "data/reports"
-  save_trades: true
-  save_equity_curve: true
+logging:
+  level: "INFO"
+  log_to_file: true
+  bypass_logging: false
