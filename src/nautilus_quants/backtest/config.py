@@ -322,8 +322,9 @@ class BacktestConfig:
         end_date = end_date + timedelta(days=1)
         end_str = end_date.strftime("%Y-%m-%d")
 
-        # Format bar spec for nautilus
-        bar_spec = format_bar_spec(self.backtest.bar_spec, internal=False)
+        # Format bar spec for nautilus (without source suffix)
+        # BacktestDataConfig adds -EXTERNAL automatically
+        bar_spec = format_bar_spec(self.backtest.bar_spec, include_source=False)
 
         for symbol in instruments:
             instrument_id = f"{symbol}.{self.venue.name}"

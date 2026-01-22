@@ -10,7 +10,7 @@ from nautilus_trader.model.data import BarType
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
 from nautilus_trader.persistence.wranglers import BarDataWrangler
 
-from nautilus_quants.backtest.engine import create_crypto_perpetual
+from nautilus_quants.data.transform.parquet import _create_instrument
 
 
 @pytest.fixture(scope="session")
@@ -38,11 +38,10 @@ def backtest_catalog_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     
     # Use the same instrument that BacktestRunner uses (size_precision=3)
     # This ensures consistency between catalog data and runtime instrument
-    instrument = create_crypto_perpetual(
-        instrument_id="BTCUSDT",
+    instrument = _create_instrument(
+        symbol="BTCUSDT",
         venue="BINANCE",
-        maker_fee=0.0002,
-        taker_fee=0.0004,
+        ts_init=0,
     )
     
     # Round volume to match instrument.size_precision (3 decimal places)

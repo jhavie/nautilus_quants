@@ -90,28 +90,32 @@ def parse_bar_spec(bar_spec: str) -> BarSpecification:
     )
 
 
-def format_bar_spec(bar_spec: str, internal: bool = False) -> str:
+def format_bar_spec(bar_spec: str, internal: bool = False, include_source: bool = True) -> str:
     """Format simplified bar spec to Nautilus native format.
 
     Args:
         bar_spec: Simplified bar spec (e.g., "1h", "1m", "4h")
         internal: If True, use INTERNAL aggregation source, else EXTERNAL
+        include_source: If True, include source suffix (-INTERNAL/-EXTERNAL)
 
     Returns:
-        Native format string (e.g., "1-HOUR-LAST-INTERNAL")
+        Native format string (e.g., "1-HOUR-LAST-EXTERNAL" or "1-HOUR-LAST")
 
     Examples:
         >>> format_bar_spec("1h")
         "1-HOUR-LAST-EXTERNAL"
         >>> format_bar_spec("1h", internal=True)
         "1-HOUR-LAST-INTERNAL"
-        >>> format_bar_spec("1m")
-        "1-MINUTE-LAST-EXTERNAL"
+        >>> format_bar_spec("1m", include_source=False)
+        "1-MINUTE-LAST"
     """
     spec = parse_bar_spec(bar_spec)
 
     agg_name = BarAggregation(spec.aggregation).name
     price_name = PriceType(spec.price_type).name
-    source = "INTERNAL" if internal else "EXTERNAL"
 
-    return f"{spec.step}-{agg_name}-{price_name}-{source}"
+    if include_source:
+        source = "INTERNAL" if internal else "EXTERNAL"
+        return f"{spec.step}-{agg_name}-{price_name}-{source}"
+    else:
+        return f"{spec.step}-{agg_name}-{price_name}"
