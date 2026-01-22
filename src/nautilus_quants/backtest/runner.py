@@ -13,7 +13,7 @@ from nautilus_trader.config import (
 )
 
 from nautilus_quants.backtest.config import BacktestConfig, BacktestResult
-from nautilus_quants.backtest.exceptions import BacktestStrategyError
+from nautilus_quants.backtest.exceptions import BacktestDataError, BacktestStrategyError
 from nautilus_quants.backtest.reports import ReportGenerator
 from nautilus_quants.backtest.utils.reporting import (
     create_output_directory,
@@ -58,6 +58,9 @@ class BacktestRunner:
         errors: list[str] = []
 
         try:
+            # Validate catalog exists before running
+            self._validate_catalog()
+
             # Initialize run
             self.run_id = generate_run_id()
             self.output_dir = create_output_directory(
@@ -221,3 +224,46 @@ class BacktestRunner:
             config_path=f"{config_module}:{config_name}",
             config=params,
         )
+
+    def _validate_catalog(self) -> None:
+        """Validate catalog path exists and contains valid data.
+
+        Raises:
+            BacktestDataError: If catalog path doesn't exist or is invalid
+        """
+        catalog_path = Path(self.config.backtest.catalog_path)
+
+        # Check if catalog path exists
+        if not catalog_path.exists():
+            raise BacktestDataError(
+                f"Catalog path does not exist: {catalog_path}"
+            )
+
+        # Check if it's a directory
+        if not catalog_path.is_dir():
+            raise BacktestDataError(
+                f"Catalog path is not a directory: {catalog_path}"
+            )
+
+        # Check for parquet files (basic validation)
+        parquet_files = list(catalog_path.rglob("*.parquet"))
+        if not parquet_files:
+            raise BacktestDataError(
+                f"No parquet files found in catalog: {catalog_path}"
+            )
+
+        # Try to validate at least one parquet file is readable and has data
+        try:
+            import pyarrow.parquet as pq
+            # Check metadata and row count
+            metadata = pq.read_metadata(parquet_files[0])
+            if metadata.num_rows == 0:
+                raise BacktestDataError(
+                    f"Parquet file has no data rows: {parquet_files[0]}"
+                )
+        except BacktestDataError:
+            raise
+        except Exception as e:
+            raise BacktestDataError(
+                f"Failed to read parquet data from catalog: {e}"
+            ) from e

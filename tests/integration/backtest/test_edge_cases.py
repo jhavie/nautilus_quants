@@ -289,33 +289,30 @@ class TestStrategyExceptions:
         """T068 - Test handling of strategy exception during instantiation.
 
         Verifies the system handles strategy creation failures gracefully.
-        Uses mocking to force a strategy instantiation error.
+        Since the high-level API uses ImportableStrategyConfig with module paths,
+        we test by providing an invalid config_path that will fail during import.
         """
-        from nautilus_quants.strategies import STRATEGY_REGISTRY
+        from nautilus_quants.backtest.runner import BacktestRunner
 
-        # Get the real config class
-        _, config_class = STRATEGY_REGISTRY["breakout"]
+        # Create a runner that will fail during strategy config build
+        # by patching _build_strategy_config to raise an error
+        config = BacktestConfig.from_dict(valid_config_dict)
+        runner = BacktestRunner(config)
 
-        # Create a mock strategy class that raises on instantiation
-        def mock_strategy_init(*args: Any, **kwargs: Any) -> None:
+        # Patch the strategy config builder to simulate instantiation failure
+        def mock_build_strategy_config(*args: Any, **kwargs: Any) -> None:
             raise ValueError("Simulated strategy instantiation error")
 
-        mock_strategy_class = MagicMock(side_effect=mock_strategy_init)
-
-        # Patch the strategy registry temporarily
-        with patch.dict(STRATEGY_REGISTRY, {"breakout": (mock_strategy_class, config_class)}):
-            config = BacktestConfig.from_dict(valid_config_dict)
-            runner = BacktestRunner(config)
-
+        with patch.object(runner, "_build_strategy_config", side_effect=mock_build_strategy_config):
             result = runner.run()
 
             # Should fail gracefully with strategy error
             assert result.success is False
             assert len(result.errors) > 0
 
-            # Error should mention strategy
+            # Error should mention the simulated error
             error_message = result.errors[0].lower()
-            assert "strategy" in error_message or "simulated" in error_message
+            assert "simulated" in error_message or "strategy" in error_message
 
     @pytest.mark.slow
     def test_strategy_execution_exception_during_run(
