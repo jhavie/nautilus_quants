@@ -9,14 +9,17 @@ __version__ = "0.1.0"
 
 from nautilus_quants.core.data_types import UniverseUpdate
 from nautilus_quants.actors.screening import ScreeningActor, ScreeningActorConfig
-from nautilus_quants.strategies.breakout import BreakoutStrategy, BreakoutStrategyConfig
+from nautilus_quants.strategies.breakout import (
+    PriceVolumeBreakoutStrategy,
+    PriceVolumeBreakoutStrategyConfig,
+)
 from nautilus_quants.indicators.breakout import BreakoutIndicator
 
 __all__ = [
     "UniverseUpdate",
     "ScreeningActor",
     "ScreeningActorConfig",
-    "BreakoutStrategy",
-    "BreakoutStrategyConfig",
+    "PriceVolumeBreakoutStrategy",
+    "PriceVolumeBreakoutStrategyConfig",
     "BreakoutIndicator",
 ]
