@@ -153,13 +153,15 @@ def csv_to_bars(
     bars = []
 
     for _, row in df.iterrows():
+        # Format prices to 2 decimal places to match instrument.price_precision=2
+        # This ensures consistency: CSV float "617.5" -> "617.50" -> precision=2
         bar = Bar(
             bar_type=bar_type,
-            open=Price.from_str(str(row["open"])),
-            high=Price.from_str(str(row["high"])),
-            low=Price.from_str(str(row["low"])),
-            close=Price.from_str(str(row["close"])),
-            volume=Quantity.from_str(str(row["volume"])),
+            open=Price.from_str(f"{row['open']:.2f}"),
+            high=Price.from_str(f"{row['high']:.2f}"),
+            low=Price.from_str(f"{row['low']:.2f}"),
+            close=Price.from_str(f"{row['close']:.2f}"),
+            volume=Quantity.from_str(f"{row['volume']:.3f}"),
             ts_event=int(row["timestamp"]) * 1_000_000,  # Convert ms to ns
             ts_init=int(row["timestamp"]) * 1_000_000,
         )
