@@ -1,0 +1,110 @@
+# Factor Framework Configuration
+# This file defines factors using Alpha101-style expressions
+
+metadata:
+  name: "nautilus_quants_factors"
+  version: "1.0"
+  description: "Factor definitions for quantitative trading"
+
+# Global parameters (can be referenced in expressions)
+parameters:
+  # Time-series lookback periods
+  short_period: 5
+  medium_period: 20
+  long_period: 60
+  
+  # Cross-sectional parameters
+  adv_period: 20  # Average daily volume period
+  
+  # Breakout parameters
+  breakout_period: 30
+  sma_period: 200
+
+# Reusable variable definitions
+variables:
+  # Basic price derivatives
+  returns: "delta(close, 1) / delay(close, 1)"
+  log_returns: "log(close / delay(close, 1))"
+  
+  # Volume metrics
+  adv20: "ts_mean(volume, adv_period)"
+  volume_ratio: "volume / adv20"
+  
+  # Breakout variables
+  highest_close: "delay(ts_max(close, breakout_period), 1)"
+  highest_volume: "delay(ts_max(volume, breakout_period), 1)"
+  sma: "ts_mean(close, sma_period)"
+
+# Factor definitions
+factors:
+  # ============================================
+  # Alpha101 Factors (Simplified versions)
+  # ============================================
+  
+  alpha001:
+    expression: "-1 * ts_rank(ts_argmax(close, 30), 5)"
+    description: "Rank of argmax position"
+    category: "momentum"
+  
+  alpha002:
+    expression: "-1 * ts_rank(delta(close, 2), 6)"
+    description: "Ranked price change"
+    category: "momentum"
+  
+  alpha003:
+    expression: "-1 * ts_rank(ts_rank(low, 9), 7)"
+    description: "Double rank of low"
+    category: "reversion"
+  
+  alpha004:
+    expression: "ts_rank(volume, 20)"
+    description: "Volume rank"
+    category: "volume"
+  
+  alpha005:
+    expression: "ts_rank(close - ts_mean(close, 10), 5)"
+    description: "Mean deviation rank"
+    category: "momentum"
+
+  alpha006:
+    expression: "-1 * delta(close, 3)"
+    description: "Negative 3-day change"
+    category: "reversion"
+
+  alpha007:
+    expression: "ts_rank(abs(delta(close, 7)), 20)"
+    description: "Volatility rank"
+    category: "volatility"
+
+  alpha008:
+    expression: "ts_mean(returns, 5)"
+    description: "5-day average returns"
+    category: "momentum"
+
+  alpha009:
+    expression: "delta(close, 1)"
+    description: "1-day price change"
+    category: "momentum"
+
+  alpha010:
+    expression: "ts_rank(delta(close, 1), 6)"
+    description: "Ranked daily change"
+    category: "momentum"
+
+  # ============================================
+  # Breakout Factor (Validation Target)
+  # ============================================
+  
+  alpha_breakout_long:
+    expression: "(close > highest_close) * (volume > highest_volume) * (close > sma)"
+    description: "量价突破开多信号: 价格突破30日高点 + 成交量突破30日高点 + 收盘价在200日均线之上"
+    category: "breakout"
+
+# Performance settings
+performance:
+  # Maximum computation time per bar (milliseconds)
+  max_compute_time_ms: 1.0
+  # Enable performance logging
+  enable_timing: true
+  # Warning threshold (milliseconds)
+  warning_threshold_ms: 0.5
