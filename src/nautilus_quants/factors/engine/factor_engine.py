@@ -242,7 +242,7 @@ class FactorEngine:
             if elapsed_ms > self._warning_threshold_ms:
                 pass  # Would log warning in production
         
-        return FactorValues(
+        return FactorValues.create(
             ts_event=bar.ts_event,
             factors=factor_results,
         )

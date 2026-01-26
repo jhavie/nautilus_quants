@@ -1,17 +1,13 @@
-"""Backtest module - Configuration-driven backtesting with nautilus_trader."""
+"""Backtest module - Configuration-driven backtesting with nautilus_trader.
+
+For Actor-decoupled backtesting, use Nautilus native BacktestRunConfig directly.
+See: config/backtest_factor.yaml for example usage.
+"""
 
 from nautilus_quants.backtest.config import (
-    BacktestConfig,
-    BacktestDataConfig,
     BacktestResult,
-    FeeModelConfig,
-    FillModelConfig,
-    LatencyModelConfig,
-    LoggingSettings,
     ReportConfig,
-    StrategyConfig,
     TearsheetConfig,
-    VenueConfig,
 )
 from nautilus_quants.backtest.exceptions import (
     BacktestConfigError,
@@ -22,24 +18,14 @@ from nautilus_quants.backtest.exceptions import (
     BacktestStrategyError,
 )
 from nautilus_quants.backtest.reports import ReportGenerator
-from nautilus_quants.backtest.runner import BacktestRunner
 
 __all__ = [
     # Main classes
-    "BacktestRunner",
-    "BacktestConfig",
     "BacktestResult",
     "ReportGenerator",
-    # Config dataclasses
-    "StrategyConfig",
-    "BacktestDataConfig",
-    "VenueConfig",
-    "FillModelConfig",
-    "FeeModelConfig",
-    "LatencyModelConfig",
+    # Config dataclasses (project-specific)
     "ReportConfig",
     "TearsheetConfig",
-    "LoggingSettings",
     # Exceptions
     "BacktestError",
     "BacktestConfigError",

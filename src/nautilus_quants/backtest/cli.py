@@ -1,13 +1,24 @@
-"""CLI entry point for backtest module."""
+"""CLI entry point for backtest module.
+
+For Actor-decoupled backtesting, use Nautilus native BacktestRunConfig directly.
+See: config/backtest_factor.yaml for example usage.
+"""
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
+import msgspec
+import yaml
 
-from nautilus_quants.backtest.config import BacktestConfig, BacktestResult
+from nautilus_trader.backtest.node import BacktestNode
+from nautilus_trader.config import BacktestRunConfig
+
+from nautilus_quants.backtest.config import BacktestResult, ReportConfig, TearsheetConfig
 from nautilus_quants.backtest.exceptions import BacktestConfigError
-from nautilus_quants.backtest.runner import BacktestRunner
+from nautilus_quants.backtest.reports import ReportGenerator
+from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
 
 
 @click.group()
@@ -20,26 +31,169 @@ def cli() -> None:
     pass
 
 
+def _parse_report_config(config_dict: dict) -> ReportConfig | None:
+    """Parse report configuration from YAML dict.
+    
+    Args:
+        config_dict: Full YAML config dictionary
+        
+    Returns:
+        ReportConfig if report section exists, None otherwise
+    """
+    report_section = config_dict.get("report")
+    if not report_section:
+        return None
+    
+    # Parse tearsheet config if present
+    tearsheet_config = None
+    tearsheet_section = report_section.get("tearsheet")
+    if tearsheet_section:
+        tearsheet_config = TearsheetConfig(
+            enabled=tearsheet_section.get("enabled", True),
+            title=tearsheet_section.get("title", "Backtest Results"),
+            theme=tearsheet_section.get("theme", "plotly_dark"),
+            height=tearsheet_section.get("height", 1500),
+            show_logo=tearsheet_section.get("show_logo", True),
+            include_benchmark=tearsheet_section.get("include_benchmark", False),
+            benchmark_name=tearsheet_section.get("benchmark_name", "Benchmark"),
+            charts=tearsheet_section.get("charts", [
+                "run_info", "stats_table", "equity", "drawdown",
+                "monthly_returns", "distribution", "rolling_sharpe", "yearly_returns"
+            ]),
+        )
+    
+    return ReportConfig(
+        output_dir=report_section.get("output_dir", "logs/backtest_runs"),
+        formats=report_section.get("formats", ["csv", "html"]),
+        tearsheet=tearsheet_config,
+    )
+
+
+def _get_nautilus_config_dict(config_dict: dict) -> dict:
+    """Extract only Nautilus-compatible config keys.
+    
+    Removes project-specific keys (report, logging) that are not part of
+    Nautilus BacktestRunConfig schema.
+    
+    Args:
+        config_dict: Full YAML config dictionary
+        
+    Returns:
+        Dict with only Nautilus-compatible keys
+    """
+    # Keys that Nautilus BacktestRunConfig expects
+    nautilus_keys = {"venues", "data", "engine", "batch_size_bytes"}
+    return {k: v for k, v in config_dict.items() if k in nautilus_keys}
+
+
+def _extract_data_configs(config_dict: dict) -> list[dict]:
+    """Extract instrument_id and bar_spec from data section.
+    
+    Args:
+        config_dict: Full YAML config dictionary
+        
+    Returns:
+        List of dicts with instrument_id and bar_spec for each data source
+    """
+    data_section = config_dict.get("data", [])
+    result = []
+    
+    for data_config in data_section:
+        instrument_id = data_config.get("instrument_id")
+        bar_spec = data_config.get("bar_spec")
+        
+        if instrument_id and bar_spec:
+            # Build the full bar_type string
+            bar_type = f"{instrument_id}-{bar_spec}-EXTERNAL"
+            result.append({
+                "instrument_id": instrument_id,
+                "bar_spec": bar_spec,
+                "bar_type": bar_type,
+            })
+    
+    return result
+
+
+def _inject_data_configs(config_dict: dict, data_configs: list[dict]) -> dict:
+    """Inject data configs into actor and strategy configurations.
+    
+    This allows actors and strategies to know which bar types to subscribe to
+    without querying the cache (which is empty at on_start time).
+    
+    Args:
+        config_dict: Full YAML config dictionary
+        data_configs: List of extracted data configs
+        
+    Returns:
+        Modified config dict with injected bar_type info
+    """
+    if not data_configs:
+        return config_dict
+    
+    # Deep copy to avoid modifying original
+    import copy
+    config_dict = copy.deepcopy(config_dict)
+    
+    engine = config_dict.get("engine", {})
+    
+    # Inject into actors
+    actors = engine.get("actors", [])
+    for actor in actors:
+        actor_config = actor.get("config", {})
+        # Inject bar_types list if not already present
+        if "bar_types" not in actor_config:
+            actor_config["bar_types"] = [dc["bar_type"] for dc in data_configs]
+        actor["config"] = actor_config
+    
+    # Inject into strategies
+    strategies = engine.get("strategies", [])
+    for strategy in strategies:
+        strategy_config = strategy.get("config", {})
+        # Inject bar_type if not already present and we have data configs
+        if "bar_type" not in strategy_config and data_configs:
+            # Find matching data config by instrument_id
+            instrument_id = strategy_config.get("instrument_id")
+            for dc in data_configs:
+                if dc["instrument_id"] == instrument_id:
+                    strategy_config["bar_type"] = dc["bar_type"]
+                    break
+            else:
+                # Default to first data config if no match
+                strategy_config["bar_type"] = data_configs[0]["bar_type"]
+        strategy["config"] = strategy_config
+    
+    return config_dict
+
+
+def _inject_logging_config(config_dict: dict, output_dir: Path) -> dict:
+    """Inject logging configuration to write log file to output directory.
+    
+    Args:
+        config_dict: Full YAML config dictionary
+        output_dir: Output directory for log file
+        
+    Returns:
+        Modified config dict with logging config
+    """
+    import copy
+    config_dict = copy.deepcopy(config_dict)
+    
+    engine = config_dict.get("engine", {})
+    logging_config = engine.get("logging", {})
+    
+    # Set log file configuration
+    logging_config["log_level_file"] = logging_config.get("log_level", "INFO")
+    logging_config["log_directory"] = str(output_dir)
+    logging_config["log_file_name"] = "nautilus.log"
+    
+    engine["logging"] = logging_config
+    config_dict["engine"] = engine
+    
+    return config_dict
+
+
 @cli.command()
 @click.argument("config_file", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "-o",
-    "--output-dir",
-    type=click.Path(path_type=Path),
-    help="Override output directory",
-)
-@click.option(
-    "-s",
-    "--start-date",
-    type=str,
-    help="Override start date (YYYY-MM-DD)",
-)
-@click.option(
-    "-e",
-    "--end-date",
-    type=str,
-    help="Override end date (YYYY-MM-DD)",
-)
 @click.option(
     "-n",
     "--dry-run",
@@ -60,100 +214,169 @@ def cli() -> None:
 )
 def run(
     config_file: Path,
-    output_dir: Path | None,
-    start_date: str | None,
-    end_date: str | None,
     dry_run: bool,
     verbose: bool,
     quiet: bool,
 ) -> None:
-    """Execute a backtest from a YAML configuration file."""
+    """Execute a backtest from a YAML configuration file.
+    
+    Supports Nautilus native BacktestRunConfig format with optional
+    project-specific report configuration.
+    """
+    start_time = datetime.now()
+    
     try:
-        # Load config
-        config = BacktestConfig.from_yaml(config_file)
-
-        # Apply overrides
-        config_dict = config.to_dict()
-
-        if output_dir:
-            config_dict["report"]["output_dir"] = str(output_dir)
-        if start_date:
-            config_dict["backtest"]["start_date"] = start_date
-        if end_date:
-            config_dict["backtest"]["end_date"] = end_date
-
-        config = BacktestConfig.from_dict(config_dict)
+        # Load YAML config
+        with open(config_file) as f:
+            config_dict = yaml.safe_load(f)
 
         if not quiet:
-            _print_header(config, config_file)
+            click.echo("=" * 80)
+            click.echo("Nautilus Quants - Backtest")
+            click.echo("=" * 80)
+            click.echo(f"Config: {config_file}")
+            click.echo("=" * 80)
+            click.echo()
+
+        # Parse project-specific report config (before stripping for Nautilus)
+        report_config = _parse_report_config(config_dict)
+        
+        # Generate run_id and output_dir BEFORE running backtest (needed for logging)
+        run_id = generate_run_id()
+        output_dir = None
+        if report_config:
+            output_dir = create_output_directory(report_config.output_dir, run_id)
+        
+        # Extract data configs for injection
+        data_configs = _extract_data_configs(config_dict)
+        
+        # Inject data configs into actors/strategies
+        config_dict = _inject_data_configs(config_dict, data_configs)
+        
+        # Inject logging config to write log file to output directory
+        if output_dir:
+            config_dict = _inject_logging_config(config_dict, output_dir)
+        
+        # Extract only Nautilus-compatible config
+        nautilus_config = _get_nautilus_config_dict(config_dict)
 
         if dry_run:
+            # Try to parse to validate
+            json_bytes = msgspec.json.encode(nautilus_config)
+            BacktestRunConfig.parse(json_bytes)
             click.echo("✓ Configuration valid (dry run)")
+            if report_config:
+                click.echo(f"  Report output: {report_config.output_dir}")
             return
 
-        # Run backtest
-        runner = BacktestRunner(config)
-        result = runner.run()
+        # Parse and run
+        json_bytes = msgspec.json.encode(nautilus_config)
+        run_config = BacktestRunConfig.parse(json_bytes)
 
-        if result.success:
+        node = BacktestNode(configs=[run_config])
+        node.run()
+
+        # Get results
+        engines = node.get_engines()
+        if engines:
+            engine = engines[0]
+            # Get ALL positions (open + closed), not just currently open ones
+            open_positions = len(engine.cache.positions())
+            closed_positions = len(engine.cache.positions_closed())
+            total_positions = open_positions + closed_positions
+            orders = len(engine.cache.orders())
+            
             if not quiet:
-                _print_results(result, verbose)
-            sys.exit(0)
-        else:
-            click.echo(f"✗ Backtest failed: {result.errors}", err=True)
-            sys.exit(4)
+                click.echo()
+                click.echo("✓ Backtest completed")
+                click.echo(f"  Total positions: {total_positions}")
+                click.echo(f"  Total orders: {orders}")
+            
+            # Generate reports if configured
+            if report_config and output_dir:
+                if not quiet:
+                    click.echo()
+                    click.echo("Generating reports...")
+                
+                report_generator = ReportGenerator(
+                    engine=engine,
+                    output_dir=output_dir,
+                    config=report_config,
+                )
+                reports = report_generator.generate_all()
+                statistics = report_generator.generate_statistics()
+                
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+                
+                if not quiet:
+                    click.echo()
+                    click.echo("=" * 80)
+                    click.echo("BACKTEST RESULTS")
+                    click.echo("=" * 80)
+                    click.echo(f"  Run ID: {run_id}")
+                    click.echo(f"  Duration: {duration:.2f}s")
+                    click.echo()
+                    
+                    # Display key statistics
+                    if statistics:
+                        click.echo("Performance Metrics:")
+                        if "PnL (total)" in statistics:
+                            click.echo(f"  PnL (total): {statistics['PnL (total)']:.2f}")
+                        if "PnL% (total)" in statistics:
+                            # Note: Nautilus returns PnL% as percentage value (e.g., 16.61 means 16.61%)
+                            click.echo(f"  PnL% (total): {statistics['PnL% (total)']:.2f}%")
+                        if "Win Rate" in statistics:
+                            # Win Rate is a ratio (0.24 means 24%), so use :.2%
+                            click.echo(f"  Win Rate: {statistics['Win Rate']:.2%}")
+                        if "Sharpe Ratio" in statistics:
+                            click.echo(f"  Sharpe Ratio: {statistics['Sharpe Ratio']:.4f}")
+                        if "Max Drawdown" in statistics:
+                            click.echo(f"  Max Drawdown: {statistics['Max Drawdown']:.2%}")
+                        if "Avg Winner" in statistics:
+                            click.echo(f"  Avg Winner: {statistics['Avg Winner']:.2f}")
+                        if "Avg Loser" in statistics:
+                            click.echo(f"  Avg Loser: {statistics['Avg Loser']:.2f}")
+                        click.echo()
+                    
+                    click.echo("Reports generated:")
+                    for report_type, report_path in reports.items():
+                        click.echo(f"  {report_type}: {report_path}")
+                    click.echo()
+                    click.echo(f"Output directory: {output_dir}")
+                    click.echo("=" * 80)
+            else:
+                if not quiet:
+                    click.echo("=" * 80)
+                    click.echo("  (No report config - skipping report generation)")
+
+        sys.exit(0)
 
     except BacktestConfigError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
+        if verbose:
+            import traceback
+            traceback.print_exc()
         sys.exit(4)
 
 
 @cli.command()
 @click.argument("config_file", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "-d",
-    "--check-data",
-    is_flag=True,
-    help="Also verify data files exist",
-)
-@click.option(
-    "-s",
-    "--check-strategy",
-    is_flag=True,
-    help="Also verify strategy can be instantiated",
-)
-def validate(
-    config_file: Path,
-    check_data: bool,
-    check_strategy: bool,
-) -> None:
+def validate(config_file: Path) -> None:
     """Validate a configuration file without executing."""
     try:
-        config = BacktestConfig.from_yaml(config_file)
+        with open(config_file) as f:
+            config_dict = yaml.safe_load(f)
+
+        json_bytes = msgspec.json.encode(config_dict)
+        BacktestRunConfig.parse(json_bytes)
 
         click.echo(f"✓ Configuration valid: {config_file}")
-        click.echo()
-        click.echo(f"Strategy: {config.strategy.type}")
-        click.echo(f"Instrument: {config.strategy.instrument_id}")
-        click.echo(
-            f"Period: {config.backtest.start_date} to {config.backtest.end_date}"
-        )
-        click.echo(
-            f"Venue: {config.venue.name} "
-            f"({config.venue.account_type}, {config.venue.default_leverage}x leverage)"
-        )
-        click.echo(f"Output: {config.report.output_dir}/{{run_id}}/")
 
-        if check_data:
-            _validate_data(config)
-
-        if check_strategy:
-            _validate_strategy(config)
-
-    except BacktestConfigError as e:
+    except Exception as e:
         click.echo(f"✗ Configuration invalid: {config_file}", err=True)
         click.echo(f"\nErrors:\n  {e}", err=True)
         sys.exit(1)
@@ -183,7 +406,6 @@ def list_strategies(verbose: bool) -> None:
         if verbose:
             click.echo(f"\n{name} - {doc_line}")
             click.echo("  Parameters:")
-            # Try to extract config fields
             try:
                 import inspect
 
@@ -207,14 +429,7 @@ def list_strategies(verbose: bool) -> None:
 @click.argument(
     "output_file",
     type=click.Path(path_type=Path),
-    default="backtest.yaml",
-)
-@click.option(
-    "-s",
-    "--strategy",
-    type=str,
-    default="breakout",
-    help="Strategy type to use",
+    default="backtest_factor.yaml",
 )
 @click.option(
     "-f",
@@ -222,66 +437,49 @@ def list_strategies(verbose: bool) -> None:
     is_flag=True,
     help="Overwrite existing file",
 )
-def init(output_file: Path, strategy: str, force: bool) -> None:
-    """Generate a sample configuration file."""
+def init(output_file: Path, force: bool) -> None:
+    """Generate a sample configuration file using Nautilus native format."""
     if output_file.exists() and not force:
         click.echo(f"Error: {output_file} already exists. Use --force to overwrite.")
         sys.exit(1)
 
-    sample_config = f"""# Backtest Configuration
+    sample_config = '''# Backtest Configuration (Nautilus Native Format)
 # Generated by: python -m nautilus_quants.backtest init
 
-strategy:
-  type: "{strategy}"
-  instrument_id: "BTCUSDT"
-  params:
-    breakout_period: 60
-    sma_period: 200
-    position_size_pct: 0.10
-    max_positions: 1
-    stop_loss_pct: 0.05
-    take_profit_pct: 0.10
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "100000 USDT"
+    default_leverage: 5
 
-backtest:
-  catalog_path: "/path/to/your/catalog"  # Update this path
-  start_date: "2025-01-01"
-  end_date: "2025-12-31"
-  bar_spec: "1h"
-  warmup_days: 30
+data:
+  - catalog_path: "/path/to/your/catalog"  # Update this path
+    data_cls: "nautilus_trader.model.data:Bar"
+    instrument_id: "ETHUSDT.BINANCE"
+    bar_spec: "1-MINUTE-LAST"
+    start_time: "2024-01-01"
+    end_time: "2024-12-31"
 
-venue:
-  name: "BINANCE"
-  oms_type: "NETTING"
-  account_type: "MARGIN"
-  base_currency: "USDT"
-  starting_balance: "100000 USDT"
-  default_leverage: 5
-
-  # Optional: Fill simulation
-  # fill_model:
-  #   prob_fill_on_limit: 1.0
-  #   prob_slippage: 0.0
-
-  # Optional: Fee structure
-  fee_model:
-    type: "maker_taker"
-    maker_fee: 0.0002
-    taker_fee: 0.0004
-
-report:
-  output_dir: "logs/backtest_runs"
-  formats: [csv, html]
-  tearsheet:
-    enabled: true
-    title: "Backtest Results"
-    theme: "plotly_dark"
-    height: 1500
-
-logging:
-  level: "INFO"
-  log_to_file: true
-  bypass_logging: false
-"""
+engine:
+  trader_id: "BACKTESTER-001"
+  actors:
+    - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
+      config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/factors.yaml"
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.factor.strategy:FactorStrategy"
+      config_path: "nautilus_quants.strategies.factor.strategy:FactorStrategyConfig"
+      config:
+        instrument_id: "ETHUSDT.BINANCE"
+        bar_type: "ETHUSDT.BINANCE-1-MINUTE-LAST-EXTERNAL"
+        signal_name: "factor.alpha_breakout_long"
+        entry_threshold: 1.0
+        order_amount: 10000.0
+'''
 
     # Ensure parent directory exists
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -290,75 +488,6 @@ logging:
     click.echo(f"✓ Created: {output_file}")
     click.echo(f"\nEdit the configuration, then run:")
     click.echo(f"  python -m nautilus_quants.backtest run {output_file}")
-
-
-def _print_header(config: BacktestConfig, config_file: Path) -> None:
-    """Print backtest header."""
-    click.echo("=" * 80)
-    click.echo("Nautilus Quants - Backtest")
-    click.echo("=" * 80)
-    click.echo(f"Config: {config_file}")
-    click.echo(
-        f"Strategy: {config.strategy.type} ({config.strategy.instrument_id})"
-    )
-    click.echo(
-        f"Period: {config.backtest.start_date} to {config.backtest.end_date}"
-    )
-    click.echo("=" * 80)
-    click.echo()
-
-
-def _print_results(result: BacktestResult, verbose: bool) -> None:
-    """Print backtest results."""
-    if not isinstance(result, BacktestResult):
-        return
-
-    click.echo()
-    click.echo(f"✓ Backtest completed in {result.duration_seconds:.1f} seconds")
-    click.echo()
-
-    # Print statistics
-    if result.statistics:
-        click.echo("Performance Summary:")
-        if result.total_pnl:
-            pnl_str = f"{result.total_pnl:+,.2f}"
-            pct_str = f"{result.total_pnl_pct:+.2%}" if result.total_pnl_pct else ""
-            click.echo(f"  Total PnL: {pnl_str} {pct_str}")
-        if result.sharpe_ratio:
-            click.echo(f"  Sharpe Ratio: {result.sharpe_ratio:.2f}")
-        if result.max_drawdown:
-            click.echo(f"  Max Drawdown: {result.max_drawdown:.2%}")
-        if result.win_rate:
-            click.echo(f"  Win Rate: {result.win_rate:.1%}")
-
-    click.echo()
-    click.echo("=" * 80)
-    click.echo(f"✓ Complete! Results saved to: {result.output_dir}/")
-    click.echo("=" * 80)
-
-
-def _validate_data(config: BacktestConfig) -> None:
-    """Validate data catalog exists."""
-    from pathlib import Path
-
-    catalog_path = Path(config.backtest.catalog_path)
-    if not catalog_path.exists():
-        click.echo(f"✗ Data validation failed: Catalog path does not exist: {catalog_path}", err=True)
-        sys.exit(2)
-    click.echo("✓ Catalog path found")
-
-
-def _validate_strategy(config: BacktestConfig) -> None:
-    """Validate strategy can be instantiated."""
-    try:
-        from nautilus_quants.strategies import STRATEGY_REGISTRY
-
-        if config.strategy.type not in STRATEGY_REGISTRY:
-            raise ValueError(f"Unknown strategy: {config.strategy.type}")
-        click.echo("✓ Strategy found in registry")
-    except Exception as e:
-        click.echo(f"✗ Strategy validation failed: {e}", err=True)
-        sys.exit(3)
 
 
 if __name__ == "__main__":

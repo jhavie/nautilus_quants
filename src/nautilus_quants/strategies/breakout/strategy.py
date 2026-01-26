@@ -26,7 +26,7 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.strategies.breakout.signal import PriceVolumeBreakoutSignal
-from nautilus_quants.strategies.breakout.utils import create_aggregated_bar_type
+from nautilus_quants.strategies.utils import create_aggregated_bar_type
 
 
 class PriceVolumeBreakoutStrategyConfig(StrategyConfig, frozen=True):

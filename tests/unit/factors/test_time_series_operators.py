@@ -145,31 +145,56 @@ class TestTsRank:
 
 
 class TestTsArgmaxArgmin:
-    """Tests for ts_argmax and ts_argmin operators."""
+    """Tests for ts_argmax and ts_argmin operators (WorldQuant semantics).
+    
+    WorldQuant convention:
+    - 1 = oldest day in window
+    - window = most recent day (today)
+    """
 
     def test_argmax_most_recent(self):
-        """Test argmax when max is most recent."""
+        """Test argmax when max is most recent (today)."""
         data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         result = ts_argmax(data, 5)
-        assert result == pytest.approx(0.0)  # max is at position 0 (most recent)
+        # WorldQuant: window=5 means today is position 5
+        assert result == pytest.approx(5.0)  # max is at position 5 (most recent)
 
     def test_argmax_oldest(self):
         """Test argmax when max is oldest."""
         data = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
         result = ts_argmax(data, 5)
-        assert result == pytest.approx(4.0)  # max is 4 positions ago
+        # WorldQuant: 1 = oldest day in window
+        assert result == pytest.approx(1.0)  # max is at position 1 (oldest)
 
     def test_argmin_most_recent(self):
-        """Test argmin when min is most recent."""
+        """Test argmin when min is most recent (today)."""
         data = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
         result = ts_argmin(data, 5)
-        assert result == pytest.approx(0.0)  # min is at position 0
+        # WorldQuant: window=5 means today is position 5
+        assert result == pytest.approx(5.0)  # min is at position 5 (most recent)
 
     def test_argmin_oldest(self):
         """Test argmin when min is oldest."""
         data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         result = ts_argmin(data, 5)
-        assert result == pytest.approx(4.0)  # min is 4 positions ago
+        # WorldQuant: 1 = oldest day in window
+        assert result == pytest.approx(1.0)  # min is at position 1 (oldest)
+    
+    def test_argmax_breakout_detection(self):
+        """Test ts_argmax for breakout detection (WorldQuant style).
+        
+        ts_argmax(close, 31) == 31 means today's close is strictly greater
+        than all values in the past 30 days.
+        """
+        # Scenario: breakout on the last bar
+        data = np.array([100.0] * 30 + [105.0])  # 30 days at 100, today at 105
+        result = ts_argmax(data, 31)
+        assert result == pytest.approx(31.0)  # today is the max
+        
+        # Scenario: no breakout (max was earlier)
+        data2 = np.array([100.0] * 15 + [110.0] + [100.0] * 14 + [105.0])
+        result2 = ts_argmax(data2, 31)
+        assert result2 == pytest.approx(16.0)  # max was at position 16
 
 
 class TestDelta:

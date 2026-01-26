@@ -1,8 +1,21 @@
-"""Backtest runner - orchestrates backtest execution using high-level API."""
+"""Backtest runner - orchestrates backtest execution using high-level API.
+
+DEPRECATED: This module uses the legacy BacktestConfig approach.
+For Actor-decoupled backtesting, use Nautilus native BacktestRunConfig directly:
+
+    from nautilus_trader.backtest.node import BacktestNode
+    from nautilus_trader.config import BacktestRunConfig
+    
+    run_config = BacktestRunConfig.parse(yaml_bytes)
+    node = BacktestNode(configs=[run_config])
+    node.run()
+
+See: config/backtest_factor.yaml for example usage.
+"""
 
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from nautilus_trader.backtest.node import BacktestNode
 from nautilus_trader.config import (
@@ -12,7 +25,7 @@ from nautilus_trader.config import (
     LoggingConfig,
 )
 
-from nautilus_quants.backtest.config import BacktestConfig, BacktestResult
+from nautilus_quants.backtest.config import BacktestResult, ReportConfig
 from nautilus_quants.backtest.exceptions import BacktestDataError, BacktestStrategyError
 from nautilus_quants.backtest.reports import ReportGenerator
 from nautilus_quants.backtest.utils.reporting import (
@@ -31,11 +44,13 @@ class BacktestRunner:
     in tearsheet generation.
     """
 
-    def __init__(self, config: BacktestConfig) -> None:
+    def __init__(self, config: Any) -> None:
         """Initialize runner.
 
+        DEPRECATED: Use BacktestNode with BacktestRunConfig directly.
+
         Args:
-            config: Backtest configuration
+            config: Legacy BacktestConfig (deprecated)
         """
         self.config = config
         self.run_id: str = ""
