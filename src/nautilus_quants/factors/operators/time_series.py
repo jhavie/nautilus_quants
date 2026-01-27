@@ -132,7 +132,7 @@ class TsRank(TimeSeriesOperator):
 
 @register_operator
 class TsArgmax(TimeSeriesOperator):
-    """Index of maximum value in window (0 = most recent)."""
+    """Index of maximum value in window (WorldQuant semantics: 1 = oldest, window = most recent)."""
     
     name = "ts_argmax"
     min_args = 2
@@ -140,22 +140,26 @@ class TsArgmax(TimeSeriesOperator):
     
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """
-        Compute position of maximum value.
+        Compute position of maximum value (WorldQuant semantics).
         
-        Returns days since maximum (0 = today, window-1 = oldest).
+        Returns position in window where maximum occurred:
+        - 1 = oldest day in window
+        - window = most recent day (today)
+        
+        This follows WorldQuant Alpha101 convention:
+        ts_argmax(close, 31) == 31 means today is the maximum.
         """
         if len(data) < window:
             return float('nan')
         
         window_data = data[-window:]
-        # argmax returns index from start, we want from end
         idx = np.argmax(window_data)
-        return float(window - 1 - idx)
+        return float(idx + 1)  # 1-indexed, 1 = oldest, window = newest
 
 
 @register_operator
 class TsArgmin(TimeSeriesOperator):
-    """Index of minimum value in window (0 = most recent)."""
+    """Index of minimum value in window (WorldQuant semantics: 1 = oldest, window = most recent)."""
     
     name = "ts_argmin"
     min_args = 2
@@ -163,16 +167,21 @@ class TsArgmin(TimeSeriesOperator):
     
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """
-        Compute position of minimum value.
+        Compute position of minimum value (WorldQuant semantics).
         
-        Returns days since minimum (0 = today, window-1 = oldest).
+        Returns position in window where minimum occurred:
+        - 1 = oldest day in window
+        - window = most recent day (today)
+        
+        This follows WorldQuant Alpha101 convention:
+        ts_argmin(close, 31) == 31 means today is the minimum.
         """
         if len(data) < window:
             return float('nan')
         
         window_data = data[-window:]
         idx = np.argmin(window_data)
-        return float(window - 1 - idx)
+        return float(idx + 1)  # 1-indexed, 1 = oldest, window = newest
 
 
 @register_operator

@@ -13,7 +13,7 @@ Constitution Compliance:
 
 from nautilus_quants.factors.engine.actor import (
     FactorEngineActor,
-    FactorEngineConfig,
+    FactorEngineActorConfig,
 )
 from nautilus_quants.factors.engine.data_synchronizer import (
     DataSynchronizer,
@@ -29,7 +29,7 @@ from nautilus_quants.factors.engine.factor_engine import FactorEngine
 __all__ = [
     # Nautilus-native Actor (Constitution compliant)
     "FactorEngineActor",
-    "FactorEngineConfig",
+    "FactorEngineActorConfig",
     # Core engine (standalone usage)
     "FactorEngine",
     "DataSynchronizer",

@@ -14,43 +14,48 @@ Constitution Compliance:
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
-from nautilus_trader.model.data import Bar, BarType
+from nautilus_trader.model.data import Bar, BarType, DataType
 
 from nautilus_quants.factors.config import load_factor_config
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
+from nautilus_quants.factors.types import FactorValues
 
 if TYPE_CHECKING:
     from nautilus_trader.model.identifiers import InstrumentId
 
 
-class FactorEngineConfig(ActorConfig, frozen=True):
+class FactorEngineActorConfig(ActorConfig, frozen=True):
     """
     Configuration for FactorEngineActor.
 
     Parameters
     ----------
-    factor_config_path : str, optional
-        Path to YAML factor configuration file.
-    bar_types : list[str], optional
-        List of bar types to subscribe to (e.g., ["ETHUSDT.BINANCE-1-HOUR-LAST"]).
+    factor_config_path : str
+        Path to YAML factor configuration file (required).
+    interval : str, default "1h"
+        Target timeframe for factor computation (e.g., "1m", "1h", "4h", "1d").
+        If not "1m", bars will be aggregated from data source to this interval.
     max_history : int, default 500
         Maximum history to maintain per instrument.
     publish_signals : bool, default True
-        Whether to publish factor values as signals.
+        Whether to publish factor values as CustomData.
     signal_prefix : str, default "factor"
         Prefix for signal names (e.g., "factor.breakout").
+    bar_types : list[str], default []
+        List of bar type strings to subscribe to (injected by CLI from data config).
+        If empty, will try to get from cache (legacy behavior).
     """
 
-    factor_config_path: str | None = None
-    bar_types: list[str] | None = None
+    factor_config_path: str
+    interval: str = "1h"
     max_history: int = 500
     publish_signals: bool = True
     signal_prefix: str = "factor"
+    bar_types: list[str] = []
 
 
 class FactorEngineActor(Actor):
@@ -59,51 +64,48 @@ class FactorEngineActor(Actor):
 
     This actor wraps the FactorEngine and integrates it with the Nautilus
     trading system, providing:
-    - Automatic bar subscription
+    - Automatic bar subscription with optional aggregation
     - Factor computation on each bar
-    - Signal publishing for factor values
+    - CustomData publishing for factor values
     - Performance logging via Nautilus Logger
 
     Example
     -------
     ```python
-    from nautilus_quants.factors.engine import FactorEngineActor, FactorEngineConfig
+    from nautilus_quants.factors.engine import FactorEngineActor, FactorEngineActorConfig
 
-    config = FactorEngineConfig(
+    config = FactorEngineActorConfig(
         factor_config_path="config/factors.yaml",
-        bar_types=["ETHUSDT.BINANCE-1-HOUR-LAST"],
+        interval="1h",  # Aggregate to 1-hour bars
     )
     actor = FactorEngineActor(config)
     # Add to TradingNode or BacktestEngine
     ```
     """
 
-    def __init__(self, config: FactorEngineConfig) -> None:
+    def __init__(self, config: FactorEngineActorConfig) -> None:
         """
         Initialize the FactorEngineActor.
 
         Parameters
         ----------
-        config : FactorEngineConfig
+        config : FactorEngineActorConfig
             The actor configuration.
         """
         super().__init__(config)
 
-        self._config: FactorEngineConfig = config
+        self._config: FactorEngineActorConfig = config
         self._engine: FactorEngine | None = None
-        self._bar_types: list[BarType] = []
-
-        # Parse bar types from config
-        if config.bar_types:
-            self._bar_types = [BarType.from_str(bt) for bt in config.bar_types]
+        self._bar_types: list[BarType] = []  # Target bar types to process
 
     def on_start(self) -> None:
         """
         Actions to perform on actor start.
 
-        Initializes the FactorEngine and subscribes to configured bar types.
+        Initializes the FactorEngine and subscribes to bar types.
+        Uses interval config to determine bar aggregation.
         """
-        self.log.info("Starting FactorEngineActor...")
+        self.log.info(f"Starting FactorEngineActor (interval={self._config.interval})...")
 
         # Initialize FactorEngine
         factor_config = None
@@ -122,10 +124,57 @@ class FactorEngineActor(Actor):
 
         self.log.info(f"Registered {len(self._engine.factor_names)} factors: {self._engine.factor_names}")
 
-        # Subscribe to bar types
-        for bar_type in self._bar_types:
-            self.subscribe_bars(bar_type)
-            self.log.info(f"Subscribed to {bar_type}")
+        # Get bar types from injected config (required)
+        # bar_types must be injected by CLI from data config
+        if not self._config.bar_types:
+            self.log.error(
+                "bar_types not configured. Ensure backtest is run via CLI which injects "
+                "bar_types from data config automatically."
+            )
+            return
+        
+        source_bar_type_strs = list(self._config.bar_types)
+        self.log.info(f"Using {len(source_bar_type_strs)} bar types from config")
+
+        # Determine if aggregation is needed based on interval
+        interval = self._config.interval.lower()
+        
+        if interval == "1m":
+            # No aggregation needed - use source bars directly
+            for bar_type_str in source_bar_type_strs:
+                bar_type = BarType.from_str(bar_type_str)
+                self._bar_types.append(bar_type)
+                self.subscribe_bars(bar_type)
+                self.log.info(f"Subscribed to {bar_type}")
+        else:
+            # Aggregation needed - create INTERNAL bar types
+            from nautilus_quants.strategies.utils import create_aggregated_bar_type
+            from nautilus_trader.model.enums import BarAggregation
+
+            for bar_type_str in source_bar_type_strs:
+                source_bar_type = BarType.from_str(bar_type_str)
+                instrument_id = str(source_bar_type.instrument_id)
+                # Build source spec from bar type string
+                # spec.aggregation may be int or enum, handle both
+                aggregation = source_bar_type.spec.aggregation
+                if isinstance(aggregation, int):
+                    aggregation_name = BarAggregation(aggregation).name
+                else:
+                    aggregation_name = aggregation.name
+                source_spec = f"{source_bar_type.spec.step}-{aggregation_name}-EXTERNAL"
+
+                target_str, subscribe_str = create_aggregated_bar_type(
+                    instrument_id,
+                    self._config.interval,
+                    source_spec,
+                )
+
+                target_bar_type = BarType.from_str(target_str)
+                subscribe_bar_type = BarType.from_str(subscribe_str)
+
+                self._bar_types.append(target_bar_type)
+                self.subscribe_bars(subscribe_bar_type)
+                self.log.info(f"Subscribed to aggregated bars: {subscribe_str}")
 
         self.log.info("FactorEngineActor started successfully")
 
@@ -143,23 +192,25 @@ class FactorEngineActor(Actor):
                 f"total_computes={stats['total_computes']}"
             )
 
-        # Unsubscribe from bar types
-        for bar_type in self._bar_types:
-            self.unsubscribe_bars(bar_type)
-
         self.log.info("FactorEngineActor stopped")
 
     def on_bar(self, bar: Bar) -> None:
         """
         Handle incoming bar data.
 
-        Computes all registered factors and optionally publishes signals.
+        Only processes target bar types (aggregated INTERNAL bars if using
+        interval aggregation). Computes all registered factors and publishes
+        results as CustomData.
 
         Parameters
         ----------
         bar : Bar
             The received bar data.
         """
+        # Only process target bar types (skip source bars when aggregating)
+        if bar.bar_type not in self._bar_types:
+            return
+
         if self._engine is None:
             return
 
@@ -169,20 +220,9 @@ class FactorEngineActor(Actor):
         if result is None:
             return
 
-        # Publish signals for each factor
+        # Publish FactorValues as Data (now a proper Nautilus Data subclass)
         if self._config.publish_signals:
-            instrument_id = str(bar.bar_type.instrument_id)
-
-            for factor_name, factor_values in result.factors.items():
-                value = factor_values.get(instrument_id)
-                if value is not None and not (isinstance(value, float) and value != value):  # Check for NaN
-                    signal_name = f"{self._config.signal_prefix}.{factor_name}"
-                    # Publish as signal with JSON value containing instrument and value
-                    self.publish_signal(
-                        name=signal_name,
-                        value=json.dumps({"instrument": instrument_id, "value": value}),
-                        ts_event=bar.ts_event,
-                    )
+            self.publish_data(data_type=DataType(FactorValues), data=result)
 
     def on_reset(self) -> None:
         """Reset the actor state."""

@@ -39,7 +39,7 @@ from nautilus_quants.factors.engine import (
     DependencyResolver,
     FactorEngine,
     FactorEngineActor,
-    FactorEngineConfig,
+    FactorEngineActorConfig,
 )
 from nautilus_quants.factors.types import FactorInput, FactorValues
 
@@ -60,7 +60,7 @@ __all__ = [
     "CrossSectionalFactor",
     # Engine (Nautilus-native Actor)
     "FactorEngineActor",
-    "FactorEngineConfig",
+    "FactorEngineActorConfig",
     # Engine (standalone)
     "FactorEngine",
     "DataSynchronizer",
