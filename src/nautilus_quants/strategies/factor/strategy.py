@@ -117,21 +117,18 @@ class FactorStrategy(Strategy):
             return
 
         # Subscribe to source bars (1m) for stop loss checks
-        # Use injected bar_type from config (preferred) or cache (fallback)
-        if self.config.bar_type:
-            # Use injected bar type from CLI
-            self._bar_type = BarType.from_str(self.config.bar_type)
-            self.subscribe_bars(self._bar_type)
-            self.log.info(f"Subscribed to bars from config: {self._bar_type}")
-        else:
-            # Fallback to cache (legacy behavior)
-            bar_types = list(self.cache.bar_types(instrument_id=self.instrument_id))
-            if bar_types:
-                self._bar_type = bar_types[0]
-                self.subscribe_bars(self._bar_type)
-                self.log.info(f"Subscribed to bars from cache: {self._bar_type}")
-            else:
-                self.log.warning("No bar types found in config or cache for instrument")
+        # bar_type must be injected by CLI from data config
+        if not self.config.bar_type:
+            self.log.error(
+                "bar_type not configured. Ensure backtest is run via CLI which injects "
+                "bar_type from data config automatically."
+            )
+            self.stop()
+            return
+        
+        self._bar_type = BarType.from_str(self.config.bar_type)
+        self.subscribe_bars(self._bar_type)
+        self.log.info(f"Subscribed to bars: {self._bar_type}")
 
         # Subscribe to FactorValues Data (now a proper Nautilus Data subclass)
         from nautilus_trader.model.data import DataType

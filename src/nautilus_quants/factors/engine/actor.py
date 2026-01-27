@@ -124,22 +124,17 @@ class FactorEngineActor(Actor):
 
         self.log.info(f"Registered {len(self._engine.factor_names)} factors: {self._engine.factor_names}")
 
-        # Get bar types from injected config (preferred) or cache (fallback)
-        source_bar_type_strs: list[str] = []
+        # Get bar types from injected config (required)
+        # bar_types must be injected by CLI from data config
+        if not self._config.bar_types:
+            self.log.error(
+                "bar_types not configured. Ensure backtest is run via CLI which injects "
+                "bar_types from data config automatically."
+            )
+            return
         
-        if self._config.bar_types:
-            # Use injected bar types from CLI
-            source_bar_type_strs = list(self._config.bar_types)
-            self.log.info(f"Using {len(source_bar_type_strs)} bar types from config")
-        else:
-            # Fallback to cache (legacy behavior)
-            cache_bar_types = list(self.cache.bar_types())
-            if cache_bar_types:
-                source_bar_type_strs = [str(bt) for bt in cache_bar_types]
-                self.log.info(f"Found {len(source_bar_type_strs)} bar types in cache")
-            else:
-                self.log.warning("No bar types found in config or cache")
-                return
+        source_bar_type_strs = list(self._config.bar_types)
+        self.log.info(f"Using {len(source_bar_type_strs)} bar types from config")
 
         # Determine if aggregation is needed based on interval
         interval = self._config.interval.lower()
