@@ -88,11 +88,10 @@ def _get_nautilus_config_dict(config_dict: dict) -> dict:
 
 
 def _extract_data_configs(config_dict: dict) -> list[dict]:
-    """Extract instrument_id and bar_spec from data section.
+    """Extract instrument_ids and bar_spec from data section.
     
-    Supports two formats:
-    1. Legacy format with instrument_id (singular) and bar_spec
-    2. Catalog format with instrument_ids (plural) and catalog_path
+    Expects catalog format with instrument_ids (plural) and catalog_path.
+    The bar_spec is inferred from catalog_path suffix (e.g., "/path/to/1h" -> "1-HOUR-LAST").
     
     Args:
         config_dict: Full YAML config dictionary
@@ -104,49 +103,29 @@ def _extract_data_configs(config_dict: dict) -> list[dict]:
     result = []
     
     for data_config in data_section:
-        # Format 1: Legacy with instrument_id (singular) and bar_spec
-        instrument_id = data_config.get("instrument_id")
-        bar_spec_raw = data_config.get("bar_spec")
-        
-        if instrument_id and bar_spec_raw:
-            try:
-                # Convert raw spec (e.g. "1h" or "1-HOUR-LAST") to native "1-HOUR-LAST"
-                native_spec = format_bar_spec(bar_spec_raw, include_source=False)
-            except ValueError:
-                native_spec = bar_spec_raw  # Fallback to original if parse fails
-
-            # Construct bar_type: "INSTRUMENT-1-HOUR-LAST-EXTERNAL"
-            bar_type = f"{instrument_id}-{native_spec}-EXTERNAL"
-            
-            result.append({
-                "instrument_id": instrument_id,
-                "bar_spec": native_spec,
-                "bar_type": bar_type,
-            })
-            continue
-        
-        # Format 2: Catalog format with instrument_ids (plural) and catalog_path
         instrument_ids = data_config.get("instrument_ids", [])
         catalog_path = data_config.get("catalog_path", "")
         
-        if instrument_ids and catalog_path:
-            # Infer bar_spec from catalog path (e.g., "/path/to/catalog/1h" -> "1h")
-            path_suffix = catalog_path.rstrip("/").split("/")[-1]
-            
-            try:
-                # Convert suffix "1h" -> native "1-HOUR-LAST"
-                native_spec = format_bar_spec(path_suffix, include_source=False)
-            except ValueError:
-                # Fallback: assume suffix might be native or just use default
-                native_spec = "1-HOUR-LAST"
-            
-            for inst_id in instrument_ids:
-                bar_type = f"{inst_id}-{native_spec}-EXTERNAL"
-                result.append({
-                    "instrument_id": inst_id,
-                    "bar_spec": native_spec,
-                    "bar_type": bar_type,
-                })
+        if not instrument_ids or not catalog_path:
+            continue
+        
+        # Infer bar_spec from catalog path (e.g., "/path/to/catalog/1h" -> "1h")
+        path_suffix = catalog_path.rstrip("/").split("/")[-1]
+        
+        try:
+            # Convert suffix "1h" -> native "1-HOUR-LAST"
+            native_spec = format_bar_spec(path_suffix, include_source=False)
+        except ValueError:
+            # Fallback: assume suffix might be native or just use default
+            native_spec = "1-HOUR-LAST"
+        
+        for inst_id in instrument_ids:
+            bar_type = f"{inst_id}-{native_spec}-EXTERNAL"
+            result.append({
+                "instrument_id": inst_id,
+                "bar_spec": native_spec,
+                "bar_type": bar_type,
+            })
     
     return result
 
