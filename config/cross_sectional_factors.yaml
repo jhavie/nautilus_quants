@@ -1,9 +1,6 @@
-# Cross-Sectional Factor Configuration (FMZ Aligned)
-# 
-# 数字货币多因子模型 - 基于 FMZ 策略复现
-# 参考: https://www.fmz.com/digest-topic/9647
+ # https://www.fmz.com/digest-topic/9647
 #
-# FMZ原策略因子:
+# 策略因子:
 #   - volume: 成交量因子 (做多低成交量)
 #   - momentum: 3h动量因子 (df_close - df_close.shift(3))/df_close.shift(3)
 #   - volatility: 波动率因子 (df_close/df_open).rolling(24).std()
@@ -36,25 +33,25 @@ weights:
 # 因子定义 (字典格式 - FactorConfig解析器期望)
 factors:
   # 成交量因子: 做多低成交量币种，做空高成交量币种
-  # FMZ: factor_volume = df_volume
+  # factor_volume = df_volume
   volume:
     expression: "volume"
     description: "Raw volume - lower volume coins tend to outperform"
 
   # 动量因子: 3小时涨幅，具有回归特性
-  # FMZ: factor_1 = (df_close - df_close.shift(3))/df_close.shift(3)
+  # factor_1 = (df_close - df_close.shift(3))/df_close.shift(3)
   momentum:
     expression: "(close - delay(close, 3)) / delay(close, 3)"
     description: "3-hour momentum - mean reversion signal"
 
   # 波动率因子: 价格波动性
-  # FMZ: factor_7 = (df_close/df_open).rolling(24).std()
+  # factor_7 = (df_close/df_open).rolling(24).std()
   volatility:
     expression: "ts_std(close / open, 24)"
     description: "24-hour volatility - lower volatility coins tend to be more stable"
 
   # 量价相关性因子: 收盘价与成交量的相关性
-  # FMZ: factor_8 = df_close.rolling(96).corr(df_volume)
+  # factor_8 = df_close.rolling(96).corr(df_volume)
   corr:
     expression: "correlation(close, volume, 96)"
     description: "96-hour price-volume correlation"
