@@ -18,6 +18,7 @@ from nautilus_trader.config import BacktestRunConfig
 from nautilus_quants.backtest.config import BacktestResult, ReportConfig, TearsheetConfig
 from nautilus_quants.backtest.exceptions import BacktestConfigError
 from nautilus_quants.backtest.reports import ReportGenerator
+from nautilus_quants.backtest.utils.bar_spec import format_bar_spec
 from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
 
 
@@ -102,27 +103,24 @@ def _extract_data_configs(config_dict: dict) -> list[dict]:
     data_section = config_dict.get("data", [])
     result = []
     
-    # Mapping from catalog path suffix to bar_spec
-    timeframe_to_bar_spec = {
-        "1m": "1-MINUTE-LAST",
-        "5m": "5-MINUTE-LAST",
-        "15m": "15-MINUTE-LAST",
-        "30m": "30-MINUTE-LAST",
-        "1h": "1-HOUR-LAST",
-        "4h": "4-HOUR-LAST",
-        "1d": "1-DAY-LAST",
-    }
-    
     for data_config in data_section:
         # Format 1: Legacy with instrument_id (singular) and bar_spec
         instrument_id = data_config.get("instrument_id")
-        bar_spec = data_config.get("bar_spec")
+        bar_spec_raw = data_config.get("bar_spec")
         
-        if instrument_id and bar_spec:
-            bar_type = f"{instrument_id}-{bar_spec}-EXTERNAL"
+        if instrument_id and bar_spec_raw:
+            try:
+                # Convert raw spec (e.g. "1h" or "1-HOUR-LAST") to native "1-HOUR-LAST"
+                native_spec = format_bar_spec(bar_spec_raw, include_source=False)
+            except ValueError:
+                native_spec = bar_spec_raw  # Fallback to original if parse fails
+
+            # Construct bar_type: "INSTRUMENT-1-HOUR-LAST-EXTERNAL"
+            bar_type = f"{instrument_id}-{native_spec}-EXTERNAL"
+            
             result.append({
                 "instrument_id": instrument_id,
-                "bar_spec": bar_spec,
+                "bar_spec": native_spec,
                 "bar_type": bar_type,
             })
             continue
@@ -132,15 +130,21 @@ def _extract_data_configs(config_dict: dict) -> list[dict]:
         catalog_path = data_config.get("catalog_path", "")
         
         if instrument_ids and catalog_path:
-            # Infer bar_spec from catalog path (e.g., "/path/to/catalog/1h" -> "1-HOUR-LAST")
+            # Infer bar_spec from catalog path (e.g., "/path/to/catalog/1h" -> "1h")
             path_suffix = catalog_path.rstrip("/").split("/")[-1]
-            bar_spec = timeframe_to_bar_spec.get(path_suffix, "1-HOUR-LAST")
+            
+            try:
+                # Convert suffix "1h" -> native "1-HOUR-LAST"
+                native_spec = format_bar_spec(path_suffix, include_source=False)
+            except ValueError:
+                # Fallback: assume suffix might be native or just use default
+                native_spec = "1-HOUR-LAST"
             
             for inst_id in instrument_ids:
-                bar_type = f"{inst_id}-{bar_spec}-EXTERNAL"
+                bar_type = f"{inst_id}-{native_spec}-EXTERNAL"
                 result.append({
                     "instrument_id": inst_id,
-                    "bar_spec": bar_spec,
+                    "bar_spec": native_spec,
                     "bar_type": bar_type,
                 })
     
