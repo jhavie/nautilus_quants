@@ -73,7 +73,7 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
 
 class CrossSectionalFactorStrategy(Strategy):
     """
-    Cross-sectional multi-factor selection strategy (FMZ Aligned).
+    Cross-sectional multi-factor selection strategy.
 
     This strategy:
     1. Receives factor values from FactorEngineActor via CustomData
@@ -81,7 +81,7 @@ class CrossSectionalFactorStrategy(Strategy):
     3. Computes composite factor as weighted sum
     4. Longs bottom N instruments (lowest composite value)
     5. Shorts top N instruments (highest composite value)
-    6. Only closes positions when direction flips (FMZ style)
+    6. Only closes positions when direction flips (Market-Neutral style)
 
     The strategy is market-neutral with equal long/short exposure.
     """
@@ -105,7 +105,7 @@ class CrossSectionalFactorStrategy(Strategy):
         self._bar_types: list[BarType] = []
         self._n_instruments = len(config.instrument_ids)
 
-        # Default factor weights if not specified (FMZ weights)
+        # Default factor weights if not specified
         self._factor_weights: dict[str, float] = config.factor_weights or {
             "volume": 0.6,
             "momentum": 0.4,
@@ -232,14 +232,14 @@ class CrossSectionalFactorStrategy(Strategy):
         # We have a complete set - this is one "hour"
         self._hour_count += 1
 
-        # Only rebalance every rebalance_period hours (FMZ: period=4)
+        # Only rebalance every rebalance_period hours
         if self._hour_count % self.config.rebalance_period != 0:
             # Clear accumulated factors for next hour but don't rebalance
             self._accumulated_factors = {}
             return
 
         # Compute composite factor from accumulated values
-        composite = self._compute_composite_factor_fmz_style()
+        composite = self._compute_composite_factor()
 
         # Debug logging
         if self._hour_count <= 20 or self._hour_count % 100 == 0:
@@ -262,11 +262,11 @@ class CrossSectionalFactorStrategy(Strategy):
         # Clear accumulated factors for next period
         self._accumulated_factors = {}
 
-    def _compute_composite_factor_fmz_style(self) -> dict[str, float]:
+    def _compute_composite_factor(self) -> dict[str, float]:
         """
-        Compute composite factor from accumulated values using FMZ normalization.
+        Compute composite factor from accumulated values using normalization.
 
-        FMZ normalization:
+        Normalization steps:
         1. Clip to 20%-80% quantile
         2. Subtract mean
         3. Divide by std
@@ -294,8 +294,8 @@ class CrossSectionalFactorStrategy(Strategy):
             if len(valid_values) < 3:
                 continue
 
-            # FMZ-style normalization: clip to 20%-80% quantile, then z-score
-            normalized = self._normalize_factor_fmz(valid_values)
+            # Normalization: clip to 20%-80% quantile, then z-score
+            normalized = self._normalize_factor(valid_values)
             if normalized:
                 normalized_factors[factor_name] = normalized
 
@@ -326,13 +326,13 @@ class CrossSectionalFactorStrategy(Strategy):
 
         return composite
 
-    def _normalize_factor_fmz(self, values: dict[str, float]) -> dict[str, float]:
+    def _normalize_factor(self, values: dict[str, float]) -> dict[str, float]:
         """
-        Normalize factor values using FMZ method.
+        Normalize factor values using quantile clipping and z-score.
 
-        FMZ code:
-            factor_clip = factor.apply(lambda x: x.clip(x.quantile(0.2), x.quantile(0.8)), axis=1)
-            factor_norm = factor_clip.add(-factor_clip.mean(axis=1), axis='index').div(factor_clip.std(axis=1), axis='index')
+        Logic:
+            factor_clip = factor.clip(quantile(0.2), quantile(0.8))
+            factor_norm = (factor_clip - mean) / std
 
         Parameters
         ----------
@@ -379,7 +379,7 @@ class CrossSectionalFactorStrategy(Strategy):
         sorted_instruments: list[tuple[str, float]],
     ) -> None:
         """
-        Rebalance with buffer zone (FMZ style).
+        Rebalance with buffer zone.
 
         Logic:
         - Step 1 (Close): Close positions that exceeded buffer threshold
@@ -509,7 +509,7 @@ class CrossSectionalFactorStrategy(Strategy):
         if price is None or price <= 0:
             return False
 
-        # FMZ: value=300 per position
+        # Target value per position
         target_value = self.config.position_value
         raw_qty = Decimal(str(target_value / price))
         qty = instrument.make_qty(raw_qty)
@@ -547,7 +547,7 @@ class CrossSectionalFactorStrategy(Strategy):
         if price is None or price <= 0:
             return False
 
-        # FMZ: value=300 per position
+        # Target value per position
         target_value = self.config.position_value
         raw_qty = Decimal(str(target_value / price))
         qty = instrument.make_qty(raw_qty)
