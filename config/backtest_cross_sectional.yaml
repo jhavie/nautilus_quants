@@ -1,275 +1,57 @@
-# Backtest Configuration: Cross-Sectional Factor Strategy
+# Backtest Configuration: Cross-Sectional Factor Strategy (FMZ Aligned)
 # 
 # 多因子截面选币策略回测配置
 # 基于: https://www.fmz.com/digest-topic/9647
 #
-# 运行方式:
-#   cd /Users/joe/Sync/worktrees/nautilus_quants-feature-005
-#   python -m nautilus_quants.backtest run config/backtest_cross_sectional.yaml
-#
-# 策略逻辑:
-#   - 做多因子值最小的10个币种
-#   - 做空因子值最大的10个币种
-#   - 每根4h K线调仓
-#
-# 数据范围: 2022-01-01 ~ 2023-01-01
-# 币种数量: 35个 (原策略与marketcap_data.yaml交集)
+# 数据范围: 2022-01-01 ~ 2022-09-14 (与FMZ一致)
+# 使用分目录 catalog: /catalog/1h 只包含1小时数据
 
 venues:
   - name: "BINANCE"
-    oms_type: "NETTING"
+    oms_type: "HEDGING"
     account_type: "MARGIN"
     base_currency: "USDT"
     starting_balances:
-      - "100000 USDT"
-    default_leverage: 3
+      - "10000 USDT"
+    default_leverage: 1
 
 data:
-  # 35个交集币种 - 4h K线数据
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
+  # 30个币种 - 使用1小时数据的独立catalog目录
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog/1h"
     data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "1000SHIBUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "AAVEUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ADAUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ALGOUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ATOMUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "AVAXUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "AXSUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "BCHUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "BNBUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "BTCUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "CHZUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "CRVUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "DASHUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "DOGEUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "DOTUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ETCUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ETHUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "FILUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "HBARUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ICPUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "IMXUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "INJUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "LDOUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "LINKUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "LTCUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "NEARUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "OPUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "SOLUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "TRXUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "UNIUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "VETUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "XLMUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "XRPUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "XTZUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
-
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ZECUSDT.BINANCE"
-    bar_spec: "4-HOUR-LAST"
-    start_time: "2022-01-01"
-    end_time: "2023-01-01"
+    instrument_ids:
+      - "1000SHIBUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "DASHUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "TRXUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "VETUSDT.BINANCE"
+      - "XLMUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "XTZUSDT.BINANCE"
+      - "ZECUSDT.BINANCE"
+    start_time: "2024-01-01"
+    end_time: "2025-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -281,9 +63,9 @@ engine:
       config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
       config:
         factor_config_path: "config/cross_sectional_factors.yaml"
-        interval: "4h"  # 使用4h K线，无需聚合
+        interval: "1h"
         signal_prefix: "factor"
-        max_history: 100
+        max_history: 200
         publish_signals: true
   
   strategies:
@@ -310,14 +92,9 @@ engine:
           - "ETHUSDT.BINANCE"
           - "FILUSDT.BINANCE"
           - "HBARUSDT.BINANCE"
-          - "ICPUSDT.BINANCE"
-          - "IMXUSDT.BINANCE"
-          - "INJUSDT.BINANCE"
-          - "LDOUSDT.BINANCE"
           - "LINKUSDT.BINANCE"
           - "LTCUSDT.BINANCE"
           - "NEARUSDT.BINANCE"
-          - "OPUSDT.BINANCE"
           - "SOLUSDT.BINANCE"
           - "TRXUSDT.BINANCE"
           - "UNIUSDT.BINANCE"
@@ -326,15 +103,20 @@ engine:
           - "XRPUSDT.BINANCE"
           - "XTZUSDT.BINANCE"
           - "ZECUSDT.BINANCE"
+        # 30个币种，N=10 (1/3)
         n_positions: 10
-        position_value: 300.0
-        rebalance_bars: 1
+        # FMZ杠杆2.4x: 10000*2.4/20=1200 per position
+        position_value: 2000.0
+        # 每4小时调仓 (与FMZ一致)
+        rebalance_period: 4
         enable_long: true
         enable_short: true
+        # 缓冲区阈值 (0.5 = 中位数)
+        buffer_ratio: 0.5
+        # FMZ因子权重
         factor_weights:
           volume: 0.6
           momentum: 0.4
-          vol_change: 0.2
           volatility: 0.3
           corr: 0.4
 
@@ -346,7 +128,7 @@ report:
     - html
   tearsheet:
     enabled: true
-    title: "Cross-Sectional Factor Strategy Backtest"
+    title: "Cross-Sectional Factor Strategy Backtest (FMZ Aligned)"
     theme: "nautilus"
     height: 1500
     charts:

@@ -3,10 +3,12 @@
 """
 CrossSectionalFactorStrategy - Multi-factor cross-sectional selection strategy.
 
-This strategy implements a market-neutral approach:
+This strategy implements a market-neutral approach aligned with FMZ:
 - Long the N instruments with lowest composite factor values
 - Short the N instruments with highest composite factor values
-- Rebalance periodically (e.g., every 4 hours)
+- Rebalance every 4 hours (period=4)
+- Only close positions when direction flips (FMZ style)
+- Apply quantile clipping for factor normalization
 
 Based on: https://www.fmz.com/digest-topic/9647
 
@@ -28,7 +30,6 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
-from nautilus_quants.factors.operators.cross_sectional import cs_zscore
 from nautilus_quants.factors.types import FactorValues
 
 if TYPE_CHECKING:
@@ -47,8 +48,8 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
         Number of instruments to hold on each side (long and short).
     position_value : float, default 300.0
         Position value per instrument in quote currency (USDT).
-    rebalance_bars : int, default 1
-        Rebalance every N bars (1 = every bar).
+    rebalance_period : int, default 4
+        Rebalance every N hours (FMZ uses period=4).
     factor_weights : dict[str, float], default {}
         Weights for factor combination. If empty, uses default weights.
     bar_types : list[str], default []
@@ -62,24 +63,25 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
     instrument_ids: list[str]
     n_positions: int = 10
     position_value: float = 300.0
-    rebalance_bars: int = 1
+    rebalance_period: int = 4  # FMZ: period=4 (every 4 hours)
     factor_weights: dict[str, float] = {}
     bar_types: list[str] = []
     enable_long: bool = True
     enable_short: bool = True
+    buffer_ratio: float = 0.5  # Buffer threshold (0.5 = median)
 
 
 class CrossSectionalFactorStrategy(Strategy):
     """
-    Cross-sectional multi-factor selection strategy.
+    Cross-sectional multi-factor selection strategy (FMZ Aligned).
 
     This strategy:
     1. Receives factor values from FactorEngineActor via CustomData
-    2. Normalizes factors cross-sectionally using z-score
+    2. Normalizes factors with quantile clipping (20%-80%) + z-score
     3. Computes composite factor as weighted sum
     4. Longs bottom N instruments (lowest composite value)
     5. Shorts top N instruments (highest composite value)
-    6. Rebalances positions periodically
+    6. Only closes positions when direction flips (FMZ style)
 
     The strategy is market-neutral with equal long/short exposure.
     """
@@ -101,12 +103,12 @@ class CrossSectionalFactorStrategy(Strategy):
         ]
         self._instruments: dict[InstrumentId, Instrument] = {}
         self._bar_types: list[BarType] = []
+        self._n_instruments = len(config.instrument_ids)
 
-        # Default factor weights if not specified
+        # Default factor weights if not specified (FMZ weights)
         self._factor_weights: dict[str, float] = config.factor_weights or {
             "volume": 0.6,
             "momentum": 0.4,
-            "vol_change": 0.2,
             "volatility": 0.3,
             "corr": 0.4,
         }
@@ -117,6 +119,11 @@ class CrossSectionalFactorStrategy(Strategy):
         self._short_positions: set[str] = set()
         self._bar_count: int = 0
         self._signal_count: int = 0
+        self._hour_count: int = 0  # Track hours for rebalance period
+
+        # Accumulate factor values across instruments for cross-sectional computation
+        # Structure: {factor_name: {instrument_id: value}}
+        self._accumulated_factors: dict[str, dict[str, float]] = {}
 
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
@@ -155,13 +162,13 @@ class CrossSectionalFactorStrategy(Strategy):
             self.log.debug(f"Subscribed to bars: {bar_type}")
 
         # Subscribe to FactorValues Data
-        self.subscribe_data(DataType(FactorValues))
+        self.subscribe_data(DataType(FactorValues), client_id=None)
         self.log.info("Subscribed to FactorValues Data")
 
         self.log.info(
             f"Strategy started: n_positions={self.config.n_positions}, "
             f"position_value={self.config.position_value}, "
-            f"rebalance_bars={self.config.rebalance_bars}"
+            f"rebalance_period={self.config.rebalance_period}h"
         )
 
     def on_stop(self) -> None:
@@ -171,7 +178,7 @@ class CrossSectionalFactorStrategy(Strategy):
 
         self.log.info(
             f"CrossSectionalFactorStrategy stopped: "
-            f"bars={self._bar_count}, signals={self._signal_count}"
+            f"bars={self._bar_count}, signals={self._signal_count}, hours={self._hour_count}"
         )
 
     def on_bar(self, bar: Bar) -> None:
@@ -194,11 +201,9 @@ class CrossSectionalFactorStrategy(Strategy):
         """
         Handle FactorValues from FactorEngineActor.
 
-        This is where the cross-sectional logic is implemented:
-        1. Normalize each factor using cs_zscore
-        2. Compute weighted composite factor
-        3. Rank instruments and select long/short lists
-        4. Execute rebalancing trades
+        FactorValues are published per-bar (one instrument at a time).
+        We accumulate them and compute cross-sectional composite when
+        we have all instruments for this hour.
 
         Parameters
         ----------
@@ -210,53 +215,61 @@ class CrossSectionalFactorStrategy(Strategy):
 
         self._signal_count += 1
 
-        # Only rebalance on schedule
-        if self._signal_count % self.config.rebalance_bars != 0:
+        # Accumulate factor values from this FactorValues message
+        factors = data.factors
+        for factor_name, instrument_values in factors.items():
+            if factor_name not in self._accumulated_factors:
+                self._accumulated_factors[factor_name] = {}
+            # Merge instrument values
+            for instrument_id, value in instrument_values.items():
+                self._accumulated_factors[factor_name][instrument_id] = value
+
+        # Check if we have all instruments for this hour (one signal per instrument)
+        n_accumulated = len(self._accumulated_factors.get("volume", {}))
+        if n_accumulated < self._n_instruments:
             return
 
-        # Compute composite factor
-        composite = self._compute_composite_factor(data)
+        # We have a complete set - this is one "hour"
+        self._hour_count += 1
+
+        # Only rebalance every rebalance_period hours (FMZ: period=4)
+        if self._hour_count % self.config.rebalance_period != 0:
+            # Clear accumulated factors for next hour but don't rebalance
+            self._accumulated_factors = {}
+            return
+
+        # Compute composite factor from accumulated values
+        composite = self._compute_composite_factor_fmz_style()
+
+        # Debug logging
+        if self._hour_count <= 20 or self._hour_count % 100 == 0:
+            self.log.info(f"Hour #{self._hour_count}: Computed composite for {len(composite)} instruments")
 
         if len(composite) < 2 * self.config.n_positions:
             self.log.warning(
                 f"Not enough instruments with valid factor values: "
                 f"{len(composite)} < {2 * self.config.n_positions}"
             )
+            self._accumulated_factors = {}
             return
 
         # Sort by composite value (ascending)
         sorted_instruments = sorted(composite.items(), key=lambda x: x[1])
 
-        # Select long list (lowest values) and short list (highest values)
-        n = self.config.n_positions
-        long_list = {x[0] for x in sorted_instruments[:n]}
-        short_list = {x[0] for x in sorted_instruments[-n:]}
+        # Execute rebalancing with buffer zone
+        self._rebalance_positions_with_buffer(sorted_instruments)
 
-        # Log rebalance info
-        if self._signal_count % 10 == 0:
-            self.log.info(
-                f"Rebalance #{self._signal_count}: "
-                f"long={list(long_list)[:3]}..., short={list(short_list)[:3]}..."
-            )
+        # Clear accumulated factors for next period
+        self._accumulated_factors = {}
 
-        # Execute rebalancing
-        self._rebalance_positions(long_list, short_list)
-
-    def _compute_composite_factor(
-        self, factor_values: FactorValues
-    ) -> dict[str, float]:
+    def _compute_composite_factor_fmz_style(self) -> dict[str, float]:
         """
-        Compute composite factor from individual factor values.
+        Compute composite factor from accumulated values using FMZ normalization.
 
-        Steps:
-        1. Extract each factor's cross-sectional values
-        2. Normalize using cs_zscore
-        3. Compute weighted sum
-
-        Parameters
-        ----------
-        factor_values : FactorValues
-            Raw factor values from FactorEngineActor.
+        FMZ normalization:
+        1. Clip to 20%-80% quantile
+        2. Subtract mean
+        3. Divide by std
 
         Returns
         -------
@@ -266,24 +279,25 @@ class CrossSectionalFactorStrategy(Strategy):
         normalized_factors: dict[str, dict[str, float]] = {}
 
         # Normalize each factor
-        for factor_name, weight in self._factor_weights.items():
-            raw_values = factor_values.get_factor(factor_name)
+        for factor_name in self._factor_weights.keys():
+            raw_values = self._accumulated_factors.get(factor_name, {})
 
             if not raw_values:
                 continue
 
             # Filter out NaN values
             valid_values = {
-                k: v for k, v in raw_values.items() 
+                k: v for k, v in raw_values.items()
                 if not math.isnan(v)
             }
 
             if len(valid_values) < 3:
                 continue
 
-            # Cross-sectional z-score normalization
-            normalized = cs_zscore(valid_values)
-            normalized_factors[factor_name] = normalized
+            # FMZ-style normalization: clip to 20%-80% quantile, then z-score
+            normalized = self._normalize_factor_fmz(valid_values)
+            if normalized:
+                normalized_factors[factor_name] = normalized
 
         if not normalized_factors:
             return {}
@@ -312,54 +326,164 @@ class CrossSectionalFactorStrategy(Strategy):
 
         return composite
 
-    def _rebalance_positions(
-        self, long_list: set[str], short_list: set[str]
-    ) -> None:
+    def _normalize_factor_fmz(self, values: dict[str, float]) -> dict[str, float]:
         """
-        Rebalance positions to match target long/short lists.
+        Normalize factor values using FMZ method.
 
-        Logic:
-        - Close longs that are no longer in long_list or are now in short_list
-        - Close shorts that are no longer in short_list or are now in long_list
-        - Open new longs for instruments in long_list
-        - Open new shorts for instruments in short_list
+        FMZ code:
+            factor_clip = factor.apply(lambda x: x.clip(x.quantile(0.2), x.quantile(0.8)), axis=1)
+            factor_norm = factor_clip.add(-factor_clip.mean(axis=1), axis='index').div(factor_clip.std(axis=1), axis='index')
 
         Parameters
         ----------
-        long_list : set[str]
-            Target instruments to be long.
-        short_list : set[str]
-            Target instruments to be short.
+        values : dict[str, float]
+            Raw factor values.
+
+        Returns
+        -------
+        dict[str, float]
+            Normalized factor values.
         """
-        # Instruments to close
-        longs_to_close = self._long_positions - long_list
-        shorts_to_close = self._short_positions - short_list
+        if len(values) < 3:
+            return {}
 
-        # Also close if direction flips
-        longs_to_close |= self._long_positions & short_list
-        shorts_to_close |= self._short_positions & long_list
+        vals = list(values.values())
+        vals_sorted = sorted(vals)
+        n = len(vals_sorted)
 
-        # Close positions
-        for instrument_id in longs_to_close:
-            self._close_position(instrument_id, "REBALANCE_EXIT_LONG")
-            self._long_positions.discard(instrument_id)
+        # Calculate 20% and 80% quantiles
+        q20_idx = int(n * 0.2)
+        q80_idx = int(n * 0.8) - 1 if n > 1 else 0
+        q20 = vals_sorted[q20_idx]
+        q80 = vals_sorted[max(q80_idx, q20_idx)]
 
-        for instrument_id in shorts_to_close:
-            self._close_position(instrument_id, "REBALANCE_EXIT_SHORT")
-            self._short_positions.discard(instrument_id)
+        # Clip values to quantile range
+        clipped = {k: max(q20, min(q80, v)) for k, v in values.items()}
 
-        # Open new positions
+        # Calculate mean and std of clipped values
+        clipped_vals = list(clipped.values())
+        mean_val = sum(clipped_vals) / len(clipped_vals)
+        variance = sum((v - mean_val) ** 2 for v in clipped_vals) / len(clipped_vals)
+        std_val = math.sqrt(variance) if variance > 0 else 1.0
+
+        if std_val == 0:
+            std_val = 1.0
+
+        # Normalize: (x - mean) / std
+        normalized = {k: (v - mean_val) / std_val for k, v in clipped.items()}
+
+        return normalized
+
+    def _rebalance_positions_with_buffer(
+        self,
+        sorted_instruments: list[tuple[str, float]],
+    ) -> None:
+        """
+        Rebalance with buffer zone (FMZ style).
+
+        Logic:
+        - Step 1 (Close): Close positions that exceeded buffer threshold
+          - Long: close if rank > mid (fell too far, 边界持有)
+          - Short: close if rank < mid (rose too far, 边界持有)
+        - Step 2 (Open): Open new positions in target zones
+          - Long: open if in top N and not already long
+          - Short: open if in bottom N and not already short
+
+        This naturally handles "flip" cases:
+        - Long at rank 12 → rank 21: Step1 closes long, Step2 opens short
+
+        Example (N=10, total=30, mid=15):
+        - Long position at rank 1-10: open/hold
+        - Long position at rank 11-15: hold (buffer zone, 边界持有)
+        - Long position at rank 16-20: close (exceeded buffer)
+        - Long position at rank 21-30: close, then open short (flip)
+
+        Parameters
+        ----------
+        sorted_instruments : list[tuple[str, float]]
+            Instruments sorted by composite factor (ascending, lowest=best for long).
+        """
+        n = self.config.n_positions
+        total = len(sorted_instruments)
+        mid = int(total * self.config.buffer_ratio)  # 默认 0.5 = 中位数
+
+        # Build rank lookup: instrument_id -> rank (0-indexed, 0=best for long)
+        rank = {inst_id: i for i, (inst_id, _) in enumerate(sorted_instruments)}
+
+        # Target lists (for opening new positions)
+        long_targets = {x[0] for x in sorted_instruments[:n]}      # top N (rank 0 to n-1)
+        short_targets = {x[0] for x in sorted_instruments[-n:]}    # bottom N (rank total-n to total-1)
+
+        # Log position ranks before rebalance (for debugging)
+        self._log_position_ranks(rank, total, mid, long_targets, short_targets)
+
+        # === STEP 1: CLOSE (with buffer) ===
+
+        # Close longs that fell below buffer (rank > mid, 边界持有)
+        for inst_id in list(self._long_positions):
+            if inst_id in rank and rank[inst_id] > mid:
+                self._close_position(inst_id, f"LONG_EXCEEDED_BUFFER_RANK_{rank[inst_id]}")
+                self._long_positions.discard(inst_id)
+
+        # Close shorts that rose above buffer (rank < mid, 边界持有)
+        for inst_id in list(self._short_positions):
+            if inst_id in rank and rank[inst_id] < mid:
+                self._close_position(inst_id, f"SHORT_EXCEEDED_BUFFER_RANK_{rank[inst_id]}")
+                self._short_positions.discard(inst_id)
+
+        # === STEP 2: OPEN (target zones only) ===
+
+        # Open new longs (top N)
         if self.config.enable_long:
-            for instrument_id in long_list:
-                if instrument_id not in self._long_positions:
-                    if self._open_long(instrument_id):
-                        self._long_positions.add(instrument_id)
+            for inst_id in long_targets:
+                if inst_id not in self._long_positions:
+                    if self._open_long(inst_id):
+                        self._long_positions.add(inst_id)
 
+        # Open new shorts (bottom N)
         if self.config.enable_short:
-            for instrument_id in short_list:
-                if instrument_id not in self._short_positions:
-                    if self._open_short(instrument_id):
-                        self._short_positions.add(instrument_id)
+            for inst_id in short_targets:
+                if inst_id not in self._short_positions:
+                    if self._open_short(inst_id):
+                        self._short_positions.add(inst_id)
+
+    def _log_position_ranks(
+        self,
+        rank: dict[str, int],
+        total: int,
+        mid: int,
+        long_targets: set[str],
+        short_targets: set[str],
+    ) -> None:
+        """Log current position ranks for debugging."""
+        # Only log periodically to avoid spam
+        if self._hour_count % 24 != 0 and self._hour_count > 20:
+            return
+
+        n = self.config.n_positions
+
+        # Get ranks for current positions
+        long_ranks = sorted([rank.get(inst, -1) for inst in self._long_positions])
+        short_ranks = sorted([rank.get(inst, -1) for inst in self._short_positions])
+
+        # Count positions in each zone
+        long_in_target = len(self._long_positions & long_targets)
+        long_in_buffer = len([r for r in long_ranks if n <= r <= mid])
+        short_in_target = len(self._short_positions & short_targets)
+        short_in_buffer = len([r for r in short_ranks if mid <= r < total - n])
+
+        self.log.info(
+            f"Rebalance #{self._hour_count // self.config.rebalance_period}: "
+            f"total={total}, mid={mid}, "
+            f"long_pos={len(self._long_positions)} (target={long_in_target}, buffer={long_in_buffer}), "
+            f"short_pos={len(self._short_positions)} (target={short_in_target}, buffer={short_in_buffer})"
+        )
+
+        # Log detailed ranks for first few rebalances
+        if self._hour_count <= 20:
+            self.log.debug(
+                f"Position ranks - Long: {long_ranks}, Short: {short_ranks}"
+            )
 
     def _open_long(self, instrument_id_str: str) -> bool:
         """
@@ -385,7 +509,9 @@ class CrossSectionalFactorStrategy(Strategy):
         if price is None or price <= 0:
             return False
 
-        raw_qty = Decimal(str(self.config.position_value / price))
+        # FMZ: value=300 per position
+        target_value = self.config.position_value
+        raw_qty = Decimal(str(target_value / price))
         qty = instrument.make_qty(raw_qty)
 
         order = self.order_factory.market(
@@ -395,7 +521,6 @@ class CrossSectionalFactorStrategy(Strategy):
         )
         self.submit_order(order)
 
-        self.log.debug(f"OPEN LONG {instrument_id_str} @ {price:.4f}, qty={qty}")
         return True
 
     def _open_short(self, instrument_id_str: str) -> bool:
@@ -422,7 +547,9 @@ class CrossSectionalFactorStrategy(Strategy):
         if price is None or price <= 0:
             return False
 
-        raw_qty = Decimal(str(self.config.position_value / price))
+        # FMZ: value=300 per position
+        target_value = self.config.position_value
+        raw_qty = Decimal(str(target_value / price))
         qty = instrument.make_qty(raw_qty)
 
         order = self.order_factory.market(
@@ -432,7 +559,6 @@ class CrossSectionalFactorStrategy(Strategy):
         )
         self.submit_order(order)
 
-        self.log.debug(f"OPEN SHORT {instrument_id_str} @ {price:.4f}, qty={qty}")
         return True
 
     def _close_position(self, instrument_id_str: str, reason: str) -> None:

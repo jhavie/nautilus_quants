@@ -1,67 +1,63 @@
-# Cross-Sectional Factor Configuration
+# Cross-Sectional Factor Configuration (FMZ Aligned)
 # 
 # 数字货币多因子模型 - 基于 FMZ 策略复现
 # 参考: https://www.fmz.com/digest-topic/9647
 #
-# 因子用于截面选币策略:
-# - 做多因子值最小的N个币种
-# - 做空因子值最大的N个币种
+# FMZ原策略因子:
+#   - volume: 成交量因子 (做多低成交量)
+#   - momentum: 3h动量因子 (df_close - df_close.shift(3))/df_close.shift(3)
+#   - volatility: 波动率因子 (df_close/df_open).rolling(24).std()
+#   - corr: 量价相关性因子 df_close.rolling(96).corr(df_volume)
 #
-# 时间周期: 4h K线
-# 窗口参数已按4h周期调整 (原策略基于1h)
+# 时间周期: 1h K线
+# 窗口参数: 24h/96h (与FMZ一致)
 
-name: cross_sectional_factors
-version: "1.0"
-description: "Multi-factor model for cross-sectional cryptocurrency selection"
+metadata:
+  name: cross_sectional_factors
+  version: "2.0"
+  description: "Multi-factor model aligned with FMZ strategy"
 
-# 因子参数
+# 因子参数 (1h周期)
 parameters:
-  # 短期窗口 (原24h / 4 = 6个4h bars)
-  short_window: 6
-  # 长期窗口 (原96h / 4 = 24个4h bars)  
-  long_window: 24
-  # 动量回溯期 (原3h ≈ 1个4h bar)
-  momentum_period: 1
+  # 短期窗口 (24小时)
+  short_window: 24
+  # 长期窗口 (96小时 = 4天)
+  long_window: 96
+  # 动量回溯期 (3小时)
+  momentum_period: 3
 
-# 因子权重 (用于多因子合成)
+# 因子权重 (用于多因子合成) - 策略层读取
 weights:
   volume: 0.6
   momentum: 0.4
-  vol_change: 0.2
   volatility: 0.3
   corr: 0.4
 
-# 因子定义
+# 因子定义 (字典格式 - FactorConfig解析器期望)
 factors:
   # 成交量因子: 做多低成交量币种，做空高成交量币种
-  # 原理: 热门币更倾向于下跌
-  - name: volume
+  # FMZ: factor_volume = df_volume
+  volume:
     expression: "volume"
     description: "Raw volume - lower volume coins tend to outperform"
 
-  # 动量因子: 短期涨幅，具有回归特性
-  # 原理: 上涨的在接下来更容易下跌
-  - name: momentum
-    expression: "(close - delay(close, 1)) / delay(close, 1)"
-    description: "1-bar momentum - mean reversion signal"
-
-  # 成交额变动因子: 近期成交量相对长期的变化
-  # 原理: 成交量突然活跃的币种倾向于下跌
-  - name: vol_change
-    expression: "ts_mean(volume, 6) / ts_mean(volume, 24)"
-    description: "Volume change ratio - volume spike indicates potential decline"
+  # 动量因子: 3小时涨幅，具有回归特性
+  # FMZ: factor_1 = (df_close - df_close.shift(3))/df_close.shift(3)
+  momentum:
+    expression: "(close - delay(close, 3)) / delay(close, 3)"
+    description: "3-hour momentum - mean reversion signal"
 
   # 波动率因子: 价格波动性
-  # 原理: 做多波动性小的币种
-  - name: volatility
-    expression: "ts_std(close / open, 6)"
-    description: "Volatility - lower volatility coins tend to be more stable"
+  # FMZ: factor_7 = (df_close/df_open).rolling(24).std()
+  volatility:
+    expression: "ts_std(close / open, 24)"
+    description: "24-hour volatility - lower volatility coins tend to be more stable"
 
   # 量价相关性因子: 收盘价与成交量的相关性
-  # 原理: 量价背离信号
-  - name: corr
-    expression: "correlation(close, volume, 24)"
-    description: "Price-volume correlation - divergence signal"
+  # FMZ: factor_8 = df_close.rolling(96).corr(df_volume)
+  corr:
+    expression: "correlation(close, volume, 96)"
+    description: "96-hour price-volume correlation"
 
 # 性能设置
 performance:
