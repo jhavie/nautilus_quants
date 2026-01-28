@@ -1,4 +1,4 @@
- # https://www.fmz.com/digest-topic/9647
+# https://www.fmz.com/digest-topic/9647
 #
 # 策略因子:
 #   - volume: 成交量因子 (做多低成交量)
@@ -11,8 +11,8 @@
 
 metadata:
   name: cross_sectional_factors
-  version: "2.0"
-  description: "Multi-factor model aligned with FMZ strategy"
+  version: "3.0"
+  description: "Multi-factor model with WorldQuant BRAIN-style normalization"
 
 # 因子参数 (1h周期)
 parameters:
@@ -32,6 +32,8 @@ weights:
 
 # 因子定义 (字典格式 - FactorConfig解析器期望)
 factors:
+  # ========== 原始因子 ==========
+
   # 成交量因子: 做多低成交量币种，做空高成交量币种
   # factor_volume = df_volume
   volume:
@@ -55,6 +57,35 @@ factors:
   corr:
     expression: "correlation(close, volume, 96)"
     description: "96-hour price-volume correlation"
+
+  # ========== 归一化因子 (WorldQuant BRAIN 规范) ==========
+  # 使用 winsorize + normalize 组合:
+  #   1. winsorize(x, 2): 将异常值裁剪到 ±2 标准差
+  #   2. normalize(x, true, 0): 去均值后除以标准差 (z-score)
+
+  volume_norm:
+    expression: "normalize(winsorize(volume, 2), true, 0)"
+    description: "Normalized volume (winsorized + z-score)"
+
+  momentum_norm:
+    expression: "normalize(winsorize(momentum, 2), true, 0)"
+    description: "Normalized momentum (winsorized + z-score)"
+
+  volatility_norm:
+    expression: "normalize(winsorize(volatility, 2), true, 0)"
+    description: "Normalized volatility (winsorized + z-score)"
+
+  corr_norm:
+    expression: "normalize(winsorize(corr, 2), true, 0)"
+    description: "Normalized correlation (winsorized + z-score)"
+
+  # ========== 复合因子 ==========
+  # 加权复合因子用于截面选币
+  # 策略消费此因子进行多空排序
+
+  composite:
+    expression: "0.6 * volume_norm + 0.4 * momentum_norm + 0.3 * volatility_norm + 0.4 * corr_norm"
+    description: "Weighted composite factor for cross-sectional selection"
 
 # 性能设置
 performance:
