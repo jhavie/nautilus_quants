@@ -13,6 +13,7 @@ venues:
 data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog/1h"
     data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "1h"
     instrument_ids:
       - "1000SHIBUSDT.BINANCE"
       - "AAVEUSDT.BINANCE"

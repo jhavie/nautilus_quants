@@ -89,36 +89,33 @@ def _get_nautilus_config_dict(config_dict: dict) -> dict:
 
 def _extract_data_configs(config_dict: dict) -> list[dict]:
     """Extract instrument_ids and bar_spec from data section.
-    
-    Expects catalog format with instrument_ids (plural) and catalog_path.
-    The bar_spec is inferred from catalog_path suffix (e.g., "/path/to/1h" -> "1-HOUR-LAST").
-    
+
+    Expects catalog format with instrument_ids (plural), catalog_path, and bar_spec.
+
     Args:
         config_dict: Full YAML config dictionary
-        
+
     Returns:
         List of dicts with instrument_id and bar_spec for each data source
     """
     data_section = config_dict.get("data", [])
     result = []
-    
+
     for data_config in data_section:
         instrument_ids = data_config.get("instrument_ids", [])
         catalog_path = data_config.get("catalog_path", "")
-        
-        if not instrument_ids or not catalog_path:
+        bar_spec = data_config.get("bar_spec", "")
+
+        if not instrument_ids or not catalog_path or not bar_spec:
             continue
-        
-        # Infer bar_spec from catalog path (e.g., "/path/to/catalog/1h" -> "1h")
-        path_suffix = catalog_path.rstrip("/").split("/")[-1]
-        
+
+        # Convert bar_spec to native format (e.g., "1h" -> "1-HOUR-LAST")
         try:
-            # Convert suffix "1h" -> native "1-HOUR-LAST"
-            native_spec = format_bar_spec(path_suffix, include_source=False)
+            native_spec = format_bar_spec(bar_spec, include_source=False)
         except ValueError:
-            # Fallback: assume suffix might be native or just use default
-            native_spec = "1-HOUR-LAST"
-        
+            # Assume already in native format
+            native_spec = bar_spec
+
         for inst_id in instrument_ids:
             bar_type = f"{inst_id}-{native_spec}-EXTERNAL"
             result.append({
@@ -126,7 +123,7 @@ def _extract_data_configs(config_dict: dict) -> list[dict]:
                 "bar_spec": native_spec,
                 "bar_type": bar_type,
             })
-    
+
     return result
 
 
