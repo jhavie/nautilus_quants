@@ -1,0 +1,128 @@
+# 多因子截面选币策略回测配置
+# https://www.fmz.com/digest-topic/9647
+
+venues:
+  - name: "BINANCE"
+    oms_type: "HEDGING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog/1h"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "1h"
+    instrument_ids:
+      - "1000SHIBUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "DASHUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "TRXUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "VETUSDT.BINANCE"
+      - "XLMUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "XTZUSDT.BINANCE"
+      - "ZECUSDT.BINANCE"
+    start_time: "2024-01-01"
+    end_time: "2025-12-31"
+
+engine:
+  trader_id: "BACKTESTER-CS-001"
+  logging:
+    log_level: "INFO"
+  
+  actors:
+    - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
+      config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cross_sectional_factors.yaml"
+        interval: "1h"
+        signal_prefix: "factor"
+        max_history: 200
+        publish_signals: true
+  
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cross_sectional.strategy:CrossSectionalFactorStrategy"
+      config_path: "nautilus_quants.strategies.cross_sectional.strategy:CrossSectionalFactorStrategyConfig"
+      config:
+        instrument_ids:
+          - "1000SHIBUSDT.BINANCE"
+          - "AAVEUSDT.BINANCE"
+          - "ADAUSDT.BINANCE"
+          - "ALGOUSDT.BINANCE"
+          - "ATOMUSDT.BINANCE"
+          - "AVAXUSDT.BINANCE"
+          - "AXSUSDT.BINANCE"
+          - "BCHUSDT.BINANCE"
+          - "BNBUSDT.BINANCE"
+          - "BTCUSDT.BINANCE"
+          - "CHZUSDT.BINANCE"
+          - "CRVUSDT.BINANCE"
+          - "DASHUSDT.BINANCE"
+          - "DOGEUSDT.BINANCE"
+          - "DOTUSDT.BINANCE"
+          - "ETCUSDT.BINANCE"
+          - "ETHUSDT.BINANCE"
+          - "FILUSDT.BINANCE"
+          - "HBARUSDT.BINANCE"
+          - "LINKUSDT.BINANCE"
+          - "LTCUSDT.BINANCE"
+          - "NEARUSDT.BINANCE"
+          - "SOLUSDT.BINANCE"
+          - "TRXUSDT.BINANCE"
+          - "UNIUSDT.BINANCE"
+          - "VETUSDT.BINANCE"
+          - "XLMUSDT.BINANCE"
+          - "XRPUSDT.BINANCE"
+          - "XTZUSDT.BINANCE"
+          - "ZECUSDT.BINANCE"
+        n_positions: 10
+        position_value: 2000.0
+        rebalance_period: 4
+        enable_long: true
+        enable_short: true
+        buffer_ratio: 0.5
+        composite_factor: "composite"
+
+# Project-specific configuration
+report:
+  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants-feature-005/logs/backtest_runs"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Cross-Sectional Factor Strategy Backtest (FMZ Aligned)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns

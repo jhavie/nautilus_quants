@@ -20,8 +20,9 @@ venues:
 data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
-    instrument_id: "ETHUSDT.BINANCE"
-    bar_spec: "1-MINUTE-LAST"
+    instrument_ids:
+      - "ETHUSDT.BINANCE"
+    bar_spec: "1m"
     start_time: "2024-01-01"
     end_time: "2025-12-31"
 

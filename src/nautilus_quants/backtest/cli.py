@@ -18,6 +18,7 @@ from nautilus_trader.config import BacktestRunConfig
 from nautilus_quants.backtest.config import BacktestResult, ReportConfig, TearsheetConfig
 from nautilus_quants.backtest.exceptions import BacktestConfigError
 from nautilus_quants.backtest.reports import ReportGenerator
+from nautilus_quants.backtest.utils.bar_spec import format_bar_spec
 from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
 
 
@@ -87,30 +88,42 @@ def _get_nautilus_config_dict(config_dict: dict) -> dict:
 
 
 def _extract_data_configs(config_dict: dict) -> list[dict]:
-    """Extract instrument_id and bar_spec from data section.
-    
+    """Extract instrument_ids and bar_spec from data section.
+
+    Expects catalog format with instrument_ids (plural), catalog_path, and bar_spec.
+
     Args:
         config_dict: Full YAML config dictionary
-        
+
     Returns:
         List of dicts with instrument_id and bar_spec for each data source
     """
     data_section = config_dict.get("data", [])
     result = []
-    
+
     for data_config in data_section:
-        instrument_id = data_config.get("instrument_id")
-        bar_spec = data_config.get("bar_spec")
-        
-        if instrument_id and bar_spec:
-            # Build the full bar_type string
-            bar_type = f"{instrument_id}-{bar_spec}-EXTERNAL"
+        instrument_ids = data_config.get("instrument_ids", [])
+        catalog_path = data_config.get("catalog_path", "")
+        bar_spec = data_config.get("bar_spec", "")
+
+        if not instrument_ids or not catalog_path or not bar_spec:
+            continue
+
+        # Convert bar_spec to native format (e.g., "1h" -> "1-HOUR-LAST")
+        try:
+            native_spec = format_bar_spec(bar_spec, include_source=False)
+        except ValueError:
+            # Assume already in native format
+            native_spec = bar_spec
+
+        for inst_id in instrument_ids:
+            bar_type = f"{inst_id}-{native_spec}-EXTERNAL"
             result.append({
-                "instrument_id": instrument_id,
-                "bar_spec": bar_spec,
+                "instrument_id": inst_id,
+                "bar_spec": native_spec,
                 "bar_type": bar_type,
             })
-    
+
     return result
 
 
@@ -149,7 +162,10 @@ def _inject_data_configs(config_dict: dict, data_configs: list[dict]) -> dict:
     strategies = engine.get("strategies", [])
     for strategy in strategies:
         strategy_config = strategy.get("config", {})
-        # Inject bar_type if not already present and we have data configs
+        # Inject bar_types list if not already present (for multi-instrument strategies)
+        if "bar_types" not in strategy_config:
+            strategy_config["bar_types"] = [dc["bar_type"] for dc in data_configs]
+        # Inject bar_type if not already present and we have data configs (for single-instrument strategies)
         if "bar_type" not in strategy_config and data_configs:
             # Find matching data config by instrument_id
             instrument_id = strategy_config.get("instrument_id")

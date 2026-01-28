@@ -21,6 +21,7 @@ from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
 
 from nautilus_quants.factors.config import load_factor_config
+from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
 
@@ -96,7 +97,13 @@ class FactorEngineActor(Actor):
 
         self._config: FactorEngineActorConfig = config
         self._engine: FactorEngine | None = None
+        self._cs_engine: CsFactorEngine | None = None
         self._bar_types: list[BarType] = []  # Target bar types to process
+
+        # Two-phase computation state
+        self._ts_factor_values: dict[str, dict[str, float]] = {}
+        self._n_instruments: int = 0
+        self._synced_instruments: set[str] = set()
 
     def on_start(self) -> None:
         """
@@ -123,6 +130,16 @@ class FactorEngineActor(Actor):
         )
 
         self.log.info(f"Registered {len(self._engine.factor_names)} factors: {self._engine.factor_names}")
+
+        # Initialize cross-sectional factor engine (auto-detects CS factors)
+        if factor_config:
+            self._cs_engine = CsFactorEngine(factor_config)
+            if self._cs_engine.cs_factor_names:
+                self.log.info(
+                    f"Factor classification: "
+                    f"time-series={self._cs_engine.ts_factor_names}, "
+                    f"cross-sectional={self._cs_engine.cs_factor_names}"
+                )
 
         # Get bar types from injected config (required)
         # bar_types must be injected by CLI from data config
@@ -176,6 +193,9 @@ class FactorEngineActor(Actor):
                 self.subscribe_bars(subscribe_bar_type)
                 self.log.info(f"Subscribed to aggregated bars: {subscribe_str}")
 
+        # Set number of instruments for cross-sectional sync
+        self._n_instruments = len(self._bar_types)
+
         self.log.info("FactorEngineActor started successfully")
 
     def on_stop(self) -> None:
@@ -198,9 +218,9 @@ class FactorEngineActor(Actor):
         """
         Handle incoming bar data.
 
-        Only processes target bar types (aggregated INTERNAL bars if using
-        interval aggregation). Computes all registered factors and publishes
-        results as CustomData.
+        Implements two-phase factor computation:
+        - Phase 1: Time-series factors computed per instrument
+        - Phase 2: Cross-sectional factors computed across instruments (after sync)
 
         Parameters
         ----------
@@ -214,20 +234,57 @@ class FactorEngineActor(Actor):
         if self._engine is None:
             return
 
-        # Compute factors
+        # Phase 1: Compute time-series factors
         result = self._engine.on_bar(bar)
 
         if result is None:
             return
 
-        # Publish FactorValues as Data (now a proper Nautilus Data subclass)
-        if self._config.publish_signals:
-            self.publish_data(data_type=DataType(FactorValues), data=result)
+        instrument_id = str(bar.bar_type.instrument_id)
+
+        # Check if we have cross-sectional factors to compute
+        has_cs_factors = (
+            self._cs_engine is not None and len(self._cs_engine.cs_factor_names) > 0
+        )
+
+        if has_cs_factors:
+            # Accumulate time-series factor values for cross-sectional computation
+            for factor_name, values in result.factors.items():
+                self._ts_factor_values.setdefault(factor_name, {}).update(values)
+
+            self._synced_instruments.add(instrument_id)
+
+            # Check if all instruments are synced
+            if len(self._synced_instruments) < self._n_instruments:
+                return
+
+            # Phase 2: Compute cross-sectional factors
+            cs_results = self._cs_engine.compute(self._ts_factor_values)
+            for factor_name, values in cs_results.items():
+                self._ts_factor_values[factor_name] = values
+
+            # Publish combined FactorValues
+            if self._config.publish_signals:
+                factor_values = FactorValues.create(
+                    ts_event=bar.ts_event,
+                    factors=self._ts_factor_values,
+                )
+                self.publish_data(data_type=DataType(FactorValues), data=factor_values)
+
+            # Reset for next cycle
+            self._ts_factor_values.clear()
+            self._synced_instruments.clear()
+        else:
+            # No cross-sectional factors, publish immediately
+            if self._config.publish_signals:
+                self.publish_data(data_type=DataType(FactorValues), data=result)
 
     def on_reset(self) -> None:
         """Reset the actor state."""
         if self._engine:
             self._engine.reset()
+        self._ts_factor_values.clear()
+        self._synced_instruments.clear()
         self.log.info("FactorEngineActor reset")
 
     # -------------------------------------------------------------------------

@@ -15,6 +15,7 @@ from nautilus_quants.factors.engine.actor import (
     FactorEngineActor,
     FactorEngineActorConfig,
 )
+from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
 from nautilus_quants.factors.engine.data_synchronizer import (
     DataSynchronizer,
     InstrumentData,
@@ -30,8 +31,9 @@ __all__ = [
     # Nautilus-native Actor (Constitution compliant)
     "FactorEngineActor",
     "FactorEngineActorConfig",
-    # Core engine (standalone usage)
+    # Core engines (standalone usage)
     "FactorEngine",
+    "CsFactorEngine",
     "DataSynchronizer",
     "InstrumentData",
     "DependencyResolver",
