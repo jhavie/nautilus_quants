@@ -558,10 +558,11 @@ class ReportGenerator:
             return []
 
         # Get positions report for entry direction lookup
-        positions = list(self.engine.cache.positions())
+        # Include both open and closed positions
+        all_positions = list(self.engine.cache.positions()) + list(self.engine.cache.positions_closed())
         position_directions: dict[str, str] = {}
-        if positions:
-            positions_df = ReportProvider.generate_positions_report(positions)
+        if all_positions:
+            positions_df = ReportProvider.generate_positions_report(all_positions)
             if not positions_df.empty and "entry" in positions_df.columns:
                 for _, row in positions_df.iterrows():
                     inst_id = row.get("instrument_id", "")
