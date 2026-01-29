@@ -55,12 +55,38 @@ class TearsheetConfig:
 
 
 @dataclass(frozen=True)
+class QuantStatsConfig:
+    """QuantStats report configuration.
+
+    Configures the generation of QuantStats-style HTML reports and PNG charts.
+    This is complementary to the Nautilus native tearsheet.
+    """
+
+    enabled: bool = False
+    title: str = "QuantStats Report"
+    benchmark: str | None = None  # Optional benchmark ticker (e.g., "SPY")
+    output_format: list[str] = field(default_factory=lambda: ["html"])  # html, png, or both
+    charts: list[str] = field(
+        default_factory=lambda: [
+            "returns",
+            "log_returns",
+            "yearly_returns",
+            "monthly_heatmap",
+            "drawdown",
+            "rolling_sharpe",
+            "rolling_volatility",
+        ]
+    )
+
+
+@dataclass(frozen=True)
 class ReportConfig:
     """Report generation configuration."""
 
     output_dir: str = "logs/backtest_runs"  # Base output directory
     formats: list[str] = field(default_factory=lambda: ["csv", "html"])
     tearsheet: TearsheetConfig | None = None
+    quantstats: QuantStatsConfig | None = None
 
 
 @dataclass
@@ -76,6 +102,11 @@ class BacktestResult:
     statistics: dict[str, Any]  # Combined stats from PortfolioAnalyzer
     reports: dict[str, Path]  # Map of report type to file path
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def quantstats_html_path(self) -> Path | None:
+        """Path to QuantStats HTML report if generated."""
+        return self.reports.get("quantstats_html")
 
     @property
     def tearsheet_path(self) -> Path | None:

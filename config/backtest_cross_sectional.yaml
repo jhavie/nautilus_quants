@@ -7,51 +7,66 @@ venues:
     account_type: "MARGIN"
     base_currency: "USDT"
     starting_balances:
-      - "10000 USDT"
+      - "100000 USDT"
     default_leverage: 1
 
 data:
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/marketcap/catalog/1h"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/pre_data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "1h"
     instrument_ids:
+      - "1000PEPEUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
-      - "AAVEUSDT.BINANCE"
-      - "ADAUSDT.BINANCE"
-      - "ALGOUSDT.BINANCE"
-      - "ATOMUSDT.BINANCE"
-      - "AVAXUSDT.BINANCE"
-      - "AXSUSDT.BINANCE"
-      - "BCHUSDT.BINANCE"
-      - "BNBUSDT.BINANCE"
-      - "BTCUSDT.BINANCE"
-      - "CHZUSDT.BINANCE"
-      - "CRVUSDT.BINANCE"
-      - "DASHUSDT.BINANCE"
-      - "DOGEUSDT.BINANCE"
-      - "DOTUSDT.BINANCE"
-      - "ETCUSDT.BINANCE"
-      - "ETHUSDT.BINANCE"
-      - "FILUSDT.BINANCE"
-      - "HBARUSDT.BINANCE"
-      - "LINKUSDT.BINANCE"
+      - "1000BONKUSDT.BINANCE"
+      - "SUIUSDT.BINANCE"
       - "LTCUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "WLDUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
       - "NEARUSDT.BINANCE"
-      - "SOLUSDT.BINANCE"
-      - "TRXUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
-      - "VETUSDT.BINANCE"
-      - "XLMUSDT.BINANCE"
-      - "XRPUSDT.BINANCE"
-      - "XTZUSDT.BINANCE"
-      - "ZECUSDT.BINANCE"
-    start_time: "2024-01-01"
+      - "ICPUSDT.BINANCE"
+      - "ARBUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "APTUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "OPUSDT.BINANCE"
+      - "TONUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "GALAUSDT.BINANCE"
+      - "ONDOUSDT.BINANCE"
+      - "JUPUSDT.BINANCE"
+      - "SANDUSDT.BINANCE"
+      - "LDOUSDT.BINANCE"
+      - "POLUSDT.BINANCE"
+      - "PENGUUSDT.BINANCE"
+      - "PYTHUSDT.BINANCE"
+      - "RENDERUSDT.BINANCE"
+      - "TIAUSDT.BINANCE"
+      - "INJUSDT.BINANCE"
+      # - "TRUMPUSDT.BINANCE"
+      - "WIFUSDT.BINANCE"
+      - "ZROUSDT.BINANCE"
+      - "VIRTUALUSDT.BINANCE"
+      - "JTOUSDT.BINANCE"
+      - "DYDXUSDT.BINANCE"
+      - "FLOWUSDT.BINANCE"
+      - "ARKMUSDT.BINANCE"
+    start_time: "2025-01-01"
     end_time: "2025-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
   logging:
     log_level: "INFO"
+  risk_engine:
+    bypass: true  # Bypass max trade size checks
   
   actors:
     - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
@@ -68,38 +83,52 @@ engine:
       config_path: "nautilus_quants.strategies.cross_sectional.strategy:CrossSectionalFactorStrategyConfig"
       config:
         instrument_ids:
+          - "1000PEPEUSDT.BINANCE"
           - "1000SHIBUSDT.BINANCE"
-          - "AAVEUSDT.BINANCE"
-          - "ADAUSDT.BINANCE"
-          - "ALGOUSDT.BINANCE"
-          - "ATOMUSDT.BINANCE"
-          - "AVAXUSDT.BINANCE"
-          - "AXSUSDT.BINANCE"
-          - "BCHUSDT.BINANCE"
-          - "BNBUSDT.BINANCE"
-          - "BTCUSDT.BINANCE"
-          - "CHZUSDT.BINANCE"
-          - "CRVUSDT.BINANCE"
-          - "DASHUSDT.BINANCE"
-          - "DOGEUSDT.BINANCE"
-          - "DOTUSDT.BINANCE"
-          - "ETCUSDT.BINANCE"
-          - "ETHUSDT.BINANCE"
-          - "FILUSDT.BINANCE"
-          - "HBARUSDT.BINANCE"
-          - "LINKUSDT.BINANCE"
+          - "1000BONKUSDT.BINANCE"
+          - "SUIUSDT.BINANCE"
           - "LTCUSDT.BINANCE"
+          - "AVAXUSDT.BINANCE"
+          - "WLDUSDT.BINANCE"
+          - "DOTUSDT.BINANCE"
+          - "AAVEUSDT.BINANCE"
+          - "HBARUSDT.BINANCE"
           - "NEARUSDT.BINANCE"
-          - "SOLUSDT.BINANCE"
-          - "TRXUSDT.BINANCE"
           - "UNIUSDT.BINANCE"
-          - "VETUSDT.BINANCE"
-          - "XLMUSDT.BINANCE"
-          - "XRPUSDT.BINANCE"
-          - "XTZUSDT.BINANCE"
-          - "ZECUSDT.BINANCE"
+          - "ICPUSDT.BINANCE"
+          - "ARBUSDT.BINANCE"
+          - "ETCUSDT.BINANCE"
+          - "FILUSDT.BINANCE"
+          - "APTUSDT.BINANCE"
+          - "ALGOUSDT.BINANCE"
+          - "CHZUSDT.BINANCE"
+          - "ATOMUSDT.BINANCE"
+          - "OPUSDT.BINANCE"
+          - "TONUSDT.BINANCE"
+          - "CRVUSDT.BINANCE"
+          - "AXSUSDT.BINANCE"
+          - "GALAUSDT.BINANCE"
+          - "ONDOUSDT.BINANCE"
+          - "JUPUSDT.BINANCE"
+          - "SANDUSDT.BINANCE"
+          - "LDOUSDT.BINANCE"
+          - "POLUSDT.BINANCE"
+          - "PENGUUSDT.BINANCE"
+          - "PYTHUSDT.BINANCE"
+          - "RENDERUSDT.BINANCE"
+          - "TIAUSDT.BINANCE"
+          - "INJUSDT.BINANCE"
+          # - "TRUMPUSDT.BINANCE"
+          - "WIFUSDT.BINANCE"
+          - "ZROUSDT.BINANCE"
+          - "VIRTUALUSDT.BINANCE"
+          - "JTOUSDT.BINANCE"
+          - "DYDXUSDT.BINANCE"
+          - "FLOWUSDT.BINANCE"
+          - "ARKMUSDT.BINANCE"
         n_positions: 10
-        position_value: 2000.0
+        target_leverage: 1
+        monthly_position_update: true
         rebalance_period: 4
         enable_long: true
         enable_short: true
@@ -108,7 +137,7 @@ engine:
 
 # Project-specific configuration
 report:
-  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants-feature-005/logs/backtest_runs"
+  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-006/logs/backtest_runs"
   formats:
     - csv
     - html
@@ -126,3 +155,17 @@ report:
       - distribution
       - rolling_sharpe
       - yearly_returns
+  quantstats:
+    enabled: true
+    title: "QuantStats Analysis"
+    output_format:
+      - html
+      - png
+    charts:
+      - returns
+      - log_returns
+      - yearly_returns
+      - monthly_heatmap
+      - drawdown
+      - rolling_sharpe
+      - rolling_volatility

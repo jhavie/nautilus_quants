@@ -78,6 +78,10 @@ class ReportGenerator:
             if tearsheet_path:
                 reports["tearsheet"] = tearsheet_path
 
+        # Generate QuantStats reports if configured
+        quantstats_reports = self.generate_quantstats_reports()
+        reports.update(quantstats_reports)
+
         return reports
 
     def generate_csv_reports(self) -> dict[str, Path]:
@@ -229,24 +233,14 @@ class ReportGenerator:
 
         try:
             from nautilus_trader.analysis import (
-                PortfolioAnalyzer,
                 TearsheetConfig as NautilusTearsheetConfig,
                 create_tearsheet_from_stats,
             )
-            from nautilus_trader.core.datetime import unix_nanos_to_dt
 
             tearsheet_path = self.output_dir / "tearsheet.html"
 
-            # Get only closed positions with valid timestamps
-            closed_positions = self._get_closed_positions()
-
-            # Create a fresh analyzer with only closed positions
-            analyzer = PortfolioAnalyzer()
-            if closed_positions:
-                analyzer.add_positions(closed_positions)
-
-            # Get returns with proper datetime index
-            returns = analyzer.returns()
+            # Get daily returns from account equity (same method used for QuantStats)
+            returns = self._get_returns_series()
 
             # Get statistics from the engine's analyzer (has full stats)
             engine_analyzer = self.engine.portfolio.analyzer
@@ -301,3 +295,200 @@ class ReportGenerator:
 
         except Exception as e:
             raise BacktestReportError(f"Failed to generate tearsheet: {e}") from e
+
+    def _get_returns_series(self) -> pd.Series:
+        """Get returns as a pandas Series with datetime index for QuantStats.
+
+        Calculates daily returns from account equity changes instead of summing
+        position returns. This is more accurate for HEDGING mode venues with
+        multiple concurrent positions closing at the same timestamp.
+
+        Returns:
+            pd.Series with daily returns indexed by datetime
+        """
+        from nautilus_trader.analysis import ReportProvider
+
+        # Get account equity data
+        accounts = list(self.engine.cache.accounts())
+        if not accounts:
+            return pd.Series(dtype=float)
+
+        account = accounts[0]
+        account_df = ReportProvider.generate_account_report(account)
+
+        if account_df.empty:
+            return pd.Series(dtype=float)
+
+        # Get equity column - try 'total' first (common in backtest reports),
+        # then fall back to 'equity' if available
+        equity_col = None
+        for col in ["total", "equity"]:
+            if col in account_df.columns:
+                equity_col = col
+                break
+
+        if equity_col is None:
+            return pd.Series(dtype=float)
+
+        # Get equity series
+        equity = account_df[equity_col].astype(float)
+
+        # Ensure datetime index
+        if not isinstance(equity.index, pd.DatetimeIndex):
+            equity.index = pd.to_datetime(equity.index)
+
+        # Resample to daily (take last value of each day)
+        daily_equity = equity.resample("1D").last().dropna()
+
+        if len(daily_equity) < 2:
+            return pd.Series(dtype=float)
+
+        # Calculate daily returns = (equity_t - equity_{t-1}) / equity_{t-1}
+        daily_returns = daily_equity.pct_change().dropna()
+
+        return daily_returns
+
+    def generate_quantstats_reports(self) -> dict[str, Path]:
+        """Generate QuantStats HTML report and/or PNG charts.
+
+        Returns:
+            Dict mapping report type to file path
+        """
+        qs_config = self.config.quantstats
+        if not qs_config or not qs_config.enabled:
+            return {}
+
+        # Check if quantstats is available
+        try:
+            import quantstats as qs
+        except ImportError:
+            import warnings
+
+            warnings.warn(
+                "quantstats not installed. Skipping QuantStats report generation. "
+                "Install with: pip install quantstats>=0.0.64"
+            )
+            return {}
+
+        reports: dict[str, Path] = {}
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            returns = self._get_returns_series()
+            if returns.empty:
+                import warnings
+
+                warnings.warn("No returns data available for QuantStats report.")
+                return {}
+
+            # Extend pandas with quantstats methods
+            qs.extend_pandas()
+
+            # Generate HTML report if configured
+            if "html" in qs_config.output_format:
+                html_path = self._generate_quantstats_html(qs, returns, qs_config)
+                if html_path:
+                    reports["quantstats_html"] = html_path
+
+            # Generate PNG charts if configured
+            if "png" in qs_config.output_format:
+                png_reports = self._generate_quantstats_charts(qs, returns, qs_config)
+                reports.update(png_reports)
+
+            return reports
+
+        except Exception as e:
+            raise BacktestReportError(f"Failed to generate QuantStats reports: {e}") from e
+
+    def _generate_quantstats_html(
+        self,
+        qs: Any,
+        returns: pd.Series,
+        qs_config: Any,
+    ) -> Path | None:
+        """Generate QuantStats HTML report.
+
+        Args:
+            qs: QuantStats module
+            returns: Returns series
+            qs_config: QuantStats configuration
+
+        Returns:
+            Path to HTML file or None
+        """
+        html_path = self.output_dir / "quantstats_report.html"
+
+        # Generate full HTML report
+        qs.reports.html(
+            returns,
+            benchmark=qs_config.benchmark,
+            title=qs_config.title,
+            output=str(html_path),
+        )
+
+        return html_path
+
+    def _generate_quantstats_charts(
+        self,
+        qs: Any,
+        returns: pd.Series,
+        qs_config: Any,
+    ) -> dict[str, Path]:
+        """Generate QuantStats PNG charts.
+
+        Args:
+            qs: QuantStats module
+            returns: Returns series
+            qs_config: QuantStats configuration
+
+        Returns:
+            Dict mapping chart name to file path
+        """
+        import matplotlib
+
+        matplotlib.use("Agg")  # Non-interactive backend for PNG generation
+        import matplotlib.pyplot as plt
+
+        charts_dir = self.output_dir / "quantstats_charts"
+        charts_dir.mkdir(parents=True, exist_ok=True)
+
+        reports: dict[str, Path] = {}
+
+        # Map chart names to QuantStats plot functions
+        chart_functions = {
+            "returns": qs.plots.returns,
+            "log_returns": qs.plots.log_returns,
+            "yearly_returns": qs.plots.yearly_returns,
+            "monthly_heatmap": qs.plots.monthly_heatmap,
+            "drawdown": qs.plots.drawdown,
+            "drawdowns_periods": qs.plots.drawdowns_periods,
+            "rolling_sharpe": qs.plots.rolling_sharpe,
+            "rolling_volatility": qs.plots.rolling_volatility,
+            "rolling_beta": qs.plots.rolling_beta,
+            "histogram": qs.plots.histogram,
+            "daily_returns": qs.plots.daily_returns,
+        }
+
+        for chart_name in qs_config.charts:
+            if chart_name not in chart_functions:
+                continue
+
+            try:
+                chart_path = charts_dir / f"{chart_name}.png"
+                plot_func = chart_functions[chart_name]
+
+                # Some plots require benchmark
+                if chart_name in ("rolling_beta",) and not qs_config.benchmark:
+                    continue
+
+                fig = plot_func(returns, show=False)
+                if fig is not None:
+                    fig.savefig(chart_path, dpi=150, bbox_inches="tight")
+                    plt.close(fig)
+                    reports[f"quantstats_{chart_name}"] = chart_path
+
+            except Exception:
+                # Skip charts that fail (some need specific data)
+                continue
+
+        return reports

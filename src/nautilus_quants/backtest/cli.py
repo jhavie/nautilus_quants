@@ -15,7 +15,12 @@ import yaml
 from nautilus_trader.backtest.node import BacktestNode
 from nautilus_trader.config import BacktestRunConfig
 
-from nautilus_quants.backtest.config import BacktestResult, ReportConfig, TearsheetConfig
+from nautilus_quants.backtest.config import (
+    BacktestResult,
+    QuantStatsConfig,
+    ReportConfig,
+    TearsheetConfig,
+)
 from nautilus_quants.backtest.exceptions import BacktestConfigError
 from nautilus_quants.backtest.reports import ReportGenerator
 from nautilus_quants.backtest.utils.bar_spec import format_bar_spec
@@ -62,11 +67,27 @@ def _parse_report_config(config_dict: dict) -> ReportConfig | None:
                 "monthly_returns", "distribution", "rolling_sharpe", "yearly_returns"
             ]),
         )
-    
+
+    # Parse quantstats config if present
+    quantstats_config = None
+    quantstats_section = report_section.get("quantstats")
+    if quantstats_section:
+        quantstats_config = QuantStatsConfig(
+            enabled=quantstats_section.get("enabled", False),
+            title=quantstats_section.get("title", "QuantStats Report"),
+            benchmark=quantstats_section.get("benchmark"),
+            output_format=quantstats_section.get("output_format", ["html"]),
+            charts=quantstats_section.get("charts", [
+                "returns", "log_returns", "yearly_returns", "monthly_heatmap",
+                "drawdown", "rolling_sharpe", "rolling_volatility"
+            ]),
+        )
+
     return ReportConfig(
         output_dir=report_section.get("output_dir", "logs/backtest_runs"),
         formats=report_section.get("formats", ["csv", "html"]),
         tearsheet=tearsheet_config,
+        quantstats=quantstats_config,
     )
 
 
