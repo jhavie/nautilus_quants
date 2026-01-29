@@ -17,6 +17,7 @@ from nautilus_trader.config import BacktestRunConfig
 
 from nautilus_quants.backtest.config import (
     BacktestResult,
+    PositionVisualizationConfig,
     QuantStatsConfig,
     ReportConfig,
     TearsheetConfig,
@@ -83,11 +84,24 @@ def _parse_report_config(config_dict: dict) -> ReportConfig | None:
             ]),
         )
 
+    # Parse position_viz config if present
+    position_viz_config = None
+    position_viz_section = report_section.get("position_viz")
+    if position_viz_section:
+        position_viz_config = PositionVisualizationConfig(
+            enabled=position_viz_section.get("enabled", True),
+            title=position_viz_section.get("title", "Position Timeline"),
+            output_subdir=position_viz_section.get("output_subdir", "echarts"),
+            chart_height=position_viz_section.get("chart_height", 500),
+            interval=position_viz_section.get("interval", "4h"),
+        )
+
     return ReportConfig(
         output_dir=report_section.get("output_dir", "logs/backtest_runs"),
         formats=report_section.get("formats", ["csv", "html"]),
         tearsheet=tearsheet_config,
         quantstats=quantstats_config,
+        position_viz=position_viz_config,
     )
 
 

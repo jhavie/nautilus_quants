@@ -82,6 +82,11 @@ class ReportGenerator:
         quantstats_reports = self.generate_quantstats_reports()
         reports.update(quantstats_reports)
 
+        # Generate position visualization if configured
+        position_viz_path = self.generate_position_visualization()
+        if position_viz_path:
+            reports["position_viz"] = position_viz_path
+
         return reports
 
     def generate_csv_reports(self) -> dict[str, Path]:
@@ -492,3 +497,529 @@ class ReportGenerator:
                 continue
 
         return reports
+
+    def generate_position_visualization(self) -> Path | None:
+        """Generate ECharts position timeline visualization.
+
+        Creates an interactive HTML chart showing equity curve with long/short
+        position counts and detailed position lists on hover.
+
+        Returns:
+            Path to HTML file or None if not configured/generated
+        """
+        viz_config = self.config.position_viz
+        if not viz_config or not viz_config.enabled:
+            return None
+
+        try:
+            # Get position timeline data
+            timeline_data = self._get_position_timeline_data(viz_config.interval)
+            if not timeline_data:
+                import warnings
+                warnings.warn("No position data available for visualization.")
+                return None
+
+            # Create output directory
+            output_subdir = self.output_dir / viz_config.output_subdir
+            output_subdir.mkdir(parents=True, exist_ok=True)
+
+            html_path = output_subdir / "position_timeline.html"
+
+            # Generate HTML
+            html_content = self._generate_echarts_html(timeline_data, viz_config)
+            html_path.write_text(html_content, encoding="utf-8")
+
+            return html_path
+
+        except Exception as e:
+            raise BacktestReportError(f"Failed to generate position visualization: {e}") from e
+
+    def _get_position_timeline_data(self, interval: str) -> list[dict]:
+        """Extract position timeline data from account report.
+
+        Args:
+            interval: Resampling interval (e.g., "4h", "1d")
+
+        Returns:
+            List of dicts with timestamp, equity, long_positions, short_positions
+        """
+        import ast
+        from nautilus_trader.analysis import ReportProvider
+
+        # Get account data
+        accounts = list(self.engine.cache.accounts())
+        if not accounts:
+            return []
+
+        account = accounts[0]
+        account_df = ReportProvider.generate_account_report(account)
+
+        if account_df.empty:
+            return []
+
+        # Get positions report for entry direction lookup
+        positions = list(self.engine.cache.positions())
+        position_directions: dict[str, str] = {}
+        if positions:
+            positions_df = ReportProvider.generate_positions_report(positions)
+            if not positions_df.empty and "entry" in positions_df.columns:
+                for _, row in positions_df.iterrows():
+                    inst_id = row.get("instrument_id", "")
+                    entry = row.get("entry", "")
+                    if inst_id and entry:
+                        position_directions[inst_id] = entry
+
+        # Ensure datetime index
+        if not isinstance(account_df.index, pd.DatetimeIndex):
+            account_df.index = pd.to_datetime(account_df.index)
+
+        # Get equity column
+        equity_col = None
+        for col in ["total", "equity"]:
+            if col in account_df.columns:
+                equity_col = col
+                break
+
+        if equity_col is None:
+            return []
+
+        # Resample to specified interval
+        resampled = account_df.resample(interval).last().dropna(subset=[equity_col])
+
+        timeline_data = []
+        for timestamp, row in resampled.iterrows():
+            equity = float(row[equity_col])
+
+            # Parse margins to get current positions
+            long_positions = []
+            short_positions = []
+
+            margins_str = row.get("margins", "[]")
+            if isinstance(margins_str, str) and margins_str.strip():
+                try:
+                    margins = ast.literal_eval(margins_str)
+                    for margin in margins:
+                        if isinstance(margin, dict):
+                            inst_id = margin.get("instrument_id", "")
+                            if inst_id:
+                                # Determine direction from positions report
+                                direction = position_directions.get(inst_id, "")
+                                # Extract symbol without venue
+                                symbol = inst_id.split(".")[0] if "." in inst_id else inst_id
+                                if direction == "BUY":
+                                    long_positions.append(symbol)
+                                elif direction == "SELL":
+                                    short_positions.append(symbol)
+                                else:
+                                    # Default: assume long if direction unknown
+                                    long_positions.append(symbol)
+                except (ValueError, SyntaxError):
+                    pass
+
+            timeline_data.append({
+                "timestamp": timestamp.isoformat(),
+                "equity": equity,
+                "long_count": len(long_positions),
+                "short_count": len(short_positions),
+                "long_positions": long_positions,
+                "short_positions": short_positions,
+            })
+
+        return timeline_data
+
+    def _generate_echarts_html(self, timeline_data: list[dict], viz_config: "PositionVisualizationConfig") -> str:
+        """Generate ECharts HTML content.
+
+        Args:
+            timeline_data: Position timeline data
+            viz_config: Visualization configuration
+
+        Returns:
+            Complete HTML string
+        """
+        import json
+        from nautilus_quants.backtest.config import PositionVisualizationConfig
+
+        # Prepare data for ECharts
+        timestamps = [d["timestamp"] for d in timeline_data]
+        equity_data = [d["equity"] for d in timeline_data]
+        long_counts = [d["long_count"] for d in timeline_data]
+        short_counts = [-d["short_count"] for d in timeline_data]  # Negative for visual distinction
+        long_positions = [d["long_positions"] for d in timeline_data]
+        short_positions = [d["short_positions"] for d in timeline_data]
+
+        # Calculate statistics
+        if equity_data:
+            start_equity = equity_data[0]
+            end_equity = equity_data[-1]
+            pnl = end_equity - start_equity
+            pnl_pct = (pnl / start_equity * 100) if start_equity else 0
+            max_equity = max(equity_data)
+            min_equity = min(equity_data)
+        else:
+            start_equity = end_equity = pnl = pnl_pct = max_equity = min_equity = 0
+
+        html_template = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{viz_config.title}</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: Arial, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #ffffff;
+            color: #333333;
+            padding: 20px;
+        }}
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+        }}
+        h1 {{
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #333333;
+        }}
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }}
+        .stat-card {{
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+        }}
+        .stat-label {{
+            font-size: 12px;
+            color: #666666;
+            margin-bottom: 5px;
+        }}
+        .stat-value {{
+            font-size: 18px;
+            font-weight: 600;
+            color: #333333;
+        }}
+        .stat-value.positive {{
+            color: #28a745;
+        }}
+        .stat-value.negative {{
+            color: #dc3545;
+        }}
+        #chart-container {{
+            width: 100%;
+            height: {viz_config.chart_height}px;
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+        }}
+        .position-table {{
+            margin-top: 20px;
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        .position-table th,
+        .position-table td {{
+            padding: 10px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e9ecef;
+        }}
+        .position-table th {{
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 12px;
+            color: #666666;
+            text-transform: uppercase;
+        }}
+        .position-table td {{
+            font-size: 14px;
+        }}
+        .long-tag {{
+            display: inline-block;
+            background: #d4edda;
+            color: #155724;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 2px;
+        }}
+        .short-tag {{
+            display: inline-block;
+            background: #f8d7da;
+            color: #721c24;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 2px;
+        }}
+        #selected-info {{
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            display: none;
+        }}
+        #selected-info h3 {{
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #666666;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            font-size: 12px;
+            color: #999999;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{viz_config.title}</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Starting Equity</div>
+                <div class="stat-value">{start_equity:,.2f}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Ending Equity</div>
+                <div class="stat-value">{end_equity:,.2f}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total PnL</div>
+                <div class="stat-value {"positive" if pnl >= 0 else "negative"}">{pnl:+,.2f}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Return</div>
+                <div class="stat-value {"positive" if pnl_pct >= 0 else "negative"}">{pnl_pct:+.2f}%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Max Equity</div>
+                <div class="stat-value">{max_equity:,.2f}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Min Equity</div>
+                <div class="stat-value">{min_equity:,.2f}</div>
+            </div>
+        </div>
+
+        <div id="chart-container"></div>
+
+        <div id="selected-info">
+            <h3>Selected Point Details</h3>
+            <div id="selected-content"></div>
+        </div>
+
+        <div class="footer">
+            Generated by Nautilus Quants &bull; Powered by ECharts
+        </div>
+    </div>
+
+    <script>
+        // Data
+        const timestamps = {json.dumps(timestamps)};
+        const equityData = {json.dumps(equity_data)};
+        const longCounts = {json.dumps(long_counts)};
+        const shortCounts = {json.dumps(short_counts)};
+        const longPositions = {json.dumps(long_positions)};
+        const shortPositions = {json.dumps(short_positions)};
+
+        // Initialize chart
+        const chart = echarts.init(document.getElementById('chart-container'));
+
+        const option = {{
+            tooltip: {{
+                trigger: 'axis',
+                axisPointer: {{
+                    type: 'cross'
+                }},
+                formatter: function(params) {{
+                    const idx = params[0].dataIndex;
+                    const time = new Date(timestamps[idx]).toLocaleString();
+                    let html = '<div style="font-weight:600;margin-bottom:8px;">' + time + '</div>';
+
+                    params.forEach(function(item) {{
+                        if (item.seriesName === 'Equity') {{
+                            html += '<div>' + item.marker + ' Equity: <b>' + item.value.toLocaleString(undefined, {{minimumFractionDigits: 2}}) + '</b></div>';
+                        }} else if (item.seriesName === 'Long') {{
+                            html += '<div>' + item.marker + ' Long: <b>' + item.value + '</b></div>';
+                        }} else if (item.seriesName === 'Short') {{
+                            html += '<div>' + item.marker + ' Short: <b>' + Math.abs(item.value) + '</b></div>';
+                        }}
+                    }});
+
+                    if (longPositions[idx] && longPositions[idx].length > 0) {{
+                        html += '<div style="margin-top:8px;"><span style="color:#28a745;">Long:</span> ' + longPositions[idx].join(', ') + '</div>';
+                    }}
+                    if (shortPositions[idx] && shortPositions[idx].length > 0) {{
+                        html += '<div><span style="color:#dc3545;">Short:</span> ' + shortPositions[idx].join(', ') + '</div>';
+                    }}
+
+                    return html;
+                }}
+            }},
+            legend: {{
+                data: ['Equity', 'Long', 'Short'],
+                top: 10
+            }},
+            grid: {{
+                left: '3%',
+                right: '4%',
+                bottom: '15%',
+                top: '60',
+                containLabel: true
+            }},
+            xAxis: {{
+                type: 'category',
+                data: timestamps.map(t => new Date(t).toLocaleDateString()),
+                axisLabel: {{
+                    rotate: 45
+                }}
+            }},
+            yAxis: [
+                {{
+                    type: 'value',
+                    name: 'Equity',
+                    position: 'left',
+                    axisLabel: {{
+                        formatter: function(value) {{
+                            return value.toLocaleString();
+                        }}
+                    }}
+                }},
+                {{
+                    type: 'value',
+                    name: 'Positions',
+                    position: 'right',
+                    axisLabel: {{
+                        formatter: function(value) {{
+                            return Math.abs(value);
+                        }}
+                    }}
+                }}
+            ],
+            dataZoom: [
+                {{
+                    type: 'inside',
+                    start: 0,
+                    end: 100
+                }},
+                {{
+                    type: 'slider',
+                    start: 0,
+                    end: 100,
+                    bottom: 10
+                }}
+            ],
+            series: [
+                {{
+                    name: 'Equity',
+                    type: 'line',
+                    data: equityData,
+                    smooth: true,
+                    lineStyle: {{
+                        width: 2,
+                        color: '#1890ff'
+                    }},
+                    areaStyle: {{
+                        color: {{
+                            type: 'linear',
+                            x: 0,
+                            y: 0,
+                            x2: 0,
+                            y2: 1,
+                            colorStops: [
+                                {{ offset: 0, color: 'rgba(24, 144, 255, 0.3)' }},
+                                {{ offset: 1, color: 'rgba(24, 144, 255, 0.05)' }}
+                            ]
+                        }}
+                    }},
+                    itemStyle: {{
+                        color: '#1890ff'
+                    }}
+                }},
+                {{
+                    name: 'Long',
+                    type: 'bar',
+                    yAxisIndex: 1,
+                    data: longCounts,
+                    itemStyle: {{
+                        color: '#28a745'
+                    }},
+                    barMaxWidth: 20
+                }},
+                {{
+                    name: 'Short',
+                    type: 'bar',
+                    yAxisIndex: 1,
+                    data: shortCounts,
+                    itemStyle: {{
+                        color: '#dc3545'
+                    }},
+                    barMaxWidth: 20
+                }}
+            ]
+        }};
+
+        chart.setOption(option);
+
+        // Handle click events
+        chart.on('click', function(params) {{
+            const idx = params.dataIndex;
+            const selectedDiv = document.getElementById('selected-info');
+            const contentDiv = document.getElementById('selected-content');
+
+            const time = new Date(timestamps[idx]).toLocaleString();
+            const equity = equityData[idx].toLocaleString(undefined, {{minimumFractionDigits: 2}});
+
+            let html = '<table class="position-table">';
+            html += '<tr><th>Time</th><th>Equity</th><th>Long Positions</th><th>Short Positions</th></tr>';
+            html += '<tr>';
+            html += '<td>' + time + '</td>';
+            html += '<td>' + equity + '</td>';
+            html += '<td>';
+            if (longPositions[idx] && longPositions[idx].length > 0) {{
+                longPositions[idx].forEach(p => {{
+                    html += '<span class="long-tag">' + p + '</span>';
+                }});
+            }} else {{
+                html += '-';
+            }}
+            html += '</td>';
+            html += '<td>';
+            if (shortPositions[idx] && shortPositions[idx].length > 0) {{
+                shortPositions[idx].forEach(p => {{
+                    html += '<span class="short-tag">' + p + '</span>';
+                }});
+            }} else {{
+                html += '-';
+            }}
+            html += '</td>';
+            html += '</tr></table>';
+
+            contentDiv.innerHTML = html;
+            selectedDiv.style.display = 'block';
+        }});
+
+        // Responsive
+        window.addEventListener('resize', function() {{
+            chart.resize();
+        }});
+    </script>
+</body>
+</html>'''
+
+        return html_template
