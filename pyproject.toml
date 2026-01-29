@@ -25,6 +25,8 @@ dependencies = [
     "tenacity>=8.0.0",  # Retry logic with exponential backoff
     # Factor framework dependencies
     "lark>=1.1.0",  # Expression parser for Alpha101-style factors
+    # Report enhancement
+    "quantstats>=0.0.64",  # QuantStats for enhanced backtest reports
 ]
 
 [project.optional-dependencies]

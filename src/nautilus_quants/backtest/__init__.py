@@ -6,6 +6,7 @@ See: config/backtest_factor.yaml for example usage.
 
 from nautilus_quants.backtest.config import (
     BacktestResult,
+    QuantStatsConfig,
     ReportConfig,
     TearsheetConfig,
 )
@@ -26,6 +27,7 @@ __all__ = [
     # Config dataclasses (project-specific)
     "ReportConfig",
     "TearsheetConfig",
+    "QuantStatsConfig",
     # Exceptions
     "BacktestError",
     "BacktestConfigError",

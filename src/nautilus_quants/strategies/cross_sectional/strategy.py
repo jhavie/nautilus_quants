@@ -22,10 +22,13 @@ import math
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from datetime import datetime
+
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.factors.types import FactorValues
@@ -44,8 +47,9 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
         List of instrument IDs to trade (e.g., ["BTCUSDT.BINANCE", "ETHUSDT.BINANCE"]).
     n_positions : int, default 10
         Number of instruments to hold on each side (long and short).
-    position_value : float, default 300.0
-        Position value per instrument in quote currency (USDT).
+    position_value : float | None, default None
+        Fixed position value per instrument in quote currency (USDT).
+        If None and monthly_position_update is True, calculated dynamically.
     rebalance_period : int, default 4
         Rebalance every N hours.
     composite_factor : str, default "composite"
@@ -58,17 +62,24 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
         Enable short positions.
     buffer_ratio : float, default 0.5
         Buffer threshold ratio (0.5 = median).
+    target_leverage : float, default 4.0
+        Target leverage for dynamic position sizing.
+        Formula: equity * target_leverage / total_positions = position_value
+    monthly_position_update : bool, default True
+        If True, update position value on the 1st of each month based on account equity.
     """
 
     instrument_ids: list[str]
     n_positions: int = 10
-    position_value: float = 300.0
+    position_value: float | None = None
     rebalance_period: int = 4
     composite_factor: str = "composite"
     bar_types: list[str] = []
     enable_long: bool = True
     enable_short: bool = True
     buffer_ratio: float = 0.5
+    target_leverage: float = 4.0
+    monthly_position_update: bool = True
 
 
 class CrossSectionalFactorStrategy(Strategy):
@@ -107,6 +118,10 @@ class CrossSectionalFactorStrategy(Strategy):
         # Accumulate composite factor values for current hour
         self._composite_values: dict[str, float] = {}
 
+        # Monthly position update state
+        self._current_month: int | None = None
+        self._monthly_position_value: float | None = None
+
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
         self.log.info(
@@ -141,15 +156,23 @@ class CrossSectionalFactorStrategy(Strategy):
             self.subscribe_bars(bar_type)
             self.log.debug(f"Subscribed to bars: {bar_type}")
 
-        self.subscribe_data(DataType(FactorValues), client_id=None)
+        self.subscribe_data(DataType(FactorValues))
         self.log.info("Subscribed to FactorValues Data")
 
-        self.log.info(
-            f"Strategy started: n_positions={self.config.n_positions}, "
-            f"position_value={self.config.position_value}, "
-            f"rebalance_period={self.config.rebalance_period}h, "
-            f"composite_factor={self.config.composite_factor}"
-        )
+        if self.config.monthly_position_update:
+            self.log.info(
+                f"Strategy started: n_positions={self.config.n_positions}, "
+                f"target_leverage={self.config.target_leverage}, "
+                f"monthly_position_update=True, "
+                f"rebalance_period={self.config.rebalance_period}h"
+            )
+        else:
+            self.log.info(
+                f"Strategy started: n_positions={self.config.n_positions}, "
+                f"position_value={self.config.position_value}, "
+                f"rebalance_period={self.config.rebalance_period}h, "
+                f"composite_factor={self.config.composite_factor}"
+            )
 
     def on_stop(self) -> None:
         """Actions to perform on strategy stop."""
@@ -178,6 +201,9 @@ class CrossSectionalFactorStrategy(Strategy):
         """
         if not isinstance(data, FactorValues):
             return
+
+        # Check for monthly position value update
+        self._update_monthly_position_value(data.ts_event)
 
         self._signal_count += 1
         factors = data.factors
@@ -305,6 +331,86 @@ class CrossSectionalFactorStrategy(Strategy):
                 f"Position ranks - Long: {long_ranks}, Short: {short_ranks}"
             )
 
+    def _update_monthly_position_value(self, ts_event: int) -> None:
+        """Update position value on the 1st of each month based on account equity."""
+        if not self.config.monthly_position_update:
+            return
+
+        # Convert nanoseconds to datetime
+        current_time = datetime.utcfromtimestamp(ts_event / 1_000_000_000)
+        current_month = current_time.month
+
+        # Skip if month hasn't changed
+        if self._current_month == current_month:
+            return
+
+        # Get venue from first instrument
+        if not self._instrument_ids:
+            return
+        venue = self._instrument_ids[0].venue
+
+        # Get current account equity
+        account = self.portfolio.account(venue)
+        if account is None:
+            return
+
+        balance = account.balance_total(Currency.from_str("USDT"))
+        if balance is None:
+            return
+        equity = float(balance.as_double())
+
+        # Safety check: skip update if equity is non-positive
+        if equity <= 0:
+            self.log.warning(
+                f"Monthly position update skipped [{current_time.strftime('%Y-%m')}]: "
+                f"equity={equity:.2f} (non-positive)"
+            )
+            self._current_month = current_month
+            return
+
+        # Calculate new position value: equity * leverage / total_positions
+        total_positions = self.config.n_positions * 2  # long + short
+        self._monthly_position_value = (equity * self.config.target_leverage) / total_positions
+
+        self._current_month = current_month
+        self.log.info(
+            f"Monthly position update [{current_time.strftime('%Y-%m')}]: "
+            f"equity={equity:.2f}, leverage={self.config.target_leverage}, "
+            f"new_position_value={self._monthly_position_value:.2f}"
+        )
+
+    def _get_position_value(self) -> float:
+        """Get the current position value for opening new positions."""
+        min_position_value = 100.0  # Minimum safe position value
+
+        # Priority: monthly calculated > config fixed > default calculation
+        if self.config.monthly_position_update and self._monthly_position_value is not None:
+            return max(self._monthly_position_value, min_position_value)
+
+        if self.config.position_value is not None:
+            return max(self.config.position_value, min_position_value)
+
+        # Fallback: calculate on-the-fly
+        if not self._instrument_ids:
+            return 2000.0  # Default fallback
+
+        venue = self._instrument_ids[0].venue
+        account = self.portfolio.account(venue)
+        if account is None:
+            return 2000.0
+
+        balance = account.balance_total(Currency.from_str("USDT"))
+        if balance is None:
+            return 2000.0
+        equity = float(balance.as_double())
+
+        if equity <= 0:
+            return min_position_value
+
+        total_positions = self.config.n_positions * 2
+        calculated = (equity * self.config.target_leverage) / total_positions
+        return max(calculated, min_position_value)
+
     def _open_position(self, instrument_id_str: str, side: OrderSide) -> bool:
         """Open position with specified side."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
@@ -317,7 +423,8 @@ class CrossSectionalFactorStrategy(Strategy):
         if price is None or price <= 0:
             return False
 
-        raw_qty = Decimal(str(self.config.position_value / price))
+        position_value = self._get_position_value()
+        raw_qty = Decimal(str(position_value / price))
         qty = instrument.make_qty(raw_qty)
 
         order = self.order_factory.market(
