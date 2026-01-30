@@ -1,0 +1,143 @@
+# Factor Framework Configuration
+# This file defines factors using Alpha101-style expressions
+
+metadata:
+  name: "nautilus_quants_factors"
+  version: "1.0"
+  description: "Factor definitions for quantitative trading"
+
+# Global parameters (can be referenced in expressions)
+parameters:
+  # Time-series lookback periods
+  short_period: 5
+  medium_period: 20
+  long_period: 60
+  
+  # Cross-sectional parameters
+  adv_period: 20  # Average daily volume period
+  
+  # Breakout parameters
+  breakout_period: 30
+  sma_period: 200
+
+# Reusable variable definitions
+variables:
+  # Basic price derivatives
+  returns: "delta(close, 1) / delay(close, 1)"
+  log_returns: "log(close / delay(close, 1))"
+  
+  # Volume metrics
+  adv20: "ts_mean(volume, adv_period)"
+  volume_ratio: "volume / adv20"
+  
+  # SMA for trend filter
+  sma: "ts_mean(close, sma_period)"
+  
+  # ============================================
+  # Breakout Signal Components
+  # ============================================
+  
+  # Price breakout conditions (WorldQuant ts_argmax semantics)
+  # ts_argmax returns: 1 = oldest, window = newest (today)
+  # So ts_argmax(close, 31) == 31 means today is the max of last 31 bars
+  price_new_high: "ts_argmax(close, breakout_period + 1) == breakout_period + 1"
+  price_new_low: "ts_argmin(close, breakout_period + 1) == breakout_period + 1"
+  
+  # Volume breakout condition (same for both long and short)
+  volume_breakout: "ts_argmax(volume, breakout_period + 1) == breakout_period + 1"
+  
+  # Trend filter conditions
+  above_sma: "close > sma"
+  below_sma: "close < sma"
+  
+  # Combined signals
+  long_signal: "price_new_high * volume_breakout * above_sma"
+  short_signal: "price_new_low * volume_breakout * below_sma"
+
+# Factor definitions
+factors:
+  # ============================================
+  # Breakout Factor (Validation Target)
+  # ============================================
+  
+  alpha_breakout:
+    # 使用 WorldQuant ts_argmax/ts_argmin 语义实现双向突破检测:
+    #
+    # 做多条件 (返回 +1):
+    #   - price_new_high: 今天的 close 严格大于过去 30 天
+    #   - volume_breakout: 今天的 volume 严格大于过去 30 天
+    #   - above_sma: 收盘价在均线之上
+    #
+    # 做空条件 (返回 -1):
+    #   - price_new_low: 今天的 close 严格小于过去 30 天
+    #   - volume_breakout: 今天的 volume 严格大于过去 30 天 (放量)
+    #   - below_sma: 收盘价在均线之下
+    #
+    # 表达式逻辑: long_signal - short_signal
+    expression: "long_signal - short_signal"
+    description: "量价突破信号: +1=做多(创新高), -1=做空(创新低), 0=无信号"
+    category: "breakout"
+
+  # ============================================
+  # Alpha101-Style Factors (Commented Out)
+  # Uncomment to enable specific factors
+  # ============================================
+  
+  # alpha001:
+  #   expression: "-1 * ts_rank(ts_argmax(close, 30), 5)"
+  #   description: "Rank of argmax position"
+  #   category: "momentum"
+  
+  # alpha002:
+  #   expression: "-1 * ts_rank(delta(close, 2), 6)"
+  #   description: "Ranked price change"
+  #   category: "momentum"
+  
+  # alpha003:
+  #   expression: "-1 * ts_rank(ts_rank(low, 9), 7)"
+  #   description: "Double rank of low"
+  #   category: "reversion"
+  
+  # alpha004:
+  #   expression: "ts_rank(volume, 20)"
+  #   description: "Volume rank"
+  #   category: "volume"
+  
+  # alpha005:
+  #   expression: "ts_rank(close - ts_mean(close, 10), 5)"
+  #   description: "Mean deviation rank"
+  #   category: "momentum"
+  
+  # alpha006:
+  #   expression: "-1 * delta(close, 3)"
+  #   description: "Negative 3-day change"
+  #   category: "reversion"
+  
+  # alpha007:
+  #   expression: "ts_rank(abs(delta(close, 7)), 20)"
+  #   description: "Volatility rank"
+  #   category: "volatility"
+  
+  # alpha008:
+  #   expression: "ts_mean(returns, 5)"
+  #   description: "5-day average returns"
+  #   category: "momentum"
+  
+  # alpha009:
+  #   expression: "delta(close, 1)"
+  #   description: "1-day price change"
+  #   category: "momentum"
+  
+  # alpha010:
+  #   expression: "ts_rank(delta(close, 1), 6)"
+  #   description: "Ranked daily change"
+  #   category: "momentum"
+
+# Performance settings
+performance:
+  # Maximum computation time per bar (milliseconds)
+  max_compute_time_ms: 1.0
+  # Enable performance logging
+  enable_timing: true
+  # Warning threshold (milliseconds)
+  warning_threshold_ms: 0.5

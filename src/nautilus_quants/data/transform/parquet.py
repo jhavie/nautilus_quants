@@ -186,6 +186,8 @@ def csv_to_bars(
     price_fmt = f"{{:.{price_precision}f}}"
 
     for _, row in df.iterrows():
+        # Format prices to 2 decimal places to match instrument.price_precision=2
+        # This ensures consistency: CSV float "617.5" -> "617.50" -> precision=2
         bar = Bar(
             bar_type=bar_type,
             open=Price.from_str(price_fmt.format(row["open"])),
