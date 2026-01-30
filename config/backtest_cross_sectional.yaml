@@ -137,7 +137,7 @@ engine:
 
 # Project-specific configuration
 report:
-  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-006/logs/backtest_runs"
+  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-007/logs/backtest_runs"
   formats:
     - csv
     - html
@@ -169,3 +169,9 @@ report:
       - drawdown
       - rolling_sharpe
       - rolling_volatility
+  position_viz:
+    enabled: true
+    title: "Cross-Sectional Strategy Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "4h"

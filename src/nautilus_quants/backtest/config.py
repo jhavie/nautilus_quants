@@ -80,6 +80,21 @@ class QuantStatsConfig:
 
 
 @dataclass(frozen=True)
+class PositionVisualizationConfig:
+    """Position visualization configuration for ECharts HTML report.
+
+    Generates an interactive HTML chart showing equity curve and position timeline
+    with long/short position details on hover.
+    """
+
+    enabled: bool = True  # Default enabled
+    title: str = "Position Timeline"
+    output_subdir: str = "echarts"  # Subdirectory name, outputs to {output_dir}/{output_subdir}/
+    chart_height: int = 500
+    interval: str = "4h"  # Sampling interval, default 4 hours
+
+
+@dataclass(frozen=True)
 class ReportConfig:
     """Report generation configuration."""
 
@@ -87,6 +102,7 @@ class ReportConfig:
     formats: list[str] = field(default_factory=lambda: ["csv", "html"])
     tearsheet: TearsheetConfig | None = None
     quantstats: QuantStatsConfig | None = None
+    position_viz: PositionVisualizationConfig | None = None
 
 
 @dataclass
@@ -112,6 +128,11 @@ class BacktestResult:
     def tearsheet_path(self) -> Path | None:
         """Path to HTML tearsheet if generated."""
         return self.reports.get("tearsheet")
+
+    @property
+    def position_viz_path(self) -> Path | None:
+        """Path to ECharts position visualization if generated."""
+        return self.reports.get("position_viz")
 
     @property
     def total_pnl(self) -> float:
