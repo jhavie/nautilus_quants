@@ -446,6 +446,9 @@ def transform(
             for file_path in files:
                 click.echo(f"Transforming {file_path.name}...")
 
+                # Get raw data path for precision lookup
+                raw_data_path = Path(config.paths.raw_data) / "binance"
+
                 try:
                     result = transform_to_parquet(
                         input_path=file_path,
@@ -453,6 +456,9 @@ def transform(
                         symbol=sym,
                         timeframe=tf,
                         merge=merge,
+                        raw_data_path=raw_data_path,
+                        maker_fee=config.transform.maker_fee,
+                        taker_fee=config.transform.taker_fee,
                     )
                     results.append(result)
 
@@ -684,6 +690,7 @@ def run(
     step_start = datetime.now()
     proc_dir = Path(config.paths.processed_data) / "binance"
     cat_path = Path(config.paths.catalog)
+    raw_dir = Path(config.paths.raw_data) / "binance"
 
     transform_results = []
     has_errors = False
@@ -702,6 +709,9 @@ def run(
                         symbol=sym,
                         timeframe=tf,
                         merge=config.transform.merge_files,
+                        raw_data_path=raw_dir,
+                        maker_fee=config.transform.maker_fee,
+                        taker_fee=config.transform.taker_fee,
                     )
                     transform_results.append(result)
                     if result.success:

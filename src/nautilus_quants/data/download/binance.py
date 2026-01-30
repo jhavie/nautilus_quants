@@ -12,6 +12,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
+import json
+
 from binance import AsyncClient
 
 from nautilus_quants.data.checkpoint import CheckpointManager
@@ -362,6 +364,11 @@ class BinanceDownloader:
         client = await AsyncClient.create()
 
         try:
+            # Fetch and save exchange info for precision lookup
+            await _fetch_and_save_exchange_info(
+                client, symbol, self.output_dir, market_type
+            )
+
             # Get klines generator based on market type
             end_ms = _date_to_ms(end_date) + 86400000 - 1  # End of day
 
@@ -532,3 +539,47 @@ async def download_klines(
         resume=resume,
         on_progress=on_progress,
     )
+
+
+async def _fetch_and_save_exchange_info(
+    client: AsyncClient,
+    symbol: str,
+    output_dir: Path,
+    market_type: Literal["spot", "futures"],
+) -> None:
+    """Fetch exchange info and save symbol precision to JSON.
+
+    Args:
+        client: Binance async client
+        symbol: Trading pair symbol
+        output_dir: Base output directory
+        market_type: "spot" or "futures"
+    """
+    exchange_info_dir = output_dir / ".exchange_info"
+    exchange_info_dir.mkdir(parents=True, exist_ok=True)
+    precision_file = exchange_info_dir / f"{symbol}_precision.json"
+
+    # Skip if already exists
+    if precision_file.exists():
+        return
+
+    try:
+        if market_type == "futures":
+            info = await client.futures_exchange_info()
+        else:
+            info = await client.get_exchange_info()
+
+        # Find symbol info
+        for sym_info in info.get("symbols", []):
+            if sym_info.get("symbol") == symbol:
+                precision_data = {
+                    "symbol": symbol,
+                    "pricePrecision": sym_info.get("pricePrecision", 8),
+                    "quantityPrecision": sym_info.get("quantityPrecision", 8),
+                }
+                with open(precision_file, "w") as f:
+                    json.dump(precision_data, f, indent=2)
+                break
+    except Exception:
+        # Silently ignore errors - will use default precision
+        pass
