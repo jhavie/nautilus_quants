@@ -430,11 +430,11 @@
             });
 
             html += `<tr class="total-row long">
-                <td colspan="5"><strong>Long Total</strong></td>
+                <td colspan="5"><strong>Long Total(${longPositions.length})</strong></td>
                 <td><strong>${(entry.long_total_value || 0).toFixed(2)}</strong></td>
             </tr>`;
             html += `<tr class="total-row short">
-                <td colspan="5"><strong>Short Total</strong></td>
+                <td colspan="5"><strong>Short Total(${shortPositions.length})</strong></td>
                 <td><strong>${(entry.short_total_value || 0).toFixed(2)}</strong></td>
             </tr>`;
 
