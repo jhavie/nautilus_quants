@@ -82,8 +82,8 @@ class FundingRateMonitor(Strategy):
     - Trade based on funding rate arbitrage
     - Calculate expected funding costs
 
-    Note: FundingRateUpdate data is automatically received via on_data
-    when added to the backtest engine.
+    Note: Must subscribe to funding rates via subscribe_funding_rates()
+    and override on_funding_rate() to receive updates.
     """
 
     def __init__(self, config: FundingRateMonitorConfig) -> None:
@@ -96,20 +96,20 @@ class FundingRateMonitor(Strategy):
         """Called when strategy starts."""
         self.log.info("FundingRateMonitor started")
         self.log.info(f"Monitoring instrument: {self._instrument_id}")
-        # FundingRateUpdate data is received automatically when added to engine
+        # Subscribe to funding rate updates
+        self.subscribe_funding_rates(self._instrument_id)
 
-    def on_data(self, data) -> None:
-        """Called when any custom data is received."""
-        if isinstance(data, FundingRateUpdate):
-            self._funding_updates_count += 1
+    def on_funding_rate(self, funding_rate: FundingRateUpdate) -> None:
+        """Called when a funding rate update is received."""
+        self._funding_updates_count += 1
 
-            # Only log significant rate changes or first update
-            if self._last_rate is None or data.rate != self._last_rate:
-                self.log.info(
-                    f"Funding rate update: {data.rate:.8f} "
-                    f"(ts_event={data.ts_event})"
-                )
-                self._last_rate = data.rate
+        # Only log significant rate changes or first update
+        if self._last_rate is None or funding_rate.rate != self._last_rate:
+            self.log.info(
+                f"Funding rate update: {funding_rate.rate:.8f} "
+                f"(ts_event={funding_rate.ts_event})"
+            )
+            self._last_rate = funding_rate.rate
 
     def on_stop(self) -> None:
         """Called when strategy stops."""
