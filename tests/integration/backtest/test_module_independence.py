@@ -13,12 +13,13 @@ class TestModuleIndependence:
         for mod in modules_to_remove:
             del sys.modules[mod]
 
-        # Import only backtest
-        from nautilus_quants.backtest import BacktestConfig, BacktestRunner
+        # Import only backtest - now uses Nautilus native classes plus project-specific ones
+        from nautilus_quants.backtest import BacktestResult, ReportConfig, ReportGenerator
 
         # Verify basic classes are available
-        assert BacktestRunner is not None
-        assert BacktestConfig is not None
+        assert ReportGenerator is not None
+        assert ReportConfig is not None
+        assert BacktestResult is not None
 
         # Verify no other nautilus_quants modules loaded (except strategies for registry)
         loaded = [k for k in sys.modules if k.startswith("nautilus_quants")]
@@ -41,18 +42,19 @@ class TestModuleIndependence:
         for mod in modules_to_remove:
             del sys.modules[mod]
 
-        # Import only config
+        # Import only config - now uses project-specific report configs
+        # Note: BacktestDataConfig, StrategyConfig, VenueConfig removed in favor of Nautilus native
         from nautilus_quants.backtest.config import (
-            BacktestConfig,
-            BacktestDataConfig,
-            StrategyConfig,
-            VenueConfig,
+            BacktestResult,
+            QuantStatsConfig,
+            ReportConfig,
+            TearsheetConfig,
         )
 
-        assert BacktestConfig is not None
-        assert BacktestDataConfig is not None
-        assert StrategyConfig is not None
-        assert VenueConfig is not None
+        assert BacktestResult is not None
+        assert ReportConfig is not None
+        assert TearsheetConfig is not None
+        assert QuantStatsConfig is not None
 
     def test_utilities_import_independently(self) -> None:
         """Verify utility modules can be imported independently."""
