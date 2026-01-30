@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title}</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #ffffff;
+            color: #333333;
+            padding: 20px;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+        h1 { font-size: 24px; font-weight: 600; margin-bottom: 20px; color: #333333; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .stat-label { font-size: 12px; color: #666666; margin-bottom: 5px; }
+        .stat-value { font-size: 18px; font-weight: 600; color: #333333; }
+        .stat-value.positive { color: #28a745; }
+        .stat-value.negative { color: #dc3545; }
+        .charts-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        #bar-chart {
+            flex: 1;
+            height: ${chart_height}px;
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+        }
+        #pie-chart {
+            flex: 1;
+            height: ${chart_height}px;
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+        }
+        #equity-chart {
+            width: 100%;
+            height: 280px;
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .timestamp-display {
+            text-align: center;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            color: #333;
+        }
+        .table-container {
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #e9ecef; }
+        th { background: #f8f9fa; font-weight: 600; font-size: 12px; color: #666666; text-transform: uppercase; }
+        td { font-size: 14px; }
+        .long { color: #28a745; font-weight: bold; }
+        .short { color: #dc3545; font-weight: bold; }
+        .total-row { background: #f8f9fa; font-weight: bold; }
+        .total-row.long td { color: #28a745; }
+        .total-row.short td { color: #dc3545; }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            font-size: 12px;
+            color: #999999;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>${title}</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Starting Equity</div>
+                <div class="stat-value">${start_equity}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Ending Equity</div>
+                <div class="stat-value">${end_equity}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total PnL</div>
+                <div class="stat-value ${pnl_class}">${pnl}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Return</div>
+                <div class="stat-value ${pnl_pct_class}">${pnl_pct}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Max Equity</div>
+                <div class="stat-value">${max_equity}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Min Equity</div>
+                <div class="stat-value">${min_equity}</div>
+            </div>
+        </div>
+
+        <div id="equity-chart"></div>
+
+        <div class="timestamp-display" id="currentTimestamp">Click on chart to select time point</div>
+
+        <div class="charts-row">
+            <div id="bar-chart"></div>
+            <div id="pie-chart"></div>
+        </div>
+
+        <div class="table-container">
+            <table id="positionTable">
+                <thead>
+                    <tr>
+                        <th>Rank (Cur/Entry)</th>
+                        <th>Composite (Cur/Entry)</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Opened</th>
+                        <th>Value (USDT)</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+
+        <div class="footer">
+            Generated by Nautilus Quants &bull; Powered by ECharts
+        </div>
+    </div>
+
+    <script>
+        const data = ${data_json};
+
+        // Initialize charts
+        const equityChart = echarts.init(document.getElementById('equity-chart'));
+        const barChart = echarts.init(document.getElementById('bar-chart'));
+        const pieChart = echarts.init(document.getElementById('pie-chart'));
+
+        // Calculate max values for color scaling
+        const maxLong = Math.max(...data.longValues.filter(v => v > 0), 1);
+        const maxShort = Math.max(...data.shortValues.filter(v => v > 0), 1);
+
+        // Color interpolation function
+        function getLongColor(value, maxVal) {
+            const ratio = Math.min(value / maxVal, 1);
+            const lightness = 75 - ratio * 40;
+            return `hsl(140, 60%, ${lightness}%)`;
+        }
+        function getShortColor(value, maxVal) {
+            const ratio = Math.min(value / maxVal, 1);
+            const lightness = 75 - ratio * 40;
+            return `hsl(0, 70%, ${lightness}%)`;
+        }
+
+        // Format timestamp to show date and hour
+        function formatDateTime(isoString) {
+            const d = new Date(isoString);
+            const month = (d.getMonth() + 1).toString().padStart(2, '0');
+            const day = d.getDate().toString().padStart(2, '0');
+            const hour = d.getHours().toString().padStart(2, '0');
+            return `${month}/${day} ${hour}:00`;
+        }
+
+        // Pre-format timestamps for axis labels
+        const formattedTimestamps = data.timestamps.map(t => formatDateTime(t));
+
+        // Equity chart - simple line chart
+        equityChart.setOption({
+            title: { text: 'Equity Curve', left: 'center', textStyle: { fontSize: 14 } },
+            tooltip: {
+                trigger: 'axis',
+                formatter: function(params) {
+                    const p = params[0];
+                    const idx = p.dataIndex;
+                    const fullTime = new Date(data.timestamps[idx]).toLocaleString();
+                    return fullTime + '<br/>Equity: ' + p.value.toFixed(2) + ' USDT';
+                }
+            },
+            grid: { left: '3%', right: '4%', bottom: '15%', top: '40', containLabel: true },
+            xAxis: {
+                type: 'category',
+                data: formattedTimestamps,
+                axisLabel: { rotate: 45 }
+            },
+            yAxis: { type: 'value', name: 'Equity' },
+            dataZoom: [
+                { type: 'inside', start: 0, end: 100 },
+                { type: 'slider', start: 0, end: 100, bottom: 5, height: 15 }
+            ],
+            series: [
+                {
+                    name: 'Equity',
+                    type: 'line',
+                    data: data.equityData,
+                    smooth: true,
+                    lineStyle: { width: 2, color: '#1890ff' },
+                    areaStyle: {
+                        color: {
+                            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                            colorStops: [
+                                { offset: 0, color: 'rgba(24, 144, 255, 0.3)' },
+                                { offset: 1, color: 'rgba(24, 144, 255, 0.05)' }
+                            ]
+                        }
+                    },
+                    itemStyle: { color: '#1890ff' }
+                }
+            ]
+        });
+
+        // Bar chart with gradient colors based on value
+        barChart.setOption({
+            title: { text: 'Position Values', left: 'center', textStyle: { fontSize: 14 } },
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                formatter: function(params) {
+                    const idx = params[0].dataIndex;
+                    const fullTime = new Date(data.timestamps[idx]).toLocaleString();
+                    let result = fullTime + '<br/>';
+                    params.forEach(p => {
+                        result += p.marker + p.seriesName + ': ' + Math.abs(p.value).toFixed(2) + ' USDT<br/>';
+                    });
+                    return result;
+                }
+            },
+            legend: { data: ['Long', 'Short'], top: 25 },
+            grid: { left: '3%', right: '4%', bottom: '15%', top: '60', containLabel: true },
+            xAxis: {
+                type: 'category',
+                data: formattedTimestamps,
+                axisLabel: { rotate: 45, fontSize: 10 }
+            },
+            yAxis: { type: 'value', name: 'Value (USDT)' },
+            dataZoom: [
+                { type: 'inside', start: 0, end: 100 },
+                { type: 'slider', start: 0, end: 100, bottom: 5, height: 15 }
+            ],
+            series: [
+                {
+                    name: 'Long',
+                    type: 'bar',
+                    data: data.longValues.map(v => ({
+                        value: v,
+                        itemStyle: { color: getLongColor(v, maxLong) }
+                    }))
+                },
+                {
+                    name: 'Short',
+                    type: 'bar',
+                    data: data.shortValues.map(v => ({
+                        value: -v,
+                        itemStyle: { color: getShortColor(v, maxShort) }
+                    }))
+                }
+            ]
+        });
+
+        // Update pie chart and table for selected index
+        let selectedIndex = data.timestamps.length - 1;
+
+        function updatePieAndTable(index) {
+            selectedIndex = index;
+            const entry = data.timelineData[index];
+            const positions = entry.positions || {};
+            document.getElementById('currentTimestamp').textContent =
+                'Selected: ' + new Date(entry.timestamp).toLocaleString();
+
+            // Separate long and short positions, sort by value descending
+            const longPositions = Object.entries(positions)
+                .filter(([_, info]) => info.value > 0 && info.side === 'LONG')
+                .sort((a, b) => b[1].value - a[1].value);
+            const shortPositions = Object.entries(positions)
+                .filter(([_, info]) => info.value > 0 && info.side === 'SHORT')
+                .sort((a, b) => b[1].value - a[1].value);
+
+            // Find max values for color scaling in pie
+            const maxLongPie = Math.max(...longPositions.map(([_, info]) => info.value), 1);
+            const maxShortPie = Math.max(...shortPositions.map(([_, info]) => info.value), 1);
+
+            // Color palette for outer ring symbols (distinct colors)
+            const longColors = ['#2ecc71', '#27ae60', '#1abc9c', '#16a085', '#3498db', '#2980b9', '#9b59b6', '#8e44ad', '#1e8449', '#117a65'];
+            const shortColors = ['#e74c3c', '#c0392b', '#e67e22', '#d35400', '#f39c12', '#f1c40f', '#e91e63', '#9c27b0', '#ff5722', '#795548'];
+
+            // Build sunburst data: inner ring Long/Short, outer ring symbols
+            const sunburstData = [];
+
+            if (longPositions.length > 0) {
+                const longChildren = longPositions.map(([symbol, info], idx) => ({
+                    name: symbol,
+                    value: info.value,
+                    itemStyle: { color: longColors[idx % longColors.length] }
+                }));
+                sunburstData.push({
+                    name: 'Long',
+                    itemStyle: { color: '#28a745' },
+                    children: longChildren
+                });
+            }
+
+            if (shortPositions.length > 0) {
+                const shortChildren = shortPositions.map(([symbol, info], idx) => ({
+                    name: symbol,
+                    value: info.value,
+                    itemStyle: { color: shortColors[idx % shortColors.length] }
+                }));
+                sunburstData.push({
+                    name: 'Short',
+                    itemStyle: { color: '#dc3545' },
+                    children: shortChildren
+                });
+            }
+
+            pieChart.setOption({
+                title: { text: 'Position Distribution', left: 'center', textStyle: { fontSize: 14 } },
+                tooltip: {
+                    trigger: 'item',
+                    formatter: function(params) {
+                        if (params.data.children) {
+                            return params.name + ': ' + params.value.toFixed(2) + ' USDT';
+                        }
+                        return params.name + ': ' + params.value.toFixed(2) + ' USDT (' + (params.percent || 0).toFixed(1) + '%)';
+                    }
+                },
+                series: [{
+                    type: 'sunburst',
+                    data: sunburstData,
+                    radius: ['10%', '60%'],
+                    sort: null,
+                    emphasis: {
+                        focus: 'ancestor'
+                    },
+                    levels: [
+                        {},
+                        {
+                            r0: '10%',
+                            r: '35%',
+                            itemStyle: { borderWidth: 2 },
+                            label: {
+                                rotate: 'tangential',
+                                fontSize: 11,
+                                fontWeight: 'bold'
+                            }
+                        },
+                        {
+                            r0: '35%',
+                            r: '60%',
+                            label: {
+                                position: 'outside',
+                                padding: 3,
+                                fontSize: 9
+                            },
+                            itemStyle: { borderWidth: 1 }
+                        }
+                    ]
+                }]
+            }, true);
+
+            // Table update - sorted by current_rank, then by ts_opened (earlier first)
+            const tbody = document.getElementById('tableBody');
+            let html = '';
+            // Combine all positions and sort by current_rank, then by open time
+            const allPositions = [...longPositions, ...shortPositions];
+            const sortedPositions = allPositions.sort((a, b) => {
+                const rankA = a[1].current_rank;
+                const rankB = b[1].current_rank;
+                // null ranks go to end
+                if (rankA === null && rankB === null) {
+                    // Both null rank, sort by ts_opened
+                    const tsA = a[1].ts_opened || '';
+                    const tsB = b[1].ts_opened || '';
+                    return tsA.localeCompare(tsB);
+                }
+                if (rankA === null) return 1;
+                if (rankB === null) return -1;
+                // Same rank, sort by ts_opened (earlier first)
+                if (rankA === rankB) {
+                    const tsA = a[1].ts_opened || '';
+                    const tsB = b[1].ts_opened || '';
+                    return tsA.localeCompare(tsB);
+                }
+                return rankA - rankB;
+            });
+
+            sortedPositions.forEach(([symbol, info]) => {
+                const sideClass = info.side === 'LONG' ? 'long' : 'short';
+                // Display as current_rank(entry_rank)
+                const entryRank = info.entry_rank !== null && info.entry_rank !== undefined ? info.entry_rank : '-';
+                const currentRank = info.current_rank !== null && info.current_rank !== undefined ? info.current_rank : '-';
+                const rankDisplay = currentRank !== '-' || entryRank !== '-' ? `${currentRank}(${entryRank})` : '-';
+                // Display as current_composite(entry_composite)
+                const entryComp = info.entry_composite !== null && info.entry_composite !== undefined ? info.entry_composite.toFixed(2) : '-';
+                const currentComp = info.current_composite !== null && info.current_composite !== undefined ? info.current_composite.toFixed(2) : '-';
+                const compDisplay = currentComp !== '-' || entryComp !== '-' ? `${currentComp}(${entryComp})` : '-';
+                const openedDisplay = info.ts_opened ? new Date(info.ts_opened).toLocaleString() : '-';
+                html += `<tr>
+                    <td>${rankDisplay}</td>
+                    <td>${compDisplay}</td>
+                    <td>${symbol}</td>
+                    <td class="${sideClass}">${info.side}</td>
+                    <td>${openedDisplay}</td>
+                    <td>${info.value.toFixed(2)}</td>
+                </tr>`;
+            });
+
+            html += `<tr class="total-row long">
+                <td colspan="5"><strong>Long Total(${longPositions.length})</strong></td>
+                <td><strong>${(entry.long_total_value || 0).toFixed(2)}</strong></td>
+            </tr>`;
+            html += `<tr class="total-row short">
+                <td colspan="5"><strong>Short Total(${shortPositions.length})</strong></td>
+                <td><strong>${(entry.short_total_value || 0).toFixed(2)}</strong></td>
+            </tr>`;
+
+            tbody.innerHTML = html;
+        }
+
+        // Initial update
+        updatePieAndTable(selectedIndex);
+
+        // Click handlers
+        equityChart.on('click', function(params) {
+            if (params.dataIndex !== undefined) {
+                updatePieAndTable(params.dataIndex);
+            } else if (params.data && params.data[0] !== undefined) {
+                updatePieAndTable(params.data[0]);
+            }
+        });
+        barChart.on('click', function(params) {
+            if (params.dataIndex !== undefined) {
+                updatePieAndTable(params.dataIndex);
+            }
+        });
+
+        // Connect charts for synchronized zoom
+        echarts.connect([equityChart, barChart]);
+
+        // Responsive
+        window.addEventListener('resize', function() {
+            equityChart.resize();
+            barChart.resize();
+            pieChart.resize();
+        });
+    </script>
+</body>
+</html>
