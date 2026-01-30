@@ -7,6 +7,7 @@ Uses Nautilus Trader's native ParquetDataCatalog for compatibility.
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from nautilus_trader.model.currencies import USDT
@@ -16,6 +17,8 @@ from nautilus_trader.model.identifiers import InstrumentId, Symbol, Venue
 from nautilus_trader.model.instruments import CryptoPerpetual
 from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
+
+from nautilus_quants.data.transform.instrument_cache import InstrumentCache
 
 
 @dataclass
@@ -52,6 +55,7 @@ def _create_instrument(
     symbol: str,
     venue: str = "BINANCE",
     ts_init: int = 0,
+    exchange_info: dict[str, InstrumentCache] | None = None,
 ) -> CryptoPerpetual:
     """Create a CryptoPerpetual instrument for the catalog.
 
@@ -59,10 +63,34 @@ def _create_instrument(
         symbol: Trading pair symbol (e.g., "BTCUSDT")
         venue: Exchange venue name
         ts_init: Initialization timestamp in nanoseconds
+        exchange_info: Optional dict of symbol -> InstrumentPrecision from API/cache
 
     Returns:
-        CryptoPerpetual instrument
+        CryptoPerpetual instrument with correct precision
     """
+    # Get precision from API/cache data or infer from symbol
+    if exchange_info and symbol in exchange_info:
+        info = exchange_info[symbol]
+        price_precision = info.price_precision
+        size_precision = info.quantity_precision
+        price_increment = Price.from_str(info.tick_size)
+        size_increment = Quantity.from_str(info.step_size)
+        min_price = Price.from_str(info.min_price)
+        max_price = Price.from_str(info.max_price)
+        min_qty = Quantity.from_str(info.min_qty)
+        max_qty = Quantity.from_str(info.max_qty)
+    else:
+        # Fallback: infer precision from symbol name
+        info = InstrumentCache.infer_precision_from_symbol(symbol)
+        price_precision = info.price_precision
+        size_precision = info.quantity_precision
+        price_increment = Price.from_str(info.tick_size)
+        size_increment = Quantity.from_str(info.step_size)
+        min_price = Price.from_str(info.min_price)
+        max_price = Price.from_str(info.max_price)
+        min_qty = Quantity.from_str(info.min_qty)
+        max_qty = Quantity.from_str(info.max_qty)
+
     return CryptoPerpetual(
         instrument_id=InstrumentId(symbol=Symbol(symbol), venue=Venue(venue)),
         raw_symbol=Symbol(symbol),
@@ -70,16 +98,16 @@ def _create_instrument(
         quote_currency=USDT,
         settlement_currency=USDT,
         is_inverse=False,
-        price_precision=2,
-        size_precision=3,
-        price_increment=Price.from_str("0.01"),
-        size_increment=Quantity.from_str("0.001"),
-        max_quantity=Quantity.from_str("10000"),
-        min_quantity=Quantity.from_str("0.001"),
+        price_precision=price_precision,
+        size_precision=size_precision,
+        price_increment=price_increment,
+        size_increment=size_increment,
+        max_quantity=max_qty,
+        min_quantity=min_qty,
         max_notional=Money(1_000_000, USDT),
         min_notional=Money(10, USDT),
-        max_price=Price.from_str("1000000"),
-        min_price=Price.from_str("0.01"),
+        max_price=max_price,
+        min_price=min_price,
         margin_init=Decimal("0.05"),
         margin_maint=Decimal("0.025"),
         maker_fee=Decimal("0.0002"),
@@ -135,6 +163,7 @@ def csv_to_bars(
     csv_path: Path | str,
     symbol: str,
     timeframe: str,
+    price_precision: int = 2,
 ) -> list[Bar]:
     """Convert CSV data to Nautilus Bar objects.
 
@@ -142,6 +171,7 @@ def csv_to_bars(
         csv_path: Path to processed CSV file
         symbol: Trading pair symbol
         timeframe: K-line interval
+        price_precision: Number of decimal places for price formatting
 
     Returns:
         List of Bar objects
@@ -152,14 +182,17 @@ def csv_to_bars(
     bar_type = _get_bar_type(symbol, timeframe)
     bars = []
 
+    # Dynamic format string based on price precision, e.g., ":.7f" for 1000PEPE
+    price_fmt = f"{{:.{price_precision}f}}"
+
     for _, row in df.iterrows():
         bar = Bar(
             bar_type=bar_type,
-            open=Price.from_str(str(row["open"])),
-            high=Price.from_str(str(row["high"])),
-            low=Price.from_str(str(row["low"])),
-            close=Price.from_str(str(row["close"])),
-            volume=Quantity.from_str(str(row["volume"])),
+            open=Price.from_str(price_fmt.format(row["open"])),
+            high=Price.from_str(price_fmt.format(row["high"])),
+            low=Price.from_str(price_fmt.format(row["low"])),
+            close=Price.from_str(price_fmt.format(row["close"])),
+            volume=Quantity.from_str(f"{row['volume']:.3f}"),
             ts_event=int(row["timestamp"]) * 1_000_000,  # Convert ms to ns
             ts_init=int(row["timestamp"]) * 1_000_000,
         )
@@ -174,8 +207,11 @@ def transform_to_parquet(
     symbol: str,
     timeframe: str,
     merge: bool = True,
+    exchange_info: dict[str, Any] | None = None,
 ) -> TransformResult:
     """Transform processed CSV to Nautilus Parquet format.
+
+    Automatically fetches instrument precision from Binance API with 24h cache.
 
     Args:
         input_path: Path to processed CSV file
@@ -183,6 +219,7 @@ def transform_to_parquet(
         symbol: Trading pair symbol
         timeframe: K-line interval
         merge: Merge with existing data if present
+        exchange_info: Optional pre-fetched exchange info (for batch processing)
 
     Returns:
         TransformResult with output path and row count
@@ -191,8 +228,24 @@ def transform_to_parquet(
     catalog_path = Path(catalog_path)
 
     try:
-        # Load and convert to bars
-        bars = csv_to_bars(input_path, symbol, timeframe)
+        # Get exchange info with 24h cache (or use provided info)
+        if exchange_info is None:
+            cache = InstrumentCache(catalog_path)
+            exchange_info = cache.get_or_fetch_exchange_info(market_type="futures")
+
+        # Create instrument with correct precision
+        instrument = _create_instrument(
+            symbol=symbol,
+            venue="BINANCE",
+            ts_init=0,  # Will be updated from bars
+            exchange_info=exchange_info,
+        )
+
+        # Load and convert to bars with correct precision
+        bars = csv_to_bars(
+            input_path, symbol, timeframe,
+            price_precision=instrument.price_precision
+        )
 
         if not bars:
             return TransformResult(
@@ -209,11 +262,12 @@ def transform_to_parquet(
         catalog_path.mkdir(parents=True, exist_ok=True)
         catalog = ParquetDataCatalog(str(catalog_path))
 
-        # Write instrument definition first (required for BacktestNode)
+        # Recreate instrument with correct ts_init from first bar
         instrument = _create_instrument(
             symbol=symbol,
             venue="BINANCE",
             ts_init=bars[0].ts_init,
+            exchange_info=exchange_info,
         )
         catalog.write_data([instrument])
 
