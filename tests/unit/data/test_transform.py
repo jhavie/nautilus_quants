@@ -15,6 +15,7 @@ from nautilus_quants.data.transform.parquet import (
     TransformResult,
     TIMEFRAME_TO_STEP,
     _get_bar_type,
+    _create_instrument,
 )
 
 
@@ -80,7 +81,9 @@ class TestCsvToBars:
         })
         df.to_csv(csv_path, index=False)
 
-        bars = csv_to_bars(csv_path, "BTCUSDT", "1h")
+        instrument = _create_instrument("BTCUSDT")
+        bar_type = _get_bar_type("BTCUSDT", "1h")
+        bars = csv_to_bars(csv_path, instrument, bar_type)
 
         assert len(bars) == 2
         # Check first bar
@@ -105,7 +108,9 @@ class TestCsvToBars:
         })
         df.to_csv(csv_path, index=False)
 
-        bars = csv_to_bars(csv_path, "BTCUSDT", "1h")
+        instrument = _create_instrument("BTCUSDT")
+        bar_type = _get_bar_type("BTCUSDT", "1h")
+        bars = csv_to_bars(csv_path, instrument, bar_type)
 
         assert len(bars) == 1
         bar = bars[0]
@@ -130,7 +135,9 @@ class TestCsvToBars:
         })
         df.to_csv(csv_path, index=False)
 
-        bars = csv_to_bars(csv_path, "BTCUSDT", "1h")
+        instrument = _create_instrument("BTCUSDT")
+        bar_type = _get_bar_type("BTCUSDT", "1h")
+        bars = csv_to_bars(csv_path, instrument, bar_type)
 
         # ts_event should be in nanoseconds (ms * 1_000_000)
         expected_ns = 1704067200000 * 1_000_000
@@ -152,7 +159,9 @@ class TestCsvToBars:
         })
         df.to_csv(csv_path, index=False)
 
-        bars = csv_to_bars(csv_path, "BTCUSDT", "1h")
+        instrument = _create_instrument("BTCUSDT")
+        bar_type = _get_bar_type("BTCUSDT", "1h")
+        bars = csv_to_bars(csv_path, instrument, bar_type)
 
         assert len(bars) == 0
 
@@ -172,7 +181,9 @@ class TestCsvToBars:
         })
         df.to_csv(csv_path, index=False)
 
-        bars = csv_to_bars(csv_path, "ETHUSDT", "4h")
+        instrument = _create_instrument("ETHUSDT")
+        bar_type = _get_bar_type("ETHUSDT", "4h")
+        bars = csv_to_bars(csv_path, instrument, bar_type)
 
         assert len(bars) == 1
         assert "ETHUSDT" in str(bars[0].bar_type.instrument_id)

@@ -13,6 +13,8 @@ from nautilus_quants.data.transform.parquet import (
     csv_to_bars,
     transform_to_parquet,
     TransformResult,
+    _get_bar_type,
+    _create_instrument,
 )
 
 
@@ -79,7 +81,9 @@ class TestTransformIntegration:
 
     def test_csv_to_bars_creates_nautilus_bars(self, processed_csv):
         """csv_to_bars should create Nautilus Bar objects."""
-        bars = csv_to_bars(processed_csv, "BTCUSDT", "1h")
+        instrument = _create_instrument("BTCUSDT")
+        bar_type = _get_bar_type("BTCUSDT", "1h")
+        bars = csv_to_bars(processed_csv, instrument, bar_type)
 
         assert len(bars) == 5
 
@@ -201,7 +205,9 @@ class TestTransformIntegration:
         })
         df.to_csv(csv_path, index=False)
 
-        bars = csv_to_bars(csv_path, "BTCUSDT", "1h")
+        instrument = _create_instrument("BTCUSDT")
+        bar_type = _get_bar_type("BTCUSDT", "1h")
+        bars = csv_to_bars(csv_path, instrument, bar_type)
 
         assert len(bars) == 1
         bar = bars[0]

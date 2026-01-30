@@ -17,6 +17,7 @@ from nautilus_trader.model.identifiers import InstrumentId, Symbol, Venue
 from nautilus_trader.model.instruments import CryptoPerpetual
 from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
+from nautilus_trader.persistence.wranglers import BarDataWrangler
 
 
 # Default precision values when exchange info is not available
@@ -191,19 +192,18 @@ def _get_bar_type(symbol: str, timeframe: str) -> BarType:
 
 def csv_to_bars(
     csv_path: Path | str,
-    symbol: str,
-    timeframe: str,
-    price_precision: int = DEFAULT_PRICE_PRECISION,
-    quantity_precision: int = DEFAULT_QUANTITY_PRECISION,
+    instrument: CryptoPerpetual,
+    bar_type: BarType,
 ) -> list[Bar]:
-    """Convert CSV data to Nautilus Bar objects.
+    """Convert CSV data to Nautilus Bar objects using official BarDataWrangler.
+
+    Uses Nautilus Trader's optimized BarDataWrangler for batch processing,
+    which is 10-100x faster than manual iteration with df.iterrows().
 
     Args:
         csv_path: Path to processed CSV file
-        symbol: Trading pair symbol
-        timeframe: K-line interval
-        price_precision: Number of decimal places for price formatting
-        quantity_precision: Number of decimal places for quantity formatting
+        instrument: CryptoPerpetual instrument (provides precision automatically)
+        bar_type: BarType for the bars
 
     Returns:
         List of Bar objects
@@ -211,23 +211,18 @@ def csv_to_bars(
     csv_path = Path(csv_path)
     df = pd.read_csv(csv_path)
 
-    bar_type = _get_bar_type(symbol, timeframe)
-    bars = []
+    # Handle empty DataFrame before processing
+    if df.empty:
+        return []
 
-    for _, row in df.iterrows():
-        bar = Bar(
-            bar_type=bar_type,
-            open=Price.from_str(f"{row['open']:.{price_precision}f}"),
-            high=Price.from_str(f"{row['high']:.{price_precision}f}"),
-            low=Price.from_str(f"{row['low']:.{price_precision}f}"),
-            close=Price.from_str(f"{row['close']:.{price_precision}f}"),
-            volume=Quantity.from_str(f"{row['volume']:.{quantity_precision}f}"),
-            ts_event=int(row["timestamp"]) * 1_000_000,  # Convert ms to ns
-            ts_init=int(row["timestamp"]) * 1_000_000,
-        )
-        bars.append(bar)
+    # Prepare DataFrame format (BarDataWrangler expects timestamp as index)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    df = df.set_index("timestamp")
+    df = df[["open", "high", "low", "close", "volume"]]
 
-    return bars
+    # Use official Wrangler for batch conversion
+    wrangler = BarDataWrangler(bar_type, instrument)
+    return wrangler.process(df)
 
 
 def transform_to_parquet(
@@ -259,15 +254,28 @@ def transform_to_parquet(
     catalog_path = Path(catalog_path)
 
     try:
-        # Load precision from exchange info
+        # 1. Load precision from exchange info
         price_precision, quantity_precision = _load_symbol_precision(
             symbol, raw_data_path
         )
 
-        # Load and convert to bars
-        bars = csv_to_bars(
-            input_path, symbol, timeframe, price_precision, quantity_precision
+        # 2. Create instrument first (BarDataWrangler needs it)
+        # Use ts_init=0 temporarily, will be used by wrangler
+        instrument = _create_instrument(
+            symbol=symbol,
+            venue="BINANCE",
+            ts_init=0,
+            price_precision=price_precision,
+            size_precision=quantity_precision,
+            maker_fee=maker_fee,
+            taker_fee=taker_fee,
         )
+
+        # 3. Get bar_type
+        bar_type = _get_bar_type(symbol, timeframe)
+
+        # 4. Convert CSV to bars using BarDataWrangler
+        bars = csv_to_bars(input_path, instrument, bar_type)
 
         if not bars:
             return TransformResult(
@@ -280,11 +288,7 @@ def transform_to_parquet(
                 errors=["No data to transform"],
             )
 
-        # Create catalog and write data
-        catalog_path.mkdir(parents=True, exist_ok=True)
-        catalog = ParquetDataCatalog(str(catalog_path))
-
-        # Write instrument definition first (required for BacktestNode)
+        # 5. Update instrument ts_init with first bar's timestamp
         instrument = _create_instrument(
             symbol=symbol,
             venue="BINANCE",
@@ -294,6 +298,12 @@ def transform_to_parquet(
             maker_fee=maker_fee,
             taker_fee=taker_fee,
         )
+
+        # 6. Create catalog and write data
+        catalog_path.mkdir(parents=True, exist_ok=True)
+        catalog = ParquetDataCatalog(str(catalog_path))
+
+        # Write instrument definition first (required for BacktestNode)
         catalog.write_data([instrument])
 
         # Write bars to catalog
