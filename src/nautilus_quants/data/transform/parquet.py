@@ -93,6 +93,8 @@ def _create_instrument(
     ts_init: int = 0,
     price_precision: int = DEFAULT_PRICE_PRECISION,
     size_precision: int = DEFAULT_QUANTITY_PRECISION,
+    maker_fee: str = "0.0002",
+    taker_fee: str = "0.0004",
 ) -> CryptoPerpetual:
     """Create a CryptoPerpetual instrument for the catalog.
 
@@ -102,6 +104,8 @@ def _create_instrument(
         ts_init: Initialization timestamp in nanoseconds
         price_precision: Number of decimal places for price
         size_precision: Number of decimal places for quantity
+        maker_fee: Maker fee rate as string (e.g., "0.0002" for 0.02%)
+        taker_fee: Taker fee rate as string (e.g., "0.0004" for 0.04%)
 
     Returns:
         CryptoPerpetual instrument
@@ -136,8 +140,8 @@ def _create_instrument(
         min_price=Price.from_str(price_increment_str),
         margin_init=Decimal("0.05"),
         margin_maint=Decimal("0.025"),
-        maker_fee=Decimal("0.0002"),
-        taker_fee=Decimal("0.0004"),
+        maker_fee=Decimal(maker_fee),
+        taker_fee=Decimal(taker_fee),
         ts_event=ts_init,
         ts_init=ts_init,
     )
@@ -233,6 +237,8 @@ def transform_to_parquet(
     timeframe: str,
     merge: bool = True,
     raw_data_path: Path | str | None = None,
+    maker_fee: str = "0.0002",
+    taker_fee: str = "0.0004",
 ) -> TransformResult:
     """Transform processed CSV to Nautilus Parquet format.
 
@@ -243,6 +249,8 @@ def transform_to_parquet(
         timeframe: K-line interval
         merge: Merge with existing data if present
         raw_data_path: Path to raw data directory for precision lookup
+        maker_fee: Maker fee rate as string (e.g., "0.0002" for 0.02%)
+        taker_fee: Taker fee rate as string (e.g., "0.0004" for 0.04%)
 
     Returns:
         TransformResult with output path and row count
@@ -283,6 +291,8 @@ def transform_to_parquet(
             ts_init=bars[0].ts_init,
             price_precision=price_precision,
             size_precision=quantity_precision,
+            maker_fee=maker_fee,
+            taker_fee=taker_fee,
         )
         catalog.write_data([instrument])
 

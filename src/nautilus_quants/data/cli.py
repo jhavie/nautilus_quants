@@ -457,6 +457,8 @@ def transform(
                         timeframe=tf,
                         merge=merge,
                         raw_data_path=raw_data_path,
+                        maker_fee=config.transform.maker_fee,
+                        taker_fee=config.transform.taker_fee,
                     )
                     results.append(result)
 
@@ -708,6 +710,8 @@ def run(
                         timeframe=tf,
                         merge=config.transform.merge_files,
                         raw_data_path=raw_dir,
+                        maker_fee=config.transform.maker_fee,
+                        taker_fee=config.transform.taker_fee,
                     )
                     transform_results.append(result)
                     if result.success:

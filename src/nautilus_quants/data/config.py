@@ -71,6 +71,8 @@ class TransformConfig:
     output_format: str = "parquet"
     merge_files: bool = True
     catalog_path: str = "data/catalog"
+    maker_fee: str = "0.0002"
+    taker_fee: str = "0.0004"
 
 
 @dataclass
@@ -160,6 +162,8 @@ def _parse_transform(data: dict) -> TransformConfig:
         output_format=data.get("output_format", "parquet"),
         merge_files=data.get("merge_files", True),
         catalog_path=data.get("catalog_path", "data/catalog"),
+        maker_fee=data.get("maker_fee", "0.0002"),
+        taker_fee=data.get("taker_fee", "0.0004"),
     )
 
 
@@ -287,6 +291,8 @@ def config_to_dict(config: PipelineConfig) -> dict:
             "output_format": config.transform.output_format,
             "merge_files": config.transform.merge_files,
             "catalog_path": config.transform.catalog_path,
+            "maker_fee": config.transform.maker_fee,
+            "taker_fee": config.transform.taker_fee,
         },
         "paths": {
             "raw_data": config.paths.raw_data,
