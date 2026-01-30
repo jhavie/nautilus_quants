@@ -1,0 +1,56 @@
+# FMZ Factors Configuration
+# https://www.fmz.com/digest-topic/9647
+
+metadata:
+  name: fmz_factors
+  version: "1.0"
+  description: "FMZ research factors for cross-sectional selection"
+
+parameters:
+  short_window: 24
+  long_window: 96
+  momentum_period: 3
+
+factors:
+  # Raw factors
+  volume:
+    expression: "volume"
+    description: "Raw volume - lower volume coins tend to outperform"
+
+  momentum:
+    expression: "(close - delay(close, 3)) / delay(close, 3)"
+    description: "3-hour momentum - mean reversion signal"
+
+  volatility:
+    expression: "ts_std(close / open, 24)"
+    description: "24-hour volatility"
+
+  corr:
+    expression: "correlation(close, volume, 96)"
+    description: "96-hour price-volume correlation"
+
+  # Normalized factors (FMZ approach)
+  volume_norm:
+    expression: "normalize(winsorize(volume, 2), true, 0)"
+    description: "Normalized volume (winsorized + z-score)"
+
+  momentum_norm:
+    expression: "normalize(winsorize(momentum, 2), true, 0)"
+    description: "Normalized momentum"
+
+  volatility_norm:
+    expression: "normalize(winsorize(volatility, 2), true, 0)"
+    description: "Normalized volatility"
+
+  corr_norm:
+    expression: "normalize(winsorize(corr, 2), true, 0)"
+    description: "Normalized correlation"
+
+  # Composite factor (FMZ weights)
+  composite:
+    expression: "0.6 * volume_norm + 0.4 * momentum_norm + 0.3 * volatility_norm + 0.4 * corr_norm"
+    description: "FMZ weighted composite factor"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0
