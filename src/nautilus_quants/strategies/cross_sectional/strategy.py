@@ -19,10 +19,10 @@ Constitution Compliance:
 from __future__ import annotations
 
 import math
+import pickle
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-
-from datetime import datetime
 
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
@@ -122,6 +122,11 @@ class CrossSectionalFactorStrategy(Strategy):
         self._current_month: int | None = None
         self._monthly_position_value: float | None = None
 
+        # Position metadata for reporting (entry info + rank history)
+        # Key: instrument_id_str, Value: metadata dict
+        self._position_metadata: dict[str, dict] = {}
+        self._closed_position_metadata: dict[str, dict] = {}
+
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
         self.log.info(
@@ -177,6 +182,16 @@ class CrossSectionalFactorStrategy(Strategy):
     def on_stop(self) -> None:
         """Actions to perform on strategy stop."""
         self._close_all_positions("STRATEGY_STOP")
+
+        # Merge open and closed metadata and store in cache for report generation
+        all_metadata = {
+            **self._position_metadata,
+            **self._closed_position_metadata,
+        }
+        if all_metadata:
+            cache_key = "position_metadata"
+            self.cache.add(cache_key, pickle.dumps(all_metadata))
+            self.log.info(f"Position metadata: {len(all_metadata)} positions stored in cache")
 
         self.log.info(
             f"CrossSectionalFactorStrategy stopped: "
@@ -244,12 +259,13 @@ class CrossSectionalFactorStrategy(Strategy):
             return
 
         sorted_instruments = sorted(composite.items(), key=lambda x: x[1])
-        self._rebalance_positions_with_buffer(sorted_instruments)
+        self._rebalance_positions_with_buffer(sorted_instruments, data.ts_event)
         self._composite_values = {}
 
     def _rebalance_positions_with_buffer(
         self,
         sorted_instruments: list[tuple[str, float]],
+        ts_event: int,
     ) -> None:
         """
         Rebalance with buffer zone.
@@ -285,17 +301,27 @@ class CrossSectionalFactorStrategy(Strategy):
                 self._short_positions.discard(inst_id)
 
         # === STEP 2: OPEN (target zones only) ===
+        # Create composite value lookup from sorted_instruments
+        composite_lookup = dict(sorted_instruments)
+
         if self.config.enable_long:
             for inst_id in long_targets:
                 if inst_id not in self._long_positions:
-                    if self._open_position(inst_id, OrderSide.BUY):
+                    inst_rank = rank.get(inst_id)
+                    composite_val = composite_lookup.get(inst_id)
+                    if self._open_position(inst_id, OrderSide.BUY, inst_rank, composite_val, ts_event):
                         self._long_positions.add(inst_id)
 
         if self.config.enable_short:
             for inst_id in short_targets:
                 if inst_id not in self._short_positions:
-                    if self._open_position(inst_id, OrderSide.SELL):
+                    inst_rank = rank.get(inst_id)
+                    composite_val = composite_lookup.get(inst_id)
+                    if self._open_position(inst_id, OrderSide.SELL, inst_rank, composite_val, ts_event):
                         self._short_positions.add(inst_id)
+
+        # === STEP 3: UPDATE RANK HISTORY for all current positions ===
+        self._update_rank_history(rank, composite_lookup, ts_event)
 
     def _log_position_ranks(
         self,
@@ -411,8 +437,15 @@ class CrossSectionalFactorStrategy(Strategy):
         calculated = (equity * self.config.target_leverage) / total_positions
         return max(calculated, min_position_value)
 
-    def _open_position(self, instrument_id_str: str, side: OrderSide) -> bool:
-        """Open position with specified side."""
+    def _open_position(
+        self,
+        instrument_id_str: str,
+        side: OrderSide,
+        rank: int | None = None,
+        composite_value: float | None = None,
+        ts_event: int | None = None,
+    ) -> bool:
+        """Open position with specified side and store metadata for reporting."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
         instrument = self._instruments.get(instrument_id)
 
@@ -427,6 +460,16 @@ class CrossSectionalFactorStrategy(Strategy):
         raw_qty = Decimal(str(position_value / price))
         qty = instrument.make_qty(raw_qty)
 
+        # Store position metadata for cache-based reporting
+        self._position_metadata[instrument_id_str] = {
+            "side": "LONG" if side == OrderSide.BUY else "SHORT",
+            "entry_rank": rank,
+            "entry_composite": composite_value,
+            "buffer_ratio": self.config.buffer_ratio,
+            "ts_opened": ts_event,
+            "rank_history": [],
+        }
+
         order = self.order_factory.market(
             instrument_id=instrument_id,
             order_side=side,
@@ -436,9 +479,33 @@ class CrossSectionalFactorStrategy(Strategy):
 
         return True
 
+    def _update_rank_history(
+        self,
+        rank: dict[str, int],
+        composite_lookup: dict[str, float],
+        ts_event: int,
+    ) -> None:
+        """Update rank history for all current positions."""
+        for inst_id in list(self._long_positions) + list(self._short_positions):
+            if inst_id in self._position_metadata:
+                self._position_metadata[inst_id]["rank_history"].append({
+                    "ts_event": ts_event,
+                    "rank": rank.get(inst_id, -1),
+                    "composite": composite_lookup.get(inst_id),
+                })
+
     def _close_position(self, instrument_id_str: str, reason: str) -> None:
         """Close a position for an instrument."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
+
+        # Move metadata to closed list before closing
+        if instrument_id_str in self._position_metadata:
+            metadata = self._position_metadata.pop(instrument_id_str)
+            metadata["close_reason"] = reason
+            # Use a unique key for closed positions (may have multiple)
+            close_key = f"{instrument_id_str}:{self._hour_count}"
+            self._closed_position_metadata[close_key] = metadata
+
         self.close_all_positions(instrument_id)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 

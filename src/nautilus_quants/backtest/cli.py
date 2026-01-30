@@ -16,7 +16,6 @@ from nautilus_trader.backtest.node import BacktestNode
 from nautilus_trader.config import BacktestRunConfig
 
 from nautilus_quants.backtest.config import (
-    BacktestResult,
     PositionVisualizationConfig,
     QuantStatsConfig,
     ReportConfig,

@@ -174,23 +174,37 @@ class TestPositionVisualizationGeneration:
             config=config,
         )
 
-        # Mock _get_position_timeline_data to return sample data
+        # Mock _get_position_timeline_data to return sample data with positions dict
         mock_data = [
             {
                 "timestamp": "2024-01-01T00:00:00",
                 "equity": 100000.0,
                 "long_count": 3,
                 "short_count": 2,
-                "long_positions": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-                "short_positions": ["DOGEUSDT", "SHIBUSDT"],
+                "positions": {
+                    "BTCUSDT": {"value": 5000.0, "side": "LONG", "rank": 0, "ts_opened": "2024-01-01T00:00:00"},
+                    "ETHUSDT": {"value": 3000.0, "side": "LONG", "rank": 1, "ts_opened": "2024-01-01T00:00:00"},
+                    "SOLUSDT": {"value": 2000.0, "side": "LONG", "rank": 2, "ts_opened": "2024-01-01T00:00:00"},
+                    "DOGEUSDT": {"value": 1500.0, "side": "SHORT", "rank": 33, "ts_opened": "2024-01-01T00:00:00"},
+                    "SHIBUSDT": {"value": 500.0, "side": "SHORT", "rank": 34, "ts_opened": "2024-01-01T00:00:00"},
+                },
+                "long_total_value": 10000.0,
+                "short_total_value": 2000.0,
             },
             {
                 "timestamp": "2024-01-01T04:00:00",
                 "equity": 100500.0,
                 "long_count": 2,
                 "short_count": 3,
-                "long_positions": ["BTCUSDT", "ETHUSDT"],
-                "short_positions": ["DOGEUSDT", "SHIBUSDT", "PEPEUSDT"],
+                "positions": {
+                    "BTCUSDT": {"value": 5000.0, "side": "LONG", "rank": 0, "ts_opened": "2024-01-01T00:00:00"},
+                    "ETHUSDT": {"value": 3000.0, "side": "LONG", "rank": 1, "ts_opened": "2024-01-01T00:00:00"},
+                    "DOGEUSDT": {"value": 1500.0, "side": "SHORT", "rank": 32, "ts_opened": "2024-01-01T00:00:00"},
+                    "SHIBUSDT": {"value": 500.0, "side": "SHORT", "rank": 33, "ts_opened": "2024-01-01T00:00:00"},
+                    "PEPEUSDT": {"value": 1000.0, "side": "SHORT", "rank": 34, "ts_opened": "2024-01-01T04:00:00"},
+                },
+                "long_total_value": 8000.0,
+                "short_total_value": 3000.0,
             },
         ]
 
@@ -225,8 +239,15 @@ class TestPositionVisualizationGeneration:
                 "equity": 100000.0,
                 "long_count": 3,
                 "short_count": 2,
-                "long_positions": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-                "short_positions": ["DOGEUSDT", "SHIBUSDT"],
+                "positions": {
+                    "BTCUSDT": {"value": 5000.0, "side": "LONG", "rank": 0, "ts_opened": "2024-01-01T00:00:00"},
+                    "ETHUSDT": {"value": 3000.0, "side": "LONG", "rank": 1, "ts_opened": "2024-01-01T00:00:00"},
+                    "SOLUSDT": {"value": 2000.0, "side": "LONG", "rank": 2, "ts_opened": "2024-01-01T00:00:00"},
+                    "DOGEUSDT": {"value": 1500.0, "side": "SHORT", "rank": 33, "ts_opened": "2024-01-01T00:00:00"},
+                    "SHIBUSDT": {"value": 500.0, "side": "SHORT", "rank": 34, "ts_opened": "2024-01-01T00:00:00"},
+                },
+                "long_total_value": 10000.0,
+                "short_total_value": 2000.0,
             },
         ]
 
@@ -242,8 +263,9 @@ class TestPositionVisualizationGeneration:
         assert "echarts" in html_content
         # Check for title
         assert position_viz_config.title in html_content
-        # Check for chart container
-        assert "chart-container" in html_content
+        # Check for chart containers
+        assert "bar-chart" in html_content
+        assert "pie-chart" in html_content
         # Check for data
         assert "100000.0" in html_content or "100,000" in html_content
 
@@ -292,14 +314,10 @@ class TestPositionTimelineData:
     def test_get_position_timeline_data_with_valid_data(
         self, mock_engine: MagicMock, tmp_path: Path
     ) -> None:
-        """Test _get_position_timeline_data with valid account data."""
+        """Test _get_position_timeline_data with valid CSV data."""
         config = ReportConfig(
             position_viz=PositionVisualizationConfig(enabled=True)
         )
-
-        # Setup mock account
-        mock_account = MagicMock()
-        mock_engine.cache.accounts.return_value = [mock_account]
 
         generator = ReportGenerator(
             engine=mock_engine,
@@ -307,7 +325,7 @@ class TestPositionTimelineData:
             config=config,
         )
 
-        # Create mock account report with margins data
+        # Create account_report.csv with margins data
         account_data = pd.DataFrame(
             {
                 "total": [100000.0, 100100.0, 100050.0, 100200.0],
@@ -320,18 +338,19 @@ class TestPositionTimelineData:
             },
             index=pd.date_range("2024-01-01", periods=4, freq="4h"),
         )
+        account_data.to_csv(tmp_path / "account_report.csv")
 
-        # Mock positions report for direction lookup
+        # Create positions_report.csv for direction and value lookup
         positions_data = pd.DataFrame({
             "instrument_id": ["BTCUSDT.BINANCE", "ETHUSDT.BINANCE"],
             "entry": ["BUY", "SELL"],
+            "quantity": [0.0, 0.0],  # closed positions
+            "peak_qty": [0.1, 1.0],  # use peak_qty for value calculation
+            "avg_px_open": [50000.0, 3000.0],  # for value: 0.1*50000=5000, 1.0*3000=3000
         })
+        positions_data.to_csv(tmp_path / "positions_report.csv")
 
-        with patch("nautilus_trader.analysis.ReportProvider") as MockReportProvider:
-            MockReportProvider.generate_account_report.return_value = account_data
-            MockReportProvider.generate_positions_report.return_value = positions_data
-
-            result = generator._get_position_timeline_data("4h")
+        result = generator._get_position_timeline_data("4h")
 
         assert isinstance(result, list)
         assert len(result) == 4
@@ -339,6 +358,9 @@ class TestPositionTimelineData:
         assert all("equity" in item for item in result)
         assert all("long_count" in item for item in result)
         assert all("short_count" in item for item in result)
+        assert all("positions" in item for item in result)
+        assert all("long_total_value" in item for item in result)
+        assert all("short_total_value" in item for item in result)
 
     def test_get_position_timeline_data_empty_account(
         self, mock_engine: MagicMock, tmp_path: Path
@@ -348,14 +370,13 @@ class TestPositionTimelineData:
             position_viz=PositionVisualizationConfig(enabled=True)
         )
 
-        mock_engine.cache.accounts.return_value = []
-
         generator = ReportGenerator(
             engine=mock_engine,
             output_dir=tmp_path,
             config=config,
         )
 
+        # No CSV file exists
         result = generator._get_position_timeline_data("4h")
 
         assert result == []
