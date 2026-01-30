@@ -4,6 +4,7 @@ Transform module for converting processed CSV to Nautilus Parquet format.
 Uses Nautilus Trader's native ParquetDataCatalog for compatibility.
 """
 
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +17,11 @@ from nautilus_trader.model.identifiers import InstrumentId, Symbol, Venue
 from nautilus_trader.model.instruments import CryptoPerpetual
 from nautilus_trader.model.objects import Money, Price, Quantity
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
+
+
+# Default precision values when exchange info is not available
+DEFAULT_PRICE_PRECISION = 8
+DEFAULT_QUANTITY_PRECISION = 8
 
 
 @dataclass
@@ -48,10 +54,45 @@ TIMEFRAME_TO_STEP = {
 }
 
 
+def _load_symbol_precision(
+    symbol: str,
+    raw_data_path: Path | str | None,
+) -> tuple[int, int]:
+    """Load price and quantity precision from exchange info JSON.
+
+    Args:
+        symbol: Trading pair symbol (e.g., "1000PEPEUSDT")
+        raw_data_path: Path to raw data directory containing .exchange_info/
+
+    Returns:
+        Tuple of (price_precision, quantity_precision)
+    """
+    if raw_data_path is None:
+        return DEFAULT_PRICE_PRECISION, DEFAULT_QUANTITY_PRECISION
+
+    raw_data_path = Path(raw_data_path)
+    json_path = raw_data_path / ".exchange_info" / f"{symbol}_precision.json"
+
+    if not json_path.exists():
+        return DEFAULT_PRICE_PRECISION, DEFAULT_QUANTITY_PRECISION
+
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+        return (
+            data.get("pricePrecision", DEFAULT_PRICE_PRECISION),
+            data.get("quantityPrecision", DEFAULT_QUANTITY_PRECISION),
+        )
+    except (json.JSONDecodeError, OSError):
+        return DEFAULT_PRICE_PRECISION, DEFAULT_QUANTITY_PRECISION
+
+
 def _create_instrument(
     symbol: str,
     venue: str = "BINANCE",
     ts_init: int = 0,
+    price_precision: int = DEFAULT_PRICE_PRECISION,
+    size_precision: int = DEFAULT_QUANTITY_PRECISION,
 ) -> CryptoPerpetual:
     """Create a CryptoPerpetual instrument for the catalog.
 
@@ -59,10 +100,23 @@ def _create_instrument(
         symbol: Trading pair symbol (e.g., "BTCUSDT")
         venue: Exchange venue name
         ts_init: Initialization timestamp in nanoseconds
+        price_precision: Number of decimal places for price
+        size_precision: Number of decimal places for quantity
 
     Returns:
         CryptoPerpetual instrument
     """
+    # Dynamically compute increment strings based on precision
+    if price_precision > 0:
+        price_increment_str = "0." + "0" * (price_precision - 1) + "1"
+    else:
+        price_increment_str = "1"
+
+    if size_precision > 0:
+        size_increment_str = "0." + "0" * (size_precision - 1) + "1"
+    else:
+        size_increment_str = "1"
+
     return CryptoPerpetual(
         instrument_id=InstrumentId(symbol=Symbol(symbol), venue=Venue(venue)),
         raw_symbol=Symbol(symbol),
@@ -70,16 +124,16 @@ def _create_instrument(
         quote_currency=USDT,
         settlement_currency=USDT,
         is_inverse=False,
-        price_precision=2,
-        size_precision=3,
-        price_increment=Price.from_str("0.01"),
-        size_increment=Quantity.from_str("0.001"),
-        max_quantity=Quantity.from_str("10000"),
-        min_quantity=Quantity.from_str("0.001"),
-        max_notional=Money(1_000_000, USDT),
-        min_notional=Money(10, USDT),
-        max_price=Price.from_str("1000000"),
-        min_price=Price.from_str("0.01"),
+        price_precision=price_precision,
+        size_precision=size_precision,
+        price_increment=Price.from_str(price_increment_str),
+        size_increment=Quantity.from_str(size_increment_str),
+        max_quantity=Quantity.from_str("10000000"),
+        min_quantity=Quantity.from_str(size_increment_str),
+        max_notional=Money(1_000_000_000, USDT),
+        min_notional=Money(1, USDT),
+        max_price=Price.from_str("10000000"),
+        min_price=Price.from_str(price_increment_str),
         margin_init=Decimal("0.05"),
         margin_maint=Decimal("0.025"),
         maker_fee=Decimal("0.0002"),
@@ -135,6 +189,8 @@ def csv_to_bars(
     csv_path: Path | str,
     symbol: str,
     timeframe: str,
+    price_precision: int = DEFAULT_PRICE_PRECISION,
+    quantity_precision: int = DEFAULT_QUANTITY_PRECISION,
 ) -> list[Bar]:
     """Convert CSV data to Nautilus Bar objects.
 
@@ -142,6 +198,8 @@ def csv_to_bars(
         csv_path: Path to processed CSV file
         symbol: Trading pair symbol
         timeframe: K-line interval
+        price_precision: Number of decimal places for price formatting
+        quantity_precision: Number of decimal places for quantity formatting
 
     Returns:
         List of Bar objects
@@ -153,15 +211,13 @@ def csv_to_bars(
     bars = []
 
     for _, row in df.iterrows():
-        # Format prices to 2 decimal places to match instrument.price_precision=2
-        # This ensures consistency: CSV float "617.5" -> "617.50" -> precision=2
         bar = Bar(
             bar_type=bar_type,
-            open=Price.from_str(f"{row['open']:.2f}"),
-            high=Price.from_str(f"{row['high']:.2f}"),
-            low=Price.from_str(f"{row['low']:.2f}"),
-            close=Price.from_str(f"{row['close']:.2f}"),
-            volume=Quantity.from_str(f"{row['volume']:.3f}"),
+            open=Price.from_str(f"{row['open']:.{price_precision}f}"),
+            high=Price.from_str(f"{row['high']:.{price_precision}f}"),
+            low=Price.from_str(f"{row['low']:.{price_precision}f}"),
+            close=Price.from_str(f"{row['close']:.{price_precision}f}"),
+            volume=Quantity.from_str(f"{row['volume']:.{quantity_precision}f}"),
             ts_event=int(row["timestamp"]) * 1_000_000,  # Convert ms to ns
             ts_init=int(row["timestamp"]) * 1_000_000,
         )
@@ -176,6 +232,7 @@ def transform_to_parquet(
     symbol: str,
     timeframe: str,
     merge: bool = True,
+    raw_data_path: Path | str | None = None,
 ) -> TransformResult:
     """Transform processed CSV to Nautilus Parquet format.
 
@@ -185,6 +242,7 @@ def transform_to_parquet(
         symbol: Trading pair symbol
         timeframe: K-line interval
         merge: Merge with existing data if present
+        raw_data_path: Path to raw data directory for precision lookup
 
     Returns:
         TransformResult with output path and row count
@@ -193,8 +251,15 @@ def transform_to_parquet(
     catalog_path = Path(catalog_path)
 
     try:
+        # Load precision from exchange info
+        price_precision, quantity_precision = _load_symbol_precision(
+            symbol, raw_data_path
+        )
+
         # Load and convert to bars
-        bars = csv_to_bars(input_path, symbol, timeframe)
+        bars = csv_to_bars(
+            input_path, symbol, timeframe, price_precision, quantity_precision
+        )
 
         if not bars:
             return TransformResult(
@@ -216,6 +281,8 @@ def transform_to_parquet(
             symbol=symbol,
             venue="BINANCE",
             ts_init=bars[0].ts_init,
+            price_precision=price_precision,
+            size_precision=quantity_precision,
         )
         catalog.write_data([instrument])
 
