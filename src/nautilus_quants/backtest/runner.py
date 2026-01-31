@@ -10,8 +10,8 @@ import yaml
 from nautilus_trader.backtest.node import BacktestNode
 from nautilus_trader.config import BacktestRunConfig
 
-from nautilus_quants.backtest.config import ReportConfig
 from nautilus_quants.backtest.exceptions import BacktestConfigError
+from nautilus_quants.backtest.protocols import MetadataRenderer
 from nautilus_quants.backtest.reports import ReportGenerator
 from nautilus_quants.backtest.utils.config_parser import (
     extract_data_configs,
@@ -21,6 +21,35 @@ from nautilus_quants.backtest.utils.config_parser import (
     parse_report_config,
 )
 from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
+
+
+def _get_metadata_renderer_for_strategy(config_dict: dict) -> MetadataRenderer | None:
+    """Infer the appropriate MetadataRenderer from strategy configuration.
+
+    Examines the strategy configuration to determine which renderer to use.
+    Currently supports CrossSectionalFactorStrategy.
+
+    Args:
+        config_dict: The full configuration dictionary
+
+    Returns:
+        MetadataRenderer instance or None to use default
+    """
+    # Look for strategy class name in trading config
+    trading_config = config_dict.get("trading", {})
+    strategies = trading_config.get("strategies", [])
+
+    for strategy_config in strategies:
+        strategy_class = strategy_config.get("strategy_path", "")
+
+        # Check for CrossSectionalFactorStrategy
+        if "CrossSectionalFactorStrategy" in strategy_class:
+            from nautilus_quants.strategies.cross_sectional.metadata import (
+                CrossSectionalMetadataRenderer,
+            )
+            return CrossSectionalMetadataRenderer()
+
+    return None
 
 
 class RunnerResult:
@@ -123,10 +152,14 @@ def run_backtest(
     statistics: dict[str, Any] = {}
 
     if report_config and output_dir:
+        # Infer renderer from strategy type
+        metadata_renderer = _get_metadata_renderer_for_strategy(config_dict)
+
         report_generator = ReportGenerator(
             engine=engine,
             output_dir=output_dir,
             config=report_config,
+            metadata_renderer=metadata_renderer,
         )
         reports = report_generator.generate_all()
         statistics = report_generator.generate_statistics()

@@ -19,7 +19,6 @@ Constitution Compliance:
 from __future__ import annotations
 
 import math
-import pickle
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -32,6 +31,7 @@ from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.factors.types import FactorValues
+from nautilus_quants.strategies.cross_sectional.metadata import CrossSectionalMetadataProvider
 
 if TYPE_CHECKING:
     from nautilus_trader.model.instruments import Instrument
@@ -122,10 +122,8 @@ class CrossSectionalFactorStrategy(Strategy):
         self._current_month: int | None = None
         self._monthly_position_value: float | None = None
 
-        # Position metadata for reporting (entry info + rank history)
-        # Key: instrument_id_str, Value: metadata dict
-        self._position_metadata: dict[str, dict] = {}
-        self._closed_position_metadata: dict[str, dict] = {}
+        # Position metadata provider for reporting
+        self._metadata_provider = CrossSectionalMetadataProvider()
 
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
@@ -183,14 +181,11 @@ class CrossSectionalFactorStrategy(Strategy):
         """Actions to perform on strategy stop."""
         self._close_all_positions("STRATEGY_STOP")
 
-        # Merge open and closed metadata and store in cache for report generation
-        all_metadata = {
-            **self._position_metadata,
-            **self._closed_position_metadata,
-        }
+        # Store metadata in cache for report generation
+        all_metadata = self._metadata_provider.get_all_metadata()
         if all_metadata:
             cache_key = "position_metadata"
-            self.cache.add(cache_key, pickle.dumps(all_metadata))
+            self.cache.add(cache_key, self._metadata_provider.serialize())
             self.log.info(f"Position metadata: {len(all_metadata)} positions stored in cache")
 
         self.log.info(
@@ -460,15 +455,15 @@ class CrossSectionalFactorStrategy(Strategy):
         raw_qty = Decimal(str(position_value / price))
         qty = instrument.make_qty(raw_qty)
 
-        # Store position metadata for cache-based reporting
-        self._position_metadata[instrument_id_str] = {
-            "side": "LONG" if side == OrderSide.BUY else "SHORT",
-            "entry_rank": rank,
-            "entry_composite": composite_value,
-            "buffer_ratio": self.config.buffer_ratio,
-            "ts_opened": ts_event,
-            "rank_history": [],
-        }
+        # Record position metadata via provider
+        self._metadata_provider.record_open(
+            instrument_id=instrument_id_str,
+            side="LONG" if side == OrderSide.BUY else "SHORT",
+            rank=rank,
+            composite=composite_value,
+            buffer_ratio=self.config.buffer_ratio,
+            ts_event=ts_event or 0,
+        )
 
         order = self.order_factory.market(
             instrument_id=instrument_id,
@@ -486,25 +481,24 @@ class CrossSectionalFactorStrategy(Strategy):
         ts_event: int,
     ) -> None:
         """Update rank history for all current positions."""
-        for inst_id in list(self._long_positions) + list(self._short_positions):
-            if inst_id in self._position_metadata:
-                self._position_metadata[inst_id]["rank_history"].append({
-                    "ts_event": ts_event,
-                    "rank": rank.get(inst_id, -1),
-                    "composite": composite_lookup.get(inst_id),
-                })
+        all_positions = list(self._long_positions) + list(self._short_positions)
+        self._metadata_provider.update_rank_history(
+            instrument_ids=all_positions,
+            rank_lookup=rank,
+            composite_lookup=composite_lookup,
+            ts_event=ts_event,
+        )
 
     def _close_position(self, instrument_id_str: str, reason: str) -> None:
         """Close a position for an instrument."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
 
-        # Move metadata to closed list before closing
-        if instrument_id_str in self._position_metadata:
-            metadata = self._position_metadata.pop(instrument_id_str)
-            metadata["close_reason"] = reason
-            # Use a unique key for closed positions (may have multiple)
-            close_key = f"{instrument_id_str}:{self._hour_count}"
-            self._closed_position_metadata[close_key] = metadata
+        # Record close in metadata provider
+        self._metadata_provider.record_close(
+            instrument_id=instrument_id_str,
+            reason=reason,
+            hour_count=self._hour_count,
+        )
 
         self.close_all_positions(instrument_id)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
