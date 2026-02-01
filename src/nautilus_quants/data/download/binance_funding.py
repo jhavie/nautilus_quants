@@ -14,16 +14,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-import aiohttp
+from binance import AsyncClient
 
 from nautilus_quants.data.types import FundingCheckpoint
-
-
-# Binance Futures public API endpoint
-BINANCE_FUTURES_API = "https://fapi.binance.com"
-
-# Maximum records per API request
-MAX_LIMIT = 1000
 
 
 @dataclass
@@ -267,7 +260,7 @@ class BinanceFundingDownloader:
         output_file: Path,
         append: bool = False,
     ) -> int:
-        """Fetch funding rates from Binance API with pagination.
+        """Fetch funding rates using python-binance AsyncClient.
 
         Args:
             symbol: Trading pair symbol
@@ -287,37 +280,26 @@ class BinanceFundingDownloader:
         all_records = []
         current_start = start_ms
 
-        async with aiohttp.ClientSession() as session:
+        client = await AsyncClient.create()
+        try:
             while current_start < end_ms:
-                url = f"{BINANCE_FUTURES_API}/fapi/v1/fundingRate"
-                params = {
-                    "symbol": symbol,
-                    "startTime": current_start,
-                    "endTime": end_ms,
-                    "limit": MAX_LIMIT,
-                }
-
-                async with session.get(url, params=params) as resp:
-                    if resp.status != 200:
-                        text = await resp.text()
-                        raise RuntimeError(
-                            f"Binance API error: {resp.status} - {text}"
-                        )
-
-                    data = await resp.json()
+                data = await client.futures_funding_rate(
+                    symbol=symbol,
+                    startTime=current_start,
+                    endTime=end_ms,
+                    limit=1000,
+                )
 
                 if not data:
                     break
 
                 all_records.extend(data)
+                current_start = data[-1]["fundingTime"] + 1
 
-                # Move start time past the last record for next page
-                last_funding_time = data[-1]["fundingTime"]
-                current_start = last_funding_time + 1
-
-                # If we got less than limit, we're done
-                if len(data) < MAX_LIMIT:
+                if len(data) < 1000:
                     break
+        finally:
+            await client.close_connection()
 
         # Write to CSV
         write_mode = "a" if append else "w"
