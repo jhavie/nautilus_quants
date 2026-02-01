@@ -1,6 +1,5 @@
 """Backtest execution runner."""
 
-import glob
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,71 +21,6 @@ from nautilus_quants.backtest.utils.config_parser import (
     parse_report_config,
 )
 from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
-
-
-def _load_funding_data(config_dict: dict, node: BacktestNode) -> None:
-    """Load funding rate data based on configuration.
-
-    Files are discovered at:
-        {raw_data_path}/{venue}/{SYMBOL}/funding/{SYMBOL}_funding_*.csv
-
-    Config format:
-        funding:
-          enabled: true
-          raw_data_path: "/path/to/raw"  # optional, defaults to catalog_path/../raw
-          instrument_ids: [...]  # optional, defaults to data section instrument_ids
-    """
-    funding_config = config_dict.get("funding", {})
-    if not funding_config.get("enabled", False):
-        return
-
-    from nautilus_quants.data.transform.funding import load_funding_rates
-
-    data_configs = config_dict.get("data", [])
-    if not data_configs:
-        return
-
-    # raw_data_path: prefer funding config, else infer from catalog_path/../raw
-    raw_data_path = funding_config.get("raw_data_path")
-    if not raw_data_path:
-        catalog_path = Path(data_configs[0].get("catalog_path", ""))
-        raw_data_path = catalog_path.parent / "raw"
-    raw_data_path = Path(raw_data_path)
-
-    # instrument_ids: prefer funding config, else use from data configs
-    instrument_ids = funding_config.get("instrument_ids")
-    if not instrument_ids:
-        instrument_ids = []
-        for dc in data_configs:
-            instrument_ids.extend(dc.get("instrument_ids", []))
-
-    if not instrument_ids:
-        return
-
-    # Build engines first so we can add data
-    node.build()
-
-    # Load funding data for each instrument
-    for inst_id in instrument_ids:
-        # Parse instrument_id: "ETHUSDT.BINANCE" -> symbol="ETHUSDT", venue="binance"
-        parts = inst_id.split(".")
-        symbol = parts[0]
-        venue = parts[1].lower() if len(parts) > 1 else "binance"
-
-        # Discover funding files
-        funding_dir = raw_data_path / venue / symbol / "funding"
-        pattern = str(funding_dir / f"{symbol}_funding_*.csv")
-        files = glob.glob(pattern)
-
-        if files:
-            # Use the latest file (sorted by name)
-            file_path = Path(sorted(files)[-1])
-            funding_rates = load_funding_rates(file_path, inst_id)
-            for engine in node.get_engines():
-                engine.add_data(funding_rates)
-            print(f"Loaded {len(funding_rates)} funding rate updates for {inst_id}")
-        else:
-            print(f"Warning: Funding data not found: {pattern}")
 
 
 class RunnerResult:
@@ -170,10 +104,6 @@ def run_backtest(
     run_config = BacktestRunConfig.parse(json_bytes)
 
     node = BacktestNode(configs=[run_config])
-
-    # Load funding rate data if configured (before run)
-    _load_funding_data(config_dict, node)
-
     node.run()
 
     # Get results

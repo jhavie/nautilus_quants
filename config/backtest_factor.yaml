@@ -18,17 +18,13 @@ venues:
     default_leverage: 5
 
 data:
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/benchmark_data/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     instrument_ids:
       - "ETHUSDT.BINANCE"
     bar_spec: "1m"
-    start_time: "2025-01-01"
-    end_time: "2025-01-30"
-
-# Funding rate data - auto-discovered from raw/binance/{SYMBOL}/funding/
-funding:
-  enabled: true
+    start_time: "2024-01-01"
+    end_time: "2025-12-31"
 
 engine:
   trader_id: "BACKTESTER-001"

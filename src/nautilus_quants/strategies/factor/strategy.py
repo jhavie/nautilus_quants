@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model.data import Bar, BarType, FundingRateUpdate
+from nautilus_trader.model.data import Bar, BarType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
@@ -107,10 +107,6 @@ class FactorStrategy(Strategy):
         self._signal_closes: list[float] = []
         self._current_sma: float | None = None
 
-        # Funding rate tracking
-        self._last_funding_rate: Decimal | None = None
-        self._funding_rate_count: int = 0
-
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
         self.instrument = self.cache.instrument(self.instrument_id)
@@ -141,10 +137,6 @@ class FactorStrategy(Strategy):
         self.subscribe_data(DataType(FactorValues))
         self.log.info("Subscribed to FactorValues Data")
 
-        # Subscribe to funding rate updates
-        self.subscribe_funding_rates(self.instrument_id)
-        self.log.info(f"Subscribed to funding rates: {self.instrument_id}")
-
         self.log.info(
             f"FactorStrategy started: {self.instrument_id}, "
             f"signal={self.signal_name}, threshold={self.config.entry_threshold}, "
@@ -158,8 +150,7 @@ class FactorStrategy(Strategy):
             self._close_position("STRATEGY_STOP")
 
         self.log.info(
-            f"FactorStrategy stopped: bars={self._bar_count}, signals={self._signal_count}, "
-            f"funding_rates={self._funding_rate_count}"
+            f"FactorStrategy stopped: bars={self._bar_count}, signals={self._signal_count}"
         )
 
     def on_bar(self, bar: Bar) -> None:
@@ -248,23 +239,6 @@ class FactorStrategy(Strategy):
             The position opened event.
         """
         self.log.info(f"Position opened: {event.side} @ {event.avg_px_open}")
-
-    def on_funding_rate(self, funding_rate: FundingRateUpdate) -> None:
-        """Handle funding rate updates.
-
-        Parameters
-        ----------
-        funding_rate : FundingRateUpdate
-            The funding rate update event.
-        """
-        self._funding_rate_count += 1
-        self._last_funding_rate = funding_rate.rate
-
-        self.log.info(
-            f"FUNDING_RATE: {funding_rate.instrument_id} "
-            f"rate={funding_rate.rate:.8f} "
-            f"ts={funding_rate.ts_event}"
-        )
 
     def _check_stop_loss(self, close: float) -> bool:
         """
