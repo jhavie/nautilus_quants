@@ -30,6 +30,13 @@ class CheckpointConfig:
 
 
 @dataclass
+class FundingConfig:
+    """Binance funding rate download configuration."""
+
+    enabled: bool = False
+
+
+@dataclass
 class DownloadConfig:
     """Download configuration."""
 
@@ -41,6 +48,7 @@ class DownloadConfig:
     end_date: str = "2024-12-31"
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
+    funding: FundingConfig = field(default_factory=FundingConfig)
 
 
 @dataclass
@@ -121,6 +129,13 @@ def _parse_checkpoint(data: dict) -> CheckpointConfig:
     )
 
 
+def _parse_funding(data: dict) -> FundingConfig:
+    """Parse funding configuration from dict."""
+    return FundingConfig(
+        enabled=data.get("enabled", False),
+    )
+
+
 def _parse_download(data: dict) -> DownloadConfig:
     """Parse download configuration from dict."""
     return DownloadConfig(
@@ -132,6 +147,7 @@ def _parse_download(data: dict) -> DownloadConfig:
         end_date=data.get("end_date", "2024-12-31"),
         rate_limit=_parse_rate_limit(data.get("rate_limit", {})),
         checkpoint=_parse_checkpoint(data.get("checkpoint", {})),
+        funding=_parse_funding(data.get("funding", {})),
     )
 
 
@@ -272,6 +288,9 @@ def config_to_dict(config: PipelineConfig) -> dict:
             "checkpoint": {
                 "enabled": config.download.checkpoint.enabled,
                 "batch_size": config.download.checkpoint.batch_size,
+            },
+            "funding": {
+                "enabled": config.download.funding.enabled,
             },
         },
         "validate": {

@@ -228,6 +228,31 @@ class DownloadCheckpoint:
 
 
 @dataclass
+class FundingCheckpoint:
+    """Checkpoint for funding rate downloads.
+
+    Used for resumable downloads from Binance funding rate API.
+
+    Attributes:
+        symbol: Trading pair symbol (e.g., "BTCUSDT")
+        exchange: Exchange identifier (e.g., "binance")
+        last_date: Last successfully downloaded date (YYYY-MM-DD format)
+        last_updated: When checkpoint was last updated
+        total_rows: Total rows downloaded so far
+        start_date: Original request start date
+        end_date: Original request end date
+    """
+
+    symbol: str
+    exchange: str
+    last_date: str
+    last_updated: datetime
+    total_rows: int
+    start_date: str
+    end_date: str
+
+
+@dataclass
 class PipelineRunContext:
     """Context for a complete pipeline run.
 

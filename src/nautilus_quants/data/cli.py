@@ -24,6 +24,7 @@ from nautilus_quants.data.download.binance import (
     check_disk_space,
     estimate_download_size,
 )
+from nautilus_quants.data.download.binance_funding import BinanceFundingDownloader
 from nautilus_quants.data.process.processors import ProcessConfig, process_data
 from nautilus_quants.data.reporting import ReportWriter, create_log_dir, generate_run_id
 from nautilus_quants.data.transform.parquet import transform_to_parquet
@@ -78,6 +79,12 @@ def cli(ctx: click.Context, config_path: str, verbose: bool, dry_run: bool) -> N
 )
 @click.option("--resume/--no-resume", default=True, help="Resume from checkpoint")
 @click.option("--force", is_flag=True, help="Re-download even if data exists")
+@click.option(
+    "--data-type",
+    type=click.Choice(["klines", "funding", "all"]),
+    default="all",
+    help="Data type to download: klines, funding, or all",
+)
 @click.pass_context
 def download(
     ctx: click.Context,
@@ -88,6 +95,7 @@ def download(
     market_type: Optional[str],
     resume: bool,
     force: bool,
+    data_type: str,
 ) -> None:
     """Download historical K-line data from Binance."""
     try:
@@ -150,20 +158,29 @@ def download(
         click.echo(f"Error: {space_msg}", err=True)
         ctx.exit(EXIT_DISK_FULL)
 
-    # Run download
-    results = asyncio.run(
-        _run_download(config, resume=resume and not force, verbose=ctx.obj["verbose"])
-    )
+    # Run K-line download (if requested)
+    results = []
+    if data_type in ("klines", "all"):
+        results = asyncio.run(
+            _run_download(config, resume=resume and not force, verbose=ctx.obj["verbose"])
+        )
 
-    # Check results
-    failed = [r for r in results if not r.success]
-    if failed:
-        click.echo(f"\nDownload failed for {len(failed)} symbol(s):", err=True)
-        for r in failed:
-            click.echo(f"  {r.symbol}: {r.errors}", err=True)
-        ctx.exit(EXIT_DOWNLOAD_ERROR)
+    # Binance funding rate download (if enabled and requested)
+    if config.download.funding.enabled and data_type in ("funding", "all"):
+        asyncio.run(_run_funding_download(config, resume=resume and not force, verbose=ctx.obj["verbose"]))
 
-    click.echo(f"\nDownload complete: {len(results)} symbol(s) processed")
+    # Check results (only for klines)
+    if data_type in ("klines", "all"):
+        failed = [r for r in results if not r.success]
+        if failed:
+            click.echo(f"\nDownload failed for {len(failed)} symbol(s):", err=True)
+            for r in failed:
+                click.echo(f"  {r.symbol}: {r.errors}", err=True)
+            ctx.exit(EXIT_DOWNLOAD_ERROR)
+
+        click.echo(f"\nDownload complete: {len(results)} symbol(s) processed")
+    elif data_type == "funding":
+        click.echo("\nFunding rate download complete")
 
 
 async def _run_download(
@@ -201,6 +218,46 @@ async def _run_download(
                 click.echo(f"  ✗ Failed: {result.errors}", err=True)
 
             results.append(result)
+
+    return results
+
+
+async def _run_funding_download(
+    config: PipelineConfig, resume: bool = True, verbose: bool = False
+):
+    """Run Binance funding rate download for all configured symbols."""
+    output_dir = Path(config.paths.raw_data) / config.download.exchange
+    checkpoint_dir = output_dir / ".checkpoints"
+
+    downloader = BinanceFundingDownloader(
+        output_dir=output_dir,
+        checkpoint_dir=checkpoint_dir,
+    )
+
+    click.echo("\nDownloading Binance funding rates...")
+
+    results = []
+    for symbol in config.download.symbols:
+        click.echo(
+            f"  {symbol}: "
+            f"{config.download.start_date} → {config.download.end_date}"
+        )
+
+        result = await downloader.download(
+            symbol=symbol,
+            start_date=config.download.start_date,
+            end_date=config.download.end_date,
+            resume=resume,
+        )
+
+        if result.success:
+            click.echo(f"  ✓ {symbol}: {result.rows_downloaded} rows downloaded")
+            if result.resumed_from_checkpoint:
+                click.echo("    (resumed from checkpoint)")
+        else:
+            click.echo(f"  ✗ {symbol}: {result.error}", err=True)
+
+        results.append(result)
 
     return results
 

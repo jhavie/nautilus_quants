@@ -1,73 +1,67 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""Tardis funding rate data loader for Nautilus Trader.
+"""Binance funding rate CSV loader for Nautilus Trader backtesting.
 
-Wraps Nautilus Trader's TardisCSVDataLoader for loading funding rate data.
+This module provides a loader for Binance funding rate CSV files
+(downloaded via BinanceFundingDownloader) to convert them into
+Nautilus Trader's FundingRateUpdate data type.
+
+The Binance CSV format:
+    symbol,funding_time,funding_rate,mark_price
+    ETHUSDT,1735689600000,0.0001,3500.25
+
+Note: Nautilus Trader's built-in TardisCSVDataLoader.load_funding_rates()
+requires Tardis derivative_ticker format, which is incompatible with
+Binance's funding rate API format.
 """
 
+from decimal import Decimal
 from pathlib import Path
 
-from nautilus_trader.adapters.tardis.loaders import TardisCSVDataLoader
+from nautilus_trader.core.datetime import millis_to_nanos
 from nautilus_trader.model.data import FundingRateUpdate
 from nautilus_trader.model.identifiers import InstrumentId
 
 
 def load_funding_rates(
     file_path: Path | str,
-    instrument_id: InstrumentId | str | None = None,
-    limit: int | None = None,
+    instrument_id: InstrumentId | str,
 ) -> list[FundingRateUpdate]:
-    """Load funding rate data from Tardis derivative_ticker CSV.
-
-    Uses Nautilus Trader's TardisCSVDataLoader to parse the CSV file.
+    """Load funding rates from Binance funding rate CSV.
 
     Args:
-        file_path: Path to the CSV file (derivative_ticker format).
-        instrument_id: Optional InstrumentId to override CSV values.
-        limit: Optional limit on number of records to load.
+        file_path: Path to CSV file (format: symbol,funding_time,funding_rate,mark_price)
+        instrument_id: Nautilus instrument ID for the funding rates
 
     Returns:
-        List of FundingRateUpdate objects.
-
-    Example:
-        >>> from nautilus_quants.data.transform.funding import load_funding_rates
-        >>> rates = load_funding_rates(
-        ...     "data/funding/btcusdt_funding.csv",
-        ...     instrument_id="BTCUSDT-PERP.BINANCE"
-        ... )
-        >>> print(f"Loaded {len(rates)} funding rate updates")
-    """
-    # Handle string instrument_id
-    if isinstance(instrument_id, str):
-        instrument_id = InstrumentId.from_str(instrument_id)
-
-    loader = TardisCSVDataLoader(instrument_id=instrument_id)
-
-    if limit:
-        return loader.load_funding_rates(str(file_path), limit=limit)
-    return loader.load_funding_rates(str(file_path))
-
-
-def stream_funding_rates(
-    file_path: Path | str,
-    instrument_id: InstrumentId | str | None = None,
-    chunk_size: int = 1000,
-):
-    """Stream funding rate data from Tardis CSV in chunks.
-
-    Memory-efficient streaming for large files.
-
-    Args:
-        file_path: Path to the CSV file.
-        instrument_id: Optional InstrumentId to override CSV values.
-        chunk_size: Number of records per chunk.
-
-    Yields:
-        Lists of FundingRateUpdate objects.
+        List of FundingRateUpdate objects sorted by timestamp
     """
     if isinstance(instrument_id, str):
         instrument_id = InstrumentId.from_str(instrument_id)
 
-    loader = TardisCSVDataLoader(instrument_id=instrument_id)
+    file_path = Path(file_path)
+    results = []
 
-    yield from loader.stream_funding_rates(str(file_path), chunk_size=chunk_size)
+    with open(file_path) as f:
+        next(f)  # skip header
+        for line in f:
+            parts = line.strip().split(",")
+            if len(parts) < 3:
+                continue
+
+            funding_time_ms = int(parts[1])
+            rate = Decimal(parts[2])
+
+            # Convert milliseconds to nanoseconds
+            ts_ns = millis_to_nanos(funding_time_ms)
+
+            update = FundingRateUpdate(
+                instrument_id=instrument_id,
+                rate=rate,
+                next_funding_ns=None,  # Not provided by Binance historical API
+                ts_event=ts_ns,
+                ts_init=ts_ns,
+            )
+            results.append(update)
+
+    return sorted(results, key=lambda x: x.ts_event)
