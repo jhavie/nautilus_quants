@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from scipy import stats
 
 from nautilus_quants.factors.operators.base import (
     CrossSectionalOperator,
@@ -551,8 +552,6 @@ class CsQuantile(CrossSectionalOperator):
         sigma: float = 1.0,
         **kwargs: Any,
     ) -> dict[str, float]:
-        from scipy import stats
-
         if not values:
             return {}
 

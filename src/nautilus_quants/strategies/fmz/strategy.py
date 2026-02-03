@@ -175,16 +175,8 @@ class FMZFactorStrategy(Strategy):
         - When timestamp changes, process previous batch
         - Accumulate values for current timestamp
         """
-        # DEBUG: Log all data received
-        if self._bar_count < 5:
-            self.log.info(f"on_data called with type: {type(data).__name__}")
-
         if not isinstance(data, FactorValues):
             return
-
-        # DEBUG: Log first few FactorValues
-        if self._hour_count < 3:
-            self.log.info(f"FactorValues received: ts={data.ts_event}, factors_count={len(data.factors)}")
 
         ts_ns = data.ts_event
         factors = data.factors
@@ -217,13 +209,6 @@ class FMZFactorStrategy(Strategy):
         # Get timestamp from batch
         ts_dt = datetime.fromtimestamp(self._current_batch_ts / 1e9, tz=timezone.utc)
         current_hour = ts_dt.hour
-
-        # DEBUG: Log first few process_batch calls
-        if self._hour_count <= 5:
-            self.log.info(f"_process_batch #{self._hour_count}: ts={ts_dt}, hour={current_hour}, "
-                         f"rebalance_period={self.config.rebalance_period}, "
-                         f"mod={current_hour % self.config.rebalance_period}, "
-                         f"composite_count={len(self._composite_values)}")
 
         # Only rebalance at specific hours (0, 8, 16 for period=8)
         if current_hour % self.config.rebalance_period != 0:

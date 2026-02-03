@@ -5,6 +5,7 @@ Uses Nautilus Trader's native ParquetDataCatalog for compatibility.
 """
 
 import json
+import traceback
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -335,5 +336,5 @@ def transform_to_parquet(
             input_file=str(input_path),
             output_path=str(catalog_path),
             rows_transformed=0,
-            errors=[str(e)],
+            errors=[f"{e}\n{traceback.format_exc()}"],
         )
