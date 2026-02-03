@@ -15,7 +15,6 @@ Constitution Compliance:
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
 
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
@@ -25,9 +24,6 @@ from nautilus_quants.factors.config import load_factor_config
 from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
-
-if TYPE_CHECKING:
-    from nautilus_trader.model.identifiers import InstrumentId
 
 
 class FactorEngineActorConfig(ActorConfig, frozen=True):
@@ -102,9 +98,6 @@ class FactorEngineActor(Actor):
         self._bar_types: list[BarType] = []  # Target bar types to process
 
         # Synchronization state for cross-sectional factors
-        self._expected_instruments: set[str] = set()
-        self._active_instruments: set[str] = set()  # Instruments that have sent data
-        self._pending_bars: dict[int, dict[str, Bar]] = defaultdict(dict)
         self._ts_factor_values: dict[int, dict[str, dict[str, float]]] = defaultdict(
             lambda: defaultdict(dict)
         )
@@ -155,11 +148,6 @@ class FactorEngineActor(Actor):
 
         source_bar_type_strs = list(self._config.bar_types)
         self.log.info(f"Using {len(source_bar_type_strs)} bar types from config")
-
-        # Track expected instruments for synchronization
-        for bar_type_str in source_bar_type_strs:
-            bar_type = BarType.from_str(bar_type_str)
-            self._expected_instruments.add(str(bar_type.instrument_id))
 
         # Determine if aggregation is needed based on interval
         interval = self._config.interval.lower()
@@ -225,11 +213,7 @@ class FactorEngineActor(Actor):
 
         Implements two-phase factor computation:
         1. Compute time-series factors for this bar
-        2. When timestamp changes, process previous batch with available instruments
-
-        FMZ-compatible behavior: Uses instruments that have actually sent data,
-        not the static expected list. This handles instruments that start
-        trading later than others.
+        2. When timestamp changes, process previous batch
 
         Parameters
         ----------
@@ -246,21 +230,13 @@ class FactorEngineActor(Actor):
         instrument_id = str(bar.bar_type.instrument_id)
         ts = bar.ts_event
 
-        # Track active instruments (those that have sent at least one bar)
-        self._active_instruments.add(instrument_id)
-
         # When timestamp changes, process the previous batch
         if self._last_processed_ts > 0 and ts > self._last_processed_ts:
             self._process_complete_batch(self._last_processed_ts)
             # Cleanup old timestamps
-            old_ts = [t for t in self._pending_bars if t < ts]
+            old_ts = [t for t in self._ts_factor_values if t < ts]
             for t in old_ts:
-                del self._pending_bars[t]
-                if t in self._ts_factor_values:
-                    del self._ts_factor_values[t]
-
-        # Store bar for current timestamp
-        self._pending_bars[ts][instrument_id] = bar
+                del self._ts_factor_values[t]
 
         # Compute time-series factors for this bar
         result = self._engine.on_bar(bar)
@@ -304,9 +280,7 @@ class FactorEngineActor(Actor):
         """Reset the actor state."""
         if self._engine:
             self._engine.reset()
-        self._pending_bars.clear()
         self._ts_factor_values.clear()
-        self._active_instruments.clear()
         self._last_processed_ts = 0
         self.log.info("FactorEngineActor reset")
 
