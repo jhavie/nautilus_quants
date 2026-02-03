@@ -271,11 +271,7 @@ class FactorEngineActor(Actor):
                 for inst_id, value in factor_values.items():
                     self._ts_factor_values[ts][factor_name][inst_id] = value
 
-        # Update last processed timestamp when we have enough instruments
-        # Use active instruments (instruments that have sent data) as reference
-        received = set(self._pending_bars[ts].keys())
-        if len(received) >= len(self._active_instruments) * 0.9:  # 90% threshold
-            self._last_processed_ts = ts
+        self._last_processed_ts = ts
 
     def _process_complete_batch(self, ts: int) -> None:
         """

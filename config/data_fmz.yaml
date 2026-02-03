@@ -1,0 +1,191 @@
+# Data Pipeline Configuration
+# See specs/feature-1-binance-data-pipeline/data-model.md for schema details
+version: "1.0"
+
+download:
+  exchange: binance
+  market_type: futures          # spot | futures
+  symbols:
+      - "1000LUNCUSDT"
+      - "1000SHIBUSDT"
+      - "1000XECUSDT"
+      - "1INCHUSDT"
+      - "AAVEUSDT"
+      - "ADAUSDT"
+      - "ALGOUSDT"
+      - "ALICEUSDT"
+      - "ALPHAUSDT"
+      - "ANKRUSDT"
+      - "ANTUSDT"
+      - "APEUSDT"
+      - "API3USDT"
+      - "ARPAUSDT"
+      - "ARUSDT"
+      - "ATAUSDT"
+      - "ATOMUSDT"
+      - "AUDIOUSDT"
+      - "AVAXUSDT"
+      - "AXSUSDT"
+      - "BAKEUSDT"
+      - "BALUSDT"
+      - "BANDUSDT"
+      - "BATUSDT"
+      - "BCHUSDT"
+      - "BELUSDT"
+      - "BLZUSDT"
+      - "BNBUSDT"
+      - "BTCDOMUSDT"
+      - "BTCUSDT"
+      - "C98USDT"
+      - "CELOUSDT"
+      - "CELRUSDT"
+      - "CHRUSDT"
+      - "CHZUSDT"
+      - "COMPUSDT"
+      - "COTIUSDT"
+      - "CRVUSDT"
+      - "CTKUSDT"
+      - "CTSIUSDT"
+      - "CVCUSDT"
+      - "CVXUSDT"
+      - "DARUSDT"
+      - "DASHUSDT"
+      - "DEFIUSDT"
+      - "DENTUSDT"
+      - "DGBUSDT"
+      - "DOGEUSDT"
+      - "DOTUSDT"
+      - "DUSKUSDT"
+      - "DYDXUSDT"
+      - "EGLDUSDT"
+      - "ENJUSDT"
+      - "ENSUSDT"
+      - "ETCUSDT"
+      - "ETHUSDT"
+      - "FILUSDT"
+      - "FLMUSDT"
+      - "FLOWUSDT"
+      - "FTMUSDT"
+      - "GALAUSDT"
+      - "GALUSDT"
+      - "GMTUSDT"
+      - "GRTUSDT"
+      - "GTCUSDT"
+      - "HBARUSDT"
+      - "HOTUSDT"
+      - "ICPUSDT"
+      - "ICXUSDT"
+      - "IMXUSDT"
+      - "INJUSDT"
+      - "IOSTUSDT"
+      - "IOTAUSDT"
+      - "IOTXUSDT"
+      - "JASMYUSDT"
+      - "KAVAUSDT"
+      - "KLAYUSDT"
+      - "KSMUSDT"
+      - "LDOUSDT"
+      - "LINAUSDT"
+      - "LINKUSDT"
+      - "LITUSDT"
+      - "LPTUSDT"
+      - "LRCUSDT"
+      - "LTCUSDT"
+      - "LUNA2USDT"
+      - "MANAUSDT"
+      - "MASKUSDT"
+      - "MATICUSDT"
+      - "MKRUSDT"
+      - "MTLUSDT"
+      - "NEARUSDT"
+      - "NEOUSDT"
+      - "NKNUSDT"
+      - "OCEANUSDT"
+      - "OGNUSDT"
+      - "OMGUSDT"
+      - "ONEUSDT"
+      - "ONTUSDT"
+      - "OPUSDT"
+      - "PEOPLEUSDT"
+      - "QTUMUSDT"
+      - "REEFUSDT"
+      - "RENUSDT"
+      - "RLCUSDT"
+      - "ROSEUSDT"
+      - "RSRUSDT"
+      - "RUNEUSDT"
+      - "RVNUSDT"
+      - "SANDUSDT"
+      - "SCUSDT"
+      - "SFPUSDT"
+      - "SKLUSDT"
+      - "SNXUSDT"
+      - "SOLUSDT"
+      - "SPELLUSDT"
+      - "STGUSDT"
+      - "STMXUSDT"
+      - "STORJUSDT"
+      - "SUSHIUSDT"
+      - "SXPUSDT"
+      - "THETAUSDT"
+      - "TLMUSDT"
+      - "TRBUSDT"
+      - "TRXUSDT"
+      - "UNFIUSDT"
+      - "UNIUSDT"
+      - "VETUSDT"
+      - "WAVESUSDT"
+      - "WOOUSDT"
+      - "XEMUSDT"
+      - "XLMUSDT"
+      - "XMRUSDT"
+      - "XRPUSDT"
+      - "XTZUSDT"
+      - "YFIUSDT"
+      - "ZECUSDT"
+      - "ZENUSDT"
+      - "ZILUSDT"
+      - "ZRXUSDT"
+  timeframes:
+    - 1h
+  start_date: "2022-01-01"
+  end_date: "2025-12-31"
+
+  # Rate limiting configuration
+  rate_limit:
+    max_retries: 5
+    initial_delay_seconds: 1
+    max_delay_seconds: 60
+    backoff_multiplier: 2
+
+  # Checkpoint settings
+  checkpoint:
+    enabled: true
+    batch_size: 1000            # Save checkpoint every N klines
+
+validate:
+  check_duplicates: true
+  check_gaps: true
+  check_ohlc: true
+  fail_on_warnings: false       # If true, warnings become errors
+
+process:
+  remove_duplicates: true
+  keep_duplicate: "last"        # first | last
+  fill_small_gaps: true
+  max_gap_bars: 3               # Gaps <= 3 bars are filled
+  remove_invalid_ohlc: true
+
+transform:
+  output_format: parquet
+  merge_files: true
+  catalog_path: "data/catalog"
+  # Fee configuration for instruments
+  maker_fee: "0.0002"    # Default 0.02%
+  taker_fee: "0.0002"    # Default 0.04%
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  catalog: "data/catalog"
+  logs: "logs/data_pipeline"

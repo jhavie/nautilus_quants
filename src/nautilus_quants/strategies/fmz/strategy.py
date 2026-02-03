@@ -19,7 +19,6 @@ Constitution Compliance:
 
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -231,11 +230,8 @@ class FMZFactorStrategy(Strategy):
             self._composite_values = {}
             return
 
-        # Filter out NaN values
-        composite = {
-            k: v for k, v in self._composite_values.items()
-            if not math.isnan(v)
-        }
+        # Use composite values directly - NaN filtering is handled by CsFactorEngine
+        composite = self._composite_values
 
         if len(composite) < self.config.n_long + self.config.n_short:
             self.log.warning(

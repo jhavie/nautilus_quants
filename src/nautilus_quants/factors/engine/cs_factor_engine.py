@@ -141,15 +141,26 @@ class CsFactorEngine:
         """
         Compute all cross-sectional factors.
 
+        Filters NaN values at both input and output to ensure clean data.
+        This follows the FMZ pattern where norm_factor handles NaN in the factor layer.
+
         Args:
             ts_factor_values: Time-series factor values from Phase 1.
                 Format: {factor_name: {instrument_id: value}}
 
         Returns:
-            Cross-sectional factor values.
+            Cross-sectional factor values with NaN filtered out.
                 Format: {factor_name: {instrument_id: value}}
         """
-        all_values = dict(ts_factor_values)
+        # Filter NaN from input factor values
+        filtered_values: dict[str, dict[str, float]] = {}
+        for factor_name, inst_values in ts_factor_values.items():
+            filtered_values[factor_name] = {
+                inst_id: val for inst_id, val in inst_values.items()
+                if not np.isnan(val)
+            }
+
+        all_values = dict(filtered_values)
         cs_results: dict[str, dict[str, float]] = {}
 
         for factor_def in self._cs_factors:
@@ -157,6 +168,8 @@ class CsFactorEngine:
                 factor_def.expression,
                 all_values,
             )
+            # Filter NaN from output
+            result = {k: v for k, v in result.items() if not np.isnan(v)}
             cs_results[factor_def.name] = result
             all_values[factor_def.name] = result
 
