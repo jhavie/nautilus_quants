@@ -24,6 +24,7 @@ from nautilus_quants.backtest.protocols import (
     MetadataRenderer,
     PositionMetadataProvider,
 )
+from nautilus_quants.backtest.registry import RendererRegistry
 from nautilus_quants.backtest.reports import ReportGenerator
 
 __all__ = [
@@ -34,11 +35,12 @@ __all__ = [
     "ReportConfig",
     "TearsheetConfig",
     "QuantStatsConfig",
-    # Protocols
+    # Protocols and Registry
     "PositionMetadataProvider",
     "MetadataRenderer",
     "BaseMetadataRenderer",
     "ColumnConfig",
+    "RendererRegistry",
     # Exceptions
     "BacktestError",
     "BacktestConfigError",
