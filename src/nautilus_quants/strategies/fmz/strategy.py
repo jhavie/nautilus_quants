@@ -255,6 +255,8 @@ class FMZFactorStrategy(Strategy):
         FMZ DOES NOT close positions that fall out of top/bottom N.
         Positions are only closed when they FLIP direction.
 
+        Enhancement: Close positions for instruments missing from factor data (e.g., delisted).
+
         In HEDGING mode, we need 2 trades to flip (close + open).
         """
         # Sort by factor value
@@ -263,6 +265,24 @@ class FMZFactorStrategy(Strategy):
         # Determine long/short targets
         long_targets = set([s for s, _ in sorted_symbols[:self.config.n_long]])
         short_targets = set([s for s, _ in sorted_symbols[-self.config.n_short:]])
+
+        # === Close positions for instruments missing from factor data ===
+        # This handles delisted instruments or data gaps
+        instruments_with_data = set(composite.keys())
+
+        # Check long positions for missing data
+        missing_long = self._long_positions - instruments_with_data
+        for inst_id in missing_long:
+            self.log.warning(f"Closing LONG {inst_id}: no factor data (possible delisting)")
+            self._close_position(inst_id, "NO_FACTOR_DATA")
+            self._long_positions.discard(inst_id)
+
+        # Check short positions for missing data
+        missing_short = self._short_positions - instruments_with_data
+        for inst_id in missing_short:
+            self.log.warning(f"Closing SHORT {inst_id}: no factor data (possible delisting)")
+            self._close_position(inst_id, "NO_FACTOR_DATA")
+            self._short_positions.discard(inst_id)
 
         if self._hour_count <= 10 or self._hour_count % 24 == 0:
             self.log.info(

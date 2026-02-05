@@ -23,12 +23,6 @@ venues:
     starting_balances:
       - "10000 USDT"
     default_leverage: 1
-    fee_model:
-      fee_model_path: "nautilus_trader.backtest.models:MakerTakerFeeModel"
-      config_path: "nautilus_trader.backtest.config:FeeModelConfig"
-      config:
-        maker_fee: 0.0002
-        taker_fee: 0.0002
 
 data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog_quote_volume"

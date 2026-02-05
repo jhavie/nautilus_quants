@@ -21,15 +21,9 @@ venues:
     starting_balances:
       - "10000 USDT"
     default_leverage: 1
-    fee_model:
-      fee_model_path: "nautilus_trader.backtest.models:MakerTakerFeeModel"
-      config_path: "nautilus_trader.backtest.config:FeeModelConfig"
-      config:
-        maker_fee: 0.0002
-        taker_fee: 0.0002
 
 data:
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
+  - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-012-fmz-strategy/data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "1h"
     instrument_ids:
@@ -174,7 +168,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-09-14"
+    end_time: "2022-01-31"
 
 engine:
   trader_id: "BACKTESTER-FMZ-001"
@@ -341,7 +335,7 @@ engine:
         n_long: 40
         n_short: 40
         position_value: 300
-        rebalance_period: 8
+        rebalance_period: 4
         composite_factor: "composite"
 
 report:
