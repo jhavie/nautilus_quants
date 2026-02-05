@@ -77,9 +77,8 @@ factors:
   # ========== 4 因子合成 ==========
   # FMZ: 0.6 * df_volume_norm + 0.4 * factor_1_norm + 0.3 * factor_7_norm + 0.4 * factor_8_norm
   composite:
-    # expression: "0.2 * volume_norm + 0.6 * momentum_24h_norm + 0.2 * corr_norm"
-    expression: "momentum_24h_norm"
-    description: "4-factor composite: Volume(0.6) + Momentum(0.4) + Volatility(0.3) + Corr(0.4)"
+    expression: "0.6 * volume_norm + 0.4 * momentum_3h_norm + 0.3 * volatility_norm + 0.4 * corr_norm"
+    description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
 
 performance:
   enable_timing: true
