@@ -1,0 +1,85 @@
+# FMZ 4-Factor Strategy Configuration
+# Exact replication of fmz_4factor_detailed.py
+#
+# 4 因子公式 (来自 fmz_4factor_detailed.py):
+#   - volume: 成交量 (权重 0.6)
+#   - factor_1 (momentum_3h): 3小时动量 (权重 0.4)
+#   - factor_7 (volatility): 波动率 (权重 0.3)
+#   - factor_8 (corr): 量价相关性 (权重 0.4)
+#
+# 归一化方法 (norm_factor):
+#   1. quantile(0.2, 0.8) clip
+#   2. z-score (subtract mean, divide by std)
+#
+# 合成公式:
+#   composite = 0.6 * volume_norm + 0.4 * momentum_norm + 0.3 * volatility_norm + 0.4 * corr_norm
+
+metadata:
+  name: fmz_4factor
+  version: "1.0"
+  description: "FMZ 4-factor composite (exact replication from fmz_4factor_detailed.py)"
+
+factors:
+  # ========== 原始因子 (Phase 1: Time-Series) ==========
+
+  # 成交量因子
+  volume:
+    expression: "volume"
+    description: "Quote volume (USDT turnover)"
+
+  # 3小时动量因子 (factor_1 in FMZ)
+  # FMZ: (df_close - df_close.shift(3)) / df_close.shift(3)
+  momentum_3h:
+    expression: "(close - delay(close, 3)) / delay(close, 3)"
+    description: "3-hour momentum factor"
+
+  momentum_24h:
+    expression: "(close - delay(close, 24)) / delay(close, 24)"
+    description: "24-hour momentum factor"
+
+  # 波动率因子 (factor_7 in FMZ)
+  # FMZ: (df_close / df_open).rolling(24).std()
+  volatility:
+    expression: "ts_std(close / open, 24)"
+    description: "24-hour volatility (close/open std)"
+
+  # 量价相关性因子 (factor_8 in FMZ)
+  # FMZ: df_close.rolling(96).corr(df_volume)
+  corr:
+    expression: "correlation(close, volume, 96)"
+    description: "96-hour price-volume correlation"
+
+  # ========== 归一化因子 (Phase 2: Cross-Sectional) ==========
+  # FMZ norm_factor:
+  #   factor_clip = factor.apply(lambda x: x.clip(x.quantile(0.2), x.quantile(0.8)), axis=1)
+  #   factor_norm = factor_clip.add(-factor_clip.mean(axis=1), axis='index').div(factor_clip.std(axis=1), axis='index')
+
+  volume_norm:
+    expression: "normalize(clip_quantile(volume, 0.2, 0.8), true, 0)"
+    description: "Normalized volume (quantile clip + z-score)"
+
+  momentum_3h_norm:
+    expression: "normalize(clip_quantile(momentum_3h, 0.2, 0.8), true, 0)"
+    description: "Normalized 3h momentum (quantile clip + z-score)"
+
+  momentum_24h_norm:
+    expression: "normalize(clip_quantile(momentum_24h, 0.2, 0.8), true, 0)"
+    description: "Normalized 24h momentum (quantile clip + z-score)"
+
+  volatility_norm:
+    expression: "normalize(clip_quantile(volatility, 0.2, 0.8), true, 0)"
+    description: "Normalized volatility (quantile clip + z-score)"
+
+  corr_norm:
+    expression: "normalize(clip_quantile(corr, 0.2, 0.8), true, 0)"
+    description: "Normalized correlation (quantile clip + z-score)"
+
+  # ========== 4 因子合成 ==========
+  # FMZ: 0.6 * df_volume_norm + 0.4 * factor_1_norm + 0.3 * factor_7_norm + 0.4 * factor_8_norm
+  composite:
+    expression: "0.6 * volume_norm + 0.4 * momentum_3h_norm + 0.3 * volatility_norm + 0.4 * corr_norm"
+    description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

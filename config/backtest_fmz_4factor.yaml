@@ -1,0 +1,345 @@
+# FMZ 4-Factor Strategy Backtest Configuration
+# Exact replication of fmz_4factor_detailed.py
+#
+# 125 Symbols (from NAUTILUS_SYMBOLS in fmz_4factor_detailed.py)
+# 时间范围: 2022-01-01 ~ 2022-02-01
+# 初始资金: 10000 USDT
+# 持仓数量: 多空各40个
+# 单品种仓位: 300 USDT
+# 调仓周期: 8小时
+# 手续费: 0.02%
+#
+# 4 因子合成 (from fmz_4factor_detailed.py):
+#   - Volume: 0.6
+#   - Momentum_3h: 0.4
+#   - Volatility: 0.3
+#   - Corr: 0.4
+
+venues:
+  - name: "BINANCE"
+    oms_type: "HEDGING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog_quote_volume"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "1h"
+    instrument_ids:
+      # 125 Symbols from fmz_4factor_detailed.py NAUTILUS_SYMBOLS
+      - "1000SHIBUSDT.BINANCE"
+      - "1000XECUSDT.BINANCE"
+      - "1INCHUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "ALICEUSDT.BINANCE"
+      - "ALPHAUSDT.BINANCE"
+      - "ANKRUSDT.BINANCE"
+      - "ANTUSDT.BINANCE"
+      - "ARPAUSDT.BINANCE"
+      - "ARUSDT.BINANCE"
+      - "ATAUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "AUDIOUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "BAKEUSDT.BINANCE"
+      - "BALUSDT.BINANCE"
+      - "BANDUSDT.BINANCE"
+      - "BATUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+      - "BELUSDT.BINANCE"
+      - "BLZUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "BTCDOMUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "BTSUSDT.BINANCE"
+      - "C98USDT.BINANCE"
+      - "CELOUSDT.BINANCE"
+      - "CELRUSDT.BINANCE"
+      - "CHRUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "COMPUSDT.BINANCE"
+      - "COTIUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "CTSIUSDT.BINANCE"
+      - "DASHUSDT.BINANCE"
+      - "DEFIUSDT.BINANCE"
+      - "DENTUSDT.BINANCE"
+      - "DGBUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "DUSKUSDT.BINANCE"
+      - "DYDXUSDT.BINANCE"
+      - "EGLDUSDT.BINANCE"
+      - "ENJUSDT.BINANCE"
+      - "ENSUSDT.BINANCE"
+      - "EOSUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "FLMUSDT.BINANCE"
+      - "FTMUSDT.BINANCE"
+      - "GALAUSDT.BINANCE"
+      - "GRTUSDT.BINANCE"
+      - "GTCUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "HNTUSDT.BINANCE"
+      - "HOTUSDT.BINANCE"
+      - "ICXUSDT.BINANCE"
+      - "IOSTUSDT.BINANCE"
+      - "IOTAUSDT.BINANCE"
+      - "IOTXUSDT.BINANCE"
+      - "KAVAUSDT.BINANCE"
+      - "KLAYUSDT.BINANCE"
+      - "KNCUSDT.BINANCE"
+      - "KSMUSDT.BINANCE"
+      - "LINAUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "LPTUSDT.BINANCE"
+      - "LRCUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "MANAUSDT.BINANCE"
+      - "MASKUSDT.BINANCE"
+      - "MATICUSDT.BINANCE"
+      - "MKRUSDT.BINANCE"
+      - "MTLUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "NEOUSDT.BINANCE"
+      - "NKNUSDT.BINANCE"
+      - "OCEANUSDT.BINANCE"
+      - "OGNUSDT.BINANCE"
+      - "OMGUSDT.BINANCE"
+      - "ONEUSDT.BINANCE"
+      - "ONTUSDT.BINANCE"
+      - "PEOPLEUSDT.BINANCE"
+      - "QTUMUSDT.BINANCE"
+      - "RAYUSDT.BINANCE"
+      - "REEFUSDT.BINANCE"
+      - "RENUSDT.BINANCE"
+      - "RLCUSDT.BINANCE"
+      - "ROSEUSDT.BINANCE"
+      - "RSRUSDT.BINANCE"
+      - "RUNEUSDT.BINANCE"
+      - "RVNUSDT.BINANCE"
+      - "SANDUSDT.BINANCE"
+      - "SCUSDT.BINANCE"
+      - "SFPUSDT.BINANCE"
+      - "SKLUSDT.BINANCE"
+      - "SNXUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "SRMUSDT.BINANCE"
+      - "STMXUSDT.BINANCE"
+      - "STORJUSDT.BINANCE"
+      - "SUSHIUSDT.BINANCE"
+      - "SXPUSDT.BINANCE"
+      - "THETAUSDT.BINANCE"
+      - "TOMOUSDT.BINANCE"
+      - "TRBUSDT.BINANCE"
+      - "TRXUSDT.BINANCE"
+      - "UNFIUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "VETUSDT.BINANCE"
+      - "WAVESUSDT.BINANCE"
+      - "XEMUSDT.BINANCE"
+      - "XLMUSDT.BINANCE"
+      - "XMRUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "XTZUSDT.BINANCE"
+      - "YFIUSDT.BINANCE"
+      - "ZECUSDT.BINANCE"
+      - "ZENUSDT.BINANCE"
+      - "ZILUSDT.BINANCE"
+      - "ZRXUSDT.BINANCE"
+    start_time: "2022-01-01"
+    end_time: "2022-09-14"
+
+engine:
+  trader_id: "BACKTESTER-FMZ-4F-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true
+
+  actors:
+    - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
+      config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/factors_fmz_4factor.yaml"
+        interval: "1m"  # Use source bars directly (1h EXTERNAL) - no aggregation needed
+        signal_prefix: "factor"
+        max_history: 200
+        publish_signals: true
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
+      config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
+      config:
+        instrument_ids:
+          # 125 Symbols - same as data section
+          - "1000SHIBUSDT.BINANCE"
+          - "1000XECUSDT.BINANCE"
+          - "1INCHUSDT.BINANCE"
+          - "AAVEUSDT.BINANCE"
+          - "ADAUSDT.BINANCE"
+          - "ALGOUSDT.BINANCE"
+          - "ALICEUSDT.BINANCE"
+          - "ALPHAUSDT.BINANCE"
+          - "ANKRUSDT.BINANCE"
+          - "ANTUSDT.BINANCE"
+          - "ARPAUSDT.BINANCE"
+          - "ARUSDT.BINANCE"
+          - "ATAUSDT.BINANCE"
+          - "ATOMUSDT.BINANCE"
+          - "AUDIOUSDT.BINANCE"
+          - "AVAXUSDT.BINANCE"
+          - "AXSUSDT.BINANCE"
+          - "BAKEUSDT.BINANCE"
+          - "BALUSDT.BINANCE"
+          - "BANDUSDT.BINANCE"
+          - "BATUSDT.BINANCE"
+          - "BCHUSDT.BINANCE"
+          - "BELUSDT.BINANCE"
+          - "BLZUSDT.BINANCE"
+          - "BNBUSDT.BINANCE"
+          - "BTCDOMUSDT.BINANCE"
+          - "BTCUSDT.BINANCE"
+          - "BTSUSDT.BINANCE"
+          - "C98USDT.BINANCE"
+          - "CELOUSDT.BINANCE"
+          - "CELRUSDT.BINANCE"
+          - "CHRUSDT.BINANCE"
+          - "CHZUSDT.BINANCE"
+          - "COMPUSDT.BINANCE"
+          - "COTIUSDT.BINANCE"
+          - "CRVUSDT.BINANCE"
+          - "CTSIUSDT.BINANCE"
+          - "DASHUSDT.BINANCE"
+          - "DEFIUSDT.BINANCE"
+          - "DENTUSDT.BINANCE"
+          - "DGBUSDT.BINANCE"
+          - "DOGEUSDT.BINANCE"
+          - "DOTUSDT.BINANCE"
+          - "DUSKUSDT.BINANCE"
+          - "DYDXUSDT.BINANCE"
+          - "EGLDUSDT.BINANCE"
+          - "ENJUSDT.BINANCE"
+          - "ENSUSDT.BINANCE"
+          - "EOSUSDT.BINANCE"
+          - "ETCUSDT.BINANCE"
+          - "ETHUSDT.BINANCE"
+          - "FILUSDT.BINANCE"
+          - "FLMUSDT.BINANCE"
+          - "FTMUSDT.BINANCE"
+          - "GALAUSDT.BINANCE"
+          - "GRTUSDT.BINANCE"
+          - "GTCUSDT.BINANCE"
+          - "HBARUSDT.BINANCE"
+          - "HNTUSDT.BINANCE"
+          - "HOTUSDT.BINANCE"
+          - "ICXUSDT.BINANCE"
+          - "IOSTUSDT.BINANCE"
+          - "IOTAUSDT.BINANCE"
+          - "IOTXUSDT.BINANCE"
+          - "KAVAUSDT.BINANCE"
+          - "KLAYUSDT.BINANCE"
+          - "KNCUSDT.BINANCE"
+          - "KSMUSDT.BINANCE"
+          - "LINAUSDT.BINANCE"
+          - "LINKUSDT.BINANCE"
+          - "LPTUSDT.BINANCE"
+          - "LRCUSDT.BINANCE"
+          - "LTCUSDT.BINANCE"
+          - "MANAUSDT.BINANCE"
+          - "MASKUSDT.BINANCE"
+          - "MATICUSDT.BINANCE"
+          - "MKRUSDT.BINANCE"
+          - "MTLUSDT.BINANCE"
+          - "NEARUSDT.BINANCE"
+          - "NEOUSDT.BINANCE"
+          - "NKNUSDT.BINANCE"
+          - "OCEANUSDT.BINANCE"
+          - "OGNUSDT.BINANCE"
+          - "OMGUSDT.BINANCE"
+          - "ONEUSDT.BINANCE"
+          - "ONTUSDT.BINANCE"
+          - "PEOPLEUSDT.BINANCE"
+          - "QTUMUSDT.BINANCE"
+          - "RAYUSDT.BINANCE"
+          - "REEFUSDT.BINANCE"
+          - "RENUSDT.BINANCE"
+          - "RLCUSDT.BINANCE"
+          - "ROSEUSDT.BINANCE"
+          - "RSRUSDT.BINANCE"
+          - "RUNEUSDT.BINANCE"
+          - "RVNUSDT.BINANCE"
+          - "SANDUSDT.BINANCE"
+          - "SCUSDT.BINANCE"
+          - "SFPUSDT.BINANCE"
+          - "SKLUSDT.BINANCE"
+          - "SNXUSDT.BINANCE"
+          - "SOLUSDT.BINANCE"
+          - "SRMUSDT.BINANCE"
+          - "STMXUSDT.BINANCE"
+          - "STORJUSDT.BINANCE"
+          - "SUSHIUSDT.BINANCE"
+          - "SXPUSDT.BINANCE"
+          - "THETAUSDT.BINANCE"
+          - "TOMOUSDT.BINANCE"
+          - "TRBUSDT.BINANCE"
+          - "TRXUSDT.BINANCE"
+          - "UNFIUSDT.BINANCE"
+          - "UNIUSDT.BINANCE"
+          - "VETUSDT.BINANCE"
+          - "WAVESUSDT.BINANCE"
+          - "XEMUSDT.BINANCE"
+          - "XLMUSDT.BINANCE"
+          - "XMRUSDT.BINANCE"
+          - "XRPUSDT.BINANCE"
+          - "XTZUSDT.BINANCE"
+          - "YFIUSDT.BINANCE"
+          - "ZECUSDT.BINANCE"
+          - "ZENUSDT.BINANCE"
+          - "ZILUSDT.BINANCE"
+          - "ZRXUSDT.BINANCE"
+        n_long: 40
+        n_short: 40
+        position_value: 300
+        rebalance_period: 8
+        composite_factor: "composite"
+
+report:
+  output_dir: "logs/fmz_4factor_backtest"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "FMZ 4-Factor Strategy Backtest (2022-01 to 2022-09)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "FMZ 4-Factor QuantStats Analysis"
+    output_format:
+      - html
+      - png
+  position_viz:
+    enabled: true
+    title: "FMZ 4-Factor Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "8h"

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from scipy import stats
 
 from nautilus_quants.factors.operators.base import (
     CrossSectionalOperator,
@@ -338,7 +339,7 @@ class CsNormalize(CrossSectionalOperator):
 
         if use_std:
             normalized_values = [r for r in result.values() if not np.isnan(r)]
-            std = np.std(normalized_values, ddof=0)  # WorldQuant uses population std
+            std = np.std(normalized_values, ddof=1)  # FMZ/pandas uses sample std
             if std > 0:
                 result = {
                     k: v / std if not np.isnan(v) else float('nan')
@@ -461,6 +462,67 @@ class CsScaleDown(CrossSectionalOperator):
 
 
 @register_operator
+class CsClipQuantile(CrossSectionalOperator):
+    """
+    Cross-sectional quantile clip (FMZ style).
+
+    clip_quantile(x, lower=0.2, upper=0.8)
+
+    Clips values to the specified quantile range. Values below the lower
+    quantile are set to the lower quantile value, and values above the
+    upper quantile are set to the upper quantile value.
+
+    This is exactly the method used in FMZ multi-factor strategy:
+        factor_clip = factor.apply(lambda x: x.clip(x.quantile(0.2), x.quantile(0.8)), axis=1)
+
+    Example:
+        x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        q20 = 2.8, q80 = 8.2
+        clip_quantile(x, 0.2, 0.8) = [2.8, 2.8, 3, 4, 5, 6, 7, 8, 8.2, 8.2]
+    """
+
+    name = "clip_quantile"
+    min_args = 1
+    max_args = 3
+
+    def compute(
+        self,
+        values: dict[str, float],
+        lower: float = 0.2,
+        upper: float = 0.8,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        if not values:
+            return {}
+
+        valid_values = [v for v in values.values() if not np.isnan(v)]
+        if len(valid_values) < 3:
+            return values.copy()
+
+        arr = np.array(valid_values)
+        q_lower = np.quantile(arr, lower)
+        q_upper = np.quantile(arr, upper)
+
+        result: dict[str, float] = {}
+        for k, v in values.items():
+            if np.isnan(v):
+                result[k] = float('nan')
+            else:
+                result[k] = float(max(q_lower, min(q_upper, v)))
+
+        return result
+
+
+def clip_quantile(
+    values: dict[str, float],
+    lower: float = 0.2,
+    upper: float = 0.8,
+) -> dict[str, float]:
+    """Cross-sectional quantile clip (FMZ style)."""
+    return CsClipQuantile().compute(values, lower=lower, upper=upper)
+
+
+@register_operator
 class CsQuantile(CrossSectionalOperator):
     """
     Cross-sectional quantile transform (WorldQuant BRAIN style).
@@ -490,8 +552,6 @@ class CsQuantile(CrossSectionalOperator):
         sigma: float = 1.0,
         **kwargs: Any,
     ) -> dict[str, float]:
-        from scipy import stats
-
         if not values:
             return {}
 
@@ -671,6 +731,7 @@ CROSS_SECTIONAL_OPERATORS = {
     "winsorize": winsorize,
     "scale_down": scale_down,
     "quantile": quantile,
+    "clip_quantile": clip_quantile,  # FMZ style
     # Aliases for backward compatibility
     "rank": rank,
     "scale": scale,

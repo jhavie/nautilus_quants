@@ -5,6 +5,7 @@ Uses Nautilus Trader's native ParquetDataCatalog for compatibility.
 """
 
 import json
+import traceback
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -200,6 +201,9 @@ def csv_to_bars(
     Uses Nautilus Trader's optimized BarDataWrangler for batch processing,
     which is 10-100x faster than manual iteration with df.iterrows().
 
+    Note: Uses quote_volume (USDT turnover) as the volume field, which is
+    the standard for crypto futures trading.
+
     Args:
         csv_path: Path to processed CSV file
         instrument: CryptoPerpetual instrument (provides precision automatically)
@@ -218,7 +222,10 @@ def csv_to_bars(
     # Prepare DataFrame format (BarDataWrangler expects timestamp as index)
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
     df = df.set_index("timestamp")
-    df = df[["open", "high", "low", "close", "volume"]]
+
+    # Use quote_volume (USDT turnover) as volume - standard for crypto futures trading
+    df = df[["open", "high", "low", "close", "quote_volume"]]
+    df = df.rename(columns={"quote_volume": "volume"})
 
     # Use official Wrangler for batch conversion
     wrangler = BarDataWrangler(bar_type, instrument)
@@ -236,6 +243,9 @@ def transform_to_parquet(
     taker_fee: str = "0.0004",
 ) -> TransformResult:
     """Transform processed CSV to Nautilus Parquet format.
+
+    Note: Uses quote_volume (USDT turnover) as the volume field if available,
+    which is the standard for crypto futures trading.
 
     Args:
         input_path: Path to processed CSV file
@@ -326,5 +336,5 @@ def transform_to_parquet(
             input_file=str(input_path),
             output_path=str(catalog_path),
             rows_transformed=0,
-            errors=[str(e)],
+            errors=[f"{e}\n{traceback.format_exc()}"],
         )
