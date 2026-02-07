@@ -17,6 +17,7 @@ import pickle
 from typing import Any
 
 from nautilus_quants.backtest.protocols import ColumnConfig
+from nautilus_quants.backtest.registry import RendererRegistry
 
 
 class CrossSectionalMetadataProvider:
@@ -124,6 +125,7 @@ class CrossSectionalMetadataProvider:
         return pickle.dumps(self.get_all_metadata())
 
 
+@RendererRegistry.register_as("cross_sectional")
 class CrossSectionalMetadataRenderer:
     """Renders CrossSectional strategy metadata for HTML reports.
 
@@ -222,14 +224,3 @@ class CrossSectionalMetadataRenderer:
             "entry_rank": entry_rank,
             "entry_composite": entry_composite,
         }
-
-
-# Self-register renderer so backtest module has zero import dependency on strategies
-def _register_renderer() -> None:
-    from nautilus_quants.backtest.registry import RendererRegistry
-
-    if "cross_sectional" not in RendererRegistry._renderers:
-        RendererRegistry.register("cross_sectional", CrossSectionalMetadataRenderer)
-
-
-_register_renderer()

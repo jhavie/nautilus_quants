@@ -45,6 +45,21 @@ class RendererRegistry:
         cls._renderers[name] = factory
 
     @classmethod
+    def register_as(cls, name: str):
+        """Class decorator for self-registration.
+
+        Usage in strategy metadata.py::
+
+            @RendererRegistry.register_as("cross_sectional")
+            class CrossSectionalMetadataRenderer:
+                ...
+        """
+        def decorator(renderer_cls):
+            cls._renderers[name] = renderer_cls
+            return renderer_cls
+        return decorator
+
+    @classmethod
     def get(cls, name: str | None) -> MetadataRenderer:
         """Get renderer instance by name.
 
