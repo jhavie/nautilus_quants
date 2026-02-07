@@ -85,6 +85,11 @@ class PositionVisualizationConfig:
 
     Generates an interactive HTML chart showing equity curve and position timeline
     with long/short position details on hover.
+
+    Attributes:
+        metadata_renderer: Name of the MetadataRenderer to use for position
+            metadata. Options: "base" (default), "cross_sectional".
+            Use "cross_sectional" for strategies that store rank/composite info.
     """
 
     enabled: bool = True  # Default enabled
@@ -92,6 +97,7 @@ class PositionVisualizationConfig:
     output_subdir: str = "echarts"  # Subdirectory name, outputs to {output_dir}/{output_subdir}/
     chart_height: int = 500
     interval: str = "4h"  # Sampling interval, default 4 hours
+    metadata_renderer: str | None = None  # None = use "base" default
 
 
 @dataclass(frozen=True)

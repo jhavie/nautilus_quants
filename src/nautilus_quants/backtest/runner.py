@@ -10,7 +10,6 @@ import yaml
 from nautilus_trader.backtest.node import BacktestNode
 from nautilus_trader.config import BacktestRunConfig
 
-from nautilus_quants.backtest.config import ReportConfig
 from nautilus_quants.backtest.exceptions import BacktestConfigError
 from nautilus_quants.backtest.reports import ReportGenerator
 from nautilus_quants.backtest.utils.config_parser import (
@@ -123,10 +122,20 @@ def run_backtest(
     statistics: dict[str, Any] = {}
 
     if report_config and output_dir:
+        # Get metadata renderer from config (explicit) or use default
+        from nautilus_quants.backtest.registry import RendererRegistry
+
+        renderer_name = None
+        if report_config.position_viz:
+            renderer_name = report_config.position_viz.metadata_renderer
+
+        metadata_renderer = RendererRegistry.get(renderer_name)
+
         report_generator = ReportGenerator(
             engine=engine,
             output_dir=output_dir,
             config=report_config,
+            metadata_renderer=metadata_renderer,
         )
         reports = report_generator.generate_all()
         statistics = report_generator.generate_statistics()

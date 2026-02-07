@@ -86,6 +86,7 @@ def parse_report_config(config_dict: dict) -> ReportConfig | None:
             output_subdir=position_viz_section.get("output_subdir", "echarts"),
             chart_height=position_viz_section.get("chart_height", 500),
             interval=position_viz_section.get("interval", "4h"),
+            metadata_renderer=position_viz_section.get("metadata_renderer"),
         )
 
     return ReportConfig(

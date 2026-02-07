@@ -18,6 +18,14 @@ from nautilus_quants.backtest.exceptions import (
     BacktestReportError,
     BacktestStrategyError,
 )
+from nautilus_quants.backtest.protocols import (
+    POSITION_METADATA_CACHE_KEY,
+    BaseMetadataRenderer,
+    ColumnConfig,
+    MetadataRenderer,
+    PositionMetadataProvider,
+)
+from nautilus_quants.backtest.registry import RendererRegistry
 from nautilus_quants.backtest.reports import ReportGenerator
 
 __all__ = [
@@ -28,6 +36,13 @@ __all__ = [
     "ReportConfig",
     "TearsheetConfig",
     "QuantStatsConfig",
+    # Protocols and Registry
+    "POSITION_METADATA_CACHE_KEY",
+    "PositionMetadataProvider",
+    "MetadataRenderer",
+    "BaseMetadataRenderer",
+    "ColumnConfig",
+    "RendererRegistry",
     # Exceptions
     "BacktestError",
     "BacktestConfigError",

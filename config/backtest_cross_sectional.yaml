@@ -175,3 +175,4 @@ report:
     output_subdir: "echarts"
     chart_height: 500
     interval: "4h"
+    metadata_renderer: "cross_sectional"

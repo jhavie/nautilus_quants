@@ -6,12 +6,17 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from nautilus_quants.backtest.exceptions import BacktestReportError
+from nautilus_quants.backtest.protocols import (
+    POSITION_METADATA_CACHE_KEY,
+    BaseMetadataRenderer,
+    MetadataRenderer,
+)
 
 if TYPE_CHECKING:
     from nautilus_trader.backtest.engine import BacktestEngine
     from nautilus_trader.model.position import Position
 
-    from nautilus_quants.backtest.config import ReportConfig
+    from nautilus_quants.backtest.config import PositionVisualizationConfig, ReportConfig
 
 
 class ReportGenerator:
@@ -22,6 +27,7 @@ class ReportGenerator:
         engine: "BacktestEngine",
         output_dir: Path,
         config: "ReportConfig",
+        metadata_renderer: MetadataRenderer | None = None,
     ) -> None:
         """Initialize report generator.
 
@@ -29,10 +35,13 @@ class ReportGenerator:
             engine: BacktestEngine after execution
             output_dir: Directory for output files
             config: Report configuration
+            metadata_renderer: Optional renderer for strategy-specific position metadata.
+                              If None, uses BaseMetadataRenderer for basic columns.
         """
         self.engine = engine
         self.output_dir = Path(output_dir)
         self.config = config
+        self.metadata_renderer = metadata_renderer or BaseMetadataRenderer()
 
     def _get_closed_positions(self) -> list["Position"]:
         """Get all closed positions from the engine.
@@ -583,8 +592,7 @@ class ReportGenerator:
         # Read position metadata from cache (stored by strategy via pickle)
         position_metadata: dict[str, dict] = {}
         try:
-            cache_key = "position_metadata"
-            metadata_bytes = self.engine.cache.get(cache_key)
+            metadata_bytes = self.engine.cache.get(POSITION_METADATA_CACHE_KEY)
             if metadata_bytes:
                 position_metadata = pickle.loads(metadata_bytes)
         except Exception as e:
@@ -606,23 +614,11 @@ class ReportGenerator:
                     ts_opened = pd.to_datetime(row.get("ts_opened", ""))
                     ts_closed = pd.to_datetime(row.get("ts_closed", ""))
 
-                    # Find matching metadata (by inst_id or closed key pattern)
-                    meta = position_metadata.get(inst_id) or self._find_metadata_for_position(
-                        position_metadata, inst_id, ts_opened
-                    )
-
-                    entry_rank = meta.get("entry_rank") if meta else None
-                    entry_composite = meta.get("entry_composite") if meta else None
-                    rank_history = meta.get("rank_history", []) if meta else []
-
                     if inst_id and entry and pd.notna(ts_opened):
                         position_records.append({
                             "inst_id": inst_id,
                             "side": "LONG" if entry == "BUY" else "SHORT",
                             "value": value,
-                            "entry_rank": entry_rank,
-                            "entry_composite": entry_composite,
-                            "rank_history": rank_history,
                             "ts_opened": ts_opened,
                             "ts_closed": ts_closed if pd.notna(ts_closed) else pd.Timestamp.max,
                         })
@@ -675,32 +671,28 @@ class ReportGenerator:
                                     # Extract symbol without venue
                                     symbol = inst_id.split(".")[0] if "." in inst_id else inst_id
 
-                                    # Get entry values
-                                    entry_rank = active_pos.get("entry_rank")
-                                    entry_composite = active_pos.get("entry_composite")
+                                    # Find matching metadata for this position
+                                    meta = position_metadata.get(inst_id) or self._find_metadata_for_position(
+                                        position_metadata, inst_id, active_pos["ts_opened"]
+                                    )
 
-                                    # Default current values to entry values
-                                    current_rank = entry_rank
-                                    current_composite = entry_composite
-
-                                    # Find the most recent rank_history entry <= current timestamp
+                                    # Build basic position info
                                     ts_ns = int(ts.value)
-                                    for history_entry in active_pos.get("rank_history", []):
-                                        if history_entry.get("ts_event", 0) <= ts_ns:
-                                            current_rank = history_entry.get("rank", current_rank)
-                                            current_composite = history_entry.get("composite", current_composite)
-                                        else:
-                                            break
-
-                                    positions[symbol] = {
+                                    position_info = {
                                         "value": active_pos["value"],
                                         "side": active_pos["side"],
-                                        "entry_rank": entry_rank,
-                                        "current_rank": current_rank,
-                                        "entry_composite": entry_composite,
-                                        "current_composite": current_composite,
                                         "ts_opened": active_pos["ts_opened"].isoformat() if pd.notna(active_pos["ts_opened"]) else None,
                                     }
+
+                                    # Use renderer to add strategy-specific fields
+                                    rendered = self.metadata_renderer.render_position(
+                                        symbol=symbol,
+                                        position_info=position_info,
+                                        metadata=meta,
+                                        timestamp_ns=ts_ns,
+                                    )
+
+                                    positions[symbol] = rendered
                                     if active_pos["side"] == "LONG":
                                         long_total_value += active_pos["value"]
                                         long_count += 1
@@ -736,6 +728,9 @@ class ReportGenerator:
         from importlib.resources import files
         from string import Template
 
+        # Get column configuration from renderer
+        column_config = self.metadata_renderer.get_column_config()
+
         # Prepare data for ECharts
         timestamps = [d["timestamp"] for d in timeline_data]
         equity_data = [d["equity"] for d in timeline_data]
@@ -760,6 +755,7 @@ class ReportGenerator:
             "longValues": long_values,
             "shortValues": short_values,
             "timelineData": timeline_data,
+            "columnConfig": column_config,
         })
 
         # Load template file

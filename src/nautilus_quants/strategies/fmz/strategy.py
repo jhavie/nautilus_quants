@@ -29,7 +29,9 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
+from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
 from nautilus_quants.factors.types import FactorValues
+from nautilus_quants.strategies.fmz.metadata import FMZMetadataProvider
 
 if TYPE_CHECKING:
     from nautilus_trader.model.instruments import Instrument
@@ -105,6 +107,9 @@ class FMZFactorStrategy(Strategy):
         # Track current batch timestamp for synchronization
         self._current_batch_ts: int = 0
 
+        # Metadata tracking for position visualization
+        self._metadata_provider = FMZMetadataProvider()
+
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
         self.log.info(
@@ -154,6 +159,13 @@ class FMZFactorStrategy(Strategy):
     def on_stop(self) -> None:
         """Actions to perform on strategy stop."""
         self._close_all_positions("STRATEGY_STOP")
+
+        # Store metadata in cache for report generation
+        all_metadata = self._metadata_provider.get_all_metadata()
+        if all_metadata:
+            self.cache.add(POSITION_METADATA_CACHE_KEY, self._metadata_provider.serialize())
+            self.log.info(f"Position metadata: {len(all_metadata)} positions stored in cache")
+
         self.log.info(
             f"FMZFactorStrategy stopped: bars={self._bar_count}, hours={self._hour_count}"
         )
@@ -262,6 +274,10 @@ class FMZFactorStrategy(Strategy):
         # Sort by factor value
         sorted_symbols = sorted(composite.items(), key=lambda x: x[1])
 
+        # Build rank and composite lookups for metadata tracking
+        rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
+        composite_lookup = dict(sorted_symbols)
+
         # Determine long/short targets
         long_targets = set([s for s, _ in sorted_symbols[:self.config.n_long]])
         short_targets = set([s for s, _ in sorted_symbols[-self.config.n_short:]])
@@ -304,7 +320,7 @@ class FMZFactorStrategy(Strategy):
                 if currently_short:
                     self._close_position(inst_id, "FLIP_TO_LONG")
                     self._short_positions.discard(inst_id)
-                if self._open_position(inst_id, OrderSide.BUY):
+                if self._open_position(inst_id, OrderSide.BUY, rank_lookup.get(inst_id), composite_lookup.get(inst_id), self._current_batch_ts):
                     self._long_positions.add(inst_id)
 
             # FMZ: if in sell_symbols AND amount >= 0, then Sell
@@ -313,14 +329,30 @@ class FMZFactorStrategy(Strategy):
                 if currently_long:
                     self._close_position(inst_id, "FLIP_TO_SHORT")
                     self._long_positions.discard(inst_id)
-                if self._open_position(inst_id, OrderSide.SELL):
+                if self._open_position(inst_id, OrderSide.SELL, rank_lookup.get(inst_id), composite_lookup.get(inst_id), self._current_batch_ts):
                     self._short_positions.add(inst_id)
 
             # FMZ CRITICAL: Do NOT close positions that are not in target
             # Positions are only closed when they FLIP direction.
 
-    def _open_position(self, instrument_id_str: str, side: OrderSide) -> bool:
-        """Open position with fixed value."""
+        # Update rank history for all current positions
+        all_positions = list(self._long_positions) + list(self._short_positions)
+        self._metadata_provider.update_rank_history(
+            instrument_ids=all_positions,
+            rank_lookup=rank_lookup,
+            composite_lookup=composite_lookup,
+            ts_event=self._current_batch_ts,
+        )
+
+    def _open_position(
+        self,
+        instrument_id_str: str,
+        side: OrderSide,
+        rank: int | None = None,
+        composite_value: float | None = None,
+        ts_event: int | None = None,
+    ) -> bool:
+        """Open position with fixed value and record metadata."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
         instrument = self._instruments.get(instrument_id)
 
@@ -334,6 +366,15 @@ class FMZFactorStrategy(Strategy):
         raw_qty = Decimal(str(self.config.position_value / price))
         qty = instrument.make_qty(raw_qty)
 
+        # Record position metadata
+        self._metadata_provider.record_open(
+            instrument_id=instrument_id_str,
+            side="LONG" if side == OrderSide.BUY else "SHORT",
+            rank=rank,
+            composite=composite_value,
+            ts_event=ts_event or 0,
+        )
+
         order = self.order_factory.market(
             instrument_id=instrument_id,
             order_side=side,
@@ -344,8 +385,13 @@ class FMZFactorStrategy(Strategy):
         return True
 
     def _close_position(self, instrument_id_str: str, reason: str) -> None:
-        """Close a position."""
+        """Close a position and record metadata."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
+        self._metadata_provider.record_close(
+            instrument_id=instrument_id_str,
+            reason=reason,
+            hour_count=self._hour_count,
+        )
         self.close_all_positions(instrument_id)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 

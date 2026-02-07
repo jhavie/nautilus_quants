@@ -135,16 +135,7 @@
 
         <div class="table-container">
             <table id="positionTable">
-                <thead>
-                    <tr>
-                        <th>Rank (Cur/Entry)</th>
-                        <th>Composite (Cur/Entry)</th>
-                        <th>Symbol</th>
-                        <th>Side</th>
-                        <th>Opened</th>
-                        <th>Value (USDT)</th>
-                    </tr>
-                </thead>
+                <thead id="tableHead"></thead>
                 <tbody id="tableBody"></tbody>
             </table>
         </div>
@@ -156,6 +147,19 @@
 
     <script>
         const data = ${data_json};
+        const columnConfig = data.columnConfig || [];
+
+        // Build table headers dynamically
+        function buildTableHeaders() {
+            const thead = document.getElementById('tableHead');
+            let html = '<tr>';
+            columnConfig.forEach(col => {
+                html += `<th>${col.label}</th>`;
+            });
+            html += '</tr>';
+            thead.innerHTML = html;
+        }
+        buildTableHeaders();
 
         // Initialize charts
         const equityChart = echarts.init(document.getElementById('equity-chart'));
@@ -282,6 +286,30 @@
             ]
         });
 
+        // Format cell value based on column config
+        function formatCellValue(value, format, posInfo) {
+            if (value === null || value === undefined) return '-';
+            switch (format) {
+                case 'number':
+                    return typeof value === 'number' ? value.toFixed(2) : value;
+                case 'side':
+                    return value;
+                case 'datetime':
+                    return value ? new Date(value).toLocaleString() : '-';
+                case 'text':
+                default:
+                    return String(value);
+            }
+        }
+
+        // Get cell CSS class based on column config
+        function getCellClass(value, format) {
+            if (format === 'side') {
+                return value === 'LONG' ? 'long' : (value === 'SHORT' ? 'short' : '');
+            }
+            return '';
+        }
+
         // Update pie chart and table for selected index
         let selectedIndex = data.timestamps.length - 1;
 
@@ -382,59 +410,60 @@
                 }]
             }, true);
 
-            // Table update - sorted by current_rank, then by ts_opened (earlier first)
+            // Table update - sort by sort_key from first column with sort_key, then by ts_opened
             const tbody = document.getElementById('tableBody');
             let html = '';
-            // Combine all positions and sort by current_rank, then by open time
+
+            // Find primary sort key from column config
+            const sortCol = columnConfig.find(c => c.sort_key);
+            const sortKey = sortCol ? sortCol.sort_key : 'value';
+
+            // Combine all positions and sort
             const allPositions = [...longPositions, ...shortPositions];
             const sortedPositions = allPositions.sort((a, b) => {
-                const rankA = a[1].current_rank;
-                const rankB = b[1].current_rank;
-                // null ranks go to end
-                if (rankA === null && rankB === null) {
-                    // Both null rank, sort by ts_opened
+                const valA = a[1][sortKey];
+                const valB = b[1][sortKey];
+                // null values go to end
+                if (valA === null && valB === null) {
                     const tsA = a[1].ts_opened || '';
                     const tsB = b[1].ts_opened || '';
-                    return tsA.localeCompare(tsB);
+                    return String(tsA).localeCompare(String(tsB));
                 }
-                if (rankA === null) return 1;
-                if (rankB === null) return -1;
-                // Same rank, sort by ts_opened (earlier first)
-                if (rankA === rankB) {
+                if (valA === null) return 1;
+                if (valB === null) return -1;
+                // Same value, sort by ts_opened (earlier first)
+                if (valA === valB) {
                     const tsA = a[1].ts_opened || '';
                     const tsB = b[1].ts_opened || '';
-                    return tsA.localeCompare(tsB);
+                    return String(tsA).localeCompare(String(tsB));
                 }
-                return rankA - rankB;
+                // Numeric comparison
+                if (typeof valA === 'number' && typeof valB === 'number') {
+                    return valA - valB;
+                }
+                return String(valA).localeCompare(String(valB));
             });
 
+            // Render rows using column config
             sortedPositions.forEach(([symbol, info]) => {
-                const sideClass = info.side === 'LONG' ? 'long' : 'short';
-                // Display as current_rank(entry_rank)
-                const entryRank = info.entry_rank !== null && info.entry_rank !== undefined ? info.entry_rank : '-';
-                const currentRank = info.current_rank !== null && info.current_rank !== undefined ? info.current_rank : '-';
-                const rankDisplay = currentRank !== '-' || entryRank !== '-' ? `${currentRank}(${entryRank})` : '-';
-                // Display as current_composite(entry_composite)
-                const entryComp = info.entry_composite !== null && info.entry_composite !== undefined ? info.entry_composite.toFixed(2) : '-';
-                const currentComp = info.current_composite !== null && info.current_composite !== undefined ? info.current_composite.toFixed(2) : '-';
-                const compDisplay = currentComp !== '-' || entryComp !== '-' ? `${currentComp}(${entryComp})` : '-';
-                const openedDisplay = info.ts_opened ? new Date(info.ts_opened).toLocaleString() : '-';
-                html += `<tr>
-                    <td>${rankDisplay}</td>
-                    <td>${compDisplay}</td>
-                    <td>${symbol}</td>
-                    <td class="${sideClass}">${info.side}</td>
-                    <td>${openedDisplay}</td>
-                    <td>${info.value.toFixed(2)}</td>
-                </tr>`;
+                html += '<tr>';
+                columnConfig.forEach(col => {
+                    const value = info[col.key];
+                    const formatted = formatCellValue(value, col.format, info);
+                    const cellClass = getCellClass(value, col.format);
+                    html += `<td class="${cellClass}">${formatted}</td>`;
+                });
+                html += '</tr>';
             });
 
+            // Total rows
+            const numCols = columnConfig.length;
             html += `<tr class="total-row long">
-                <td colspan="5"><strong>Long Total(${longPositions.length})</strong></td>
+                <td colspan="${numCols - 1}"><strong>Long Total(${longPositions.length})</strong></td>
                 <td><strong>${(entry.long_total_value || 0).toFixed(2)}</strong></td>
             </tr>`;
             html += `<tr class="total-row short">
-                <td colspan="5"><strong>Short Total(${shortPositions.length})</strong></td>
+                <td colspan="${numCols - 1}"><strong>Short Total(${shortPositions.length})</strong></td>
                 <td><strong>${(entry.short_total_value || 0).toFixed(2)}</strong></td>
             </tr>`;
 

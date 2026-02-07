@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: MIT
 """FMZ Multi-Factor Strategy - Exact replication of FMZ article logic."""
 
+from nautilus_quants.strategies.fmz.metadata import (
+    FMZMetadataProvider,
+    FMZMetadataRenderer,
+)
 from nautilus_quants.strategies.fmz.strategy import (
     FMZFactorStrategy,
     FMZFactorStrategyConfig,
@@ -10,4 +14,6 @@ from nautilus_quants.strategies.fmz.strategy import (
 __all__ = [
     "FMZFactorStrategy",
     "FMZFactorStrategyConfig",
+    "FMZMetadataProvider",
+    "FMZMetadataRenderer",
 ]
