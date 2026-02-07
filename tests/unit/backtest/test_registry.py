@@ -4,6 +4,9 @@ import pytest
 
 from nautilus_quants.backtest.protocols import BaseMetadataRenderer
 from nautilus_quants.backtest.registry import RendererRegistry
+from nautilus_quants.strategies.cross_sectional.metadata import (  # noqa: F401 - triggers self-registration
+    CrossSectionalMetadataRenderer,
+)
 
 
 class TestRendererRegistry:
@@ -21,9 +24,6 @@ class TestRendererRegistry:
 
     def test_get_cross_sectional(self):
         """Test getting cross_sectional renderer."""
-        from nautilus_quants.strategies.cross_sectional.metadata import (
-            CrossSectionalMetadataRenderer,
-        )
         renderer = RendererRegistry.get("cross_sectional")
         assert isinstance(renderer, CrossSectionalMetadataRenderer)
 

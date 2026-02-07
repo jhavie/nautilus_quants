@@ -222,3 +222,14 @@ class CrossSectionalMetadataRenderer:
             "entry_rank": entry_rank,
             "entry_composite": entry_composite,
         }
+
+
+# Self-register renderer so backtest module has zero import dependency on strategies
+def _register_renderer() -> None:
+    from nautilus_quants.backtest.registry import RendererRegistry
+
+    if "cross_sectional" not in RendererRegistry._renderers:
+        RendererRegistry.register("cross_sectional", CrossSectionalMetadataRenderer)
+
+
+_register_renderer()

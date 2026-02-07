@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
 if TYPE_CHECKING:
     pass
 
+# Cache key for strategy → report metadata transfer via engine.cache
+POSITION_METADATA_CACHE_KEY = "position_metadata"
+
 
 class ColumnConfig(TypedDict):
     """Configuration for a table column in position timeline.

@@ -19,6 +19,7 @@ from nautilus_quants.backtest.exceptions import (
     BacktestStrategyError,
 )
 from nautilus_quants.backtest.protocols import (
+    POSITION_METADATA_CACHE_KEY,
     BaseMetadataRenderer,
     ColumnConfig,
     MetadataRenderer,
@@ -36,6 +37,7 @@ __all__ = [
     "TearsheetConfig",
     "QuantStatsConfig",
     # Protocols and Registry
+    "POSITION_METADATA_CACHE_KEY",
     "PositionMetadataProvider",
     "MetadataRenderer",
     "BaseMetadataRenderer",

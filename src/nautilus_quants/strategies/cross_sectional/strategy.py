@@ -30,6 +30,7 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.strategy import Strategy
 
+from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.cross_sectional.metadata import CrossSectionalMetadataProvider
 
@@ -184,8 +185,7 @@ class CrossSectionalFactorStrategy(Strategy):
         # Store metadata in cache for report generation
         all_metadata = self._metadata_provider.get_all_metadata()
         if all_metadata:
-            cache_key = "position_metadata"
-            self.cache.add(cache_key, self._metadata_provider.serialize())
+            self.cache.add(POSITION_METADATA_CACHE_KEY, self._metadata_provider.serialize())
             self.log.info(f"Position metadata: {len(all_metadata)} positions stored in cache")
 
         self.log.info(

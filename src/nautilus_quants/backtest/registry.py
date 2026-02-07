@@ -79,15 +79,3 @@ class RendererRegistry:
         return ["base"] + sorted(cls._renderers.keys())
 
 
-def _register_builtins() -> None:
-    """Register built-in renderers on module load."""
-    try:
-        from nautilus_quants.strategies.cross_sectional.metadata import (
-            CrossSectionalMetadataRenderer,
-        )
-        RendererRegistry.register("cross_sectional", CrossSectionalMetadataRenderer)
-    except ImportError:
-        pass  # Strategy module not available
-
-
-_register_builtins()

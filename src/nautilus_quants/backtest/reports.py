@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from nautilus_quants.backtest.exceptions import BacktestReportError
-from nautilus_quants.backtest.protocols import BaseMetadataRenderer, MetadataRenderer
+from nautilus_quants.backtest.protocols import (
+    POSITION_METADATA_CACHE_KEY,
+    BaseMetadataRenderer,
+    MetadataRenderer,
+)
 
 if TYPE_CHECKING:
     from nautilus_trader.backtest.engine import BacktestEngine
@@ -588,8 +592,7 @@ class ReportGenerator:
         # Read position metadata from cache (stored by strategy via pickle)
         position_metadata: dict[str, dict] = {}
         try:
-            cache_key = "position_metadata"
-            metadata_bytes = self.engine.cache.get(cache_key)
+            metadata_bytes = self.engine.cache.get(POSITION_METADATA_CACHE_KEY)
             if metadata_bytes:
                 position_metadata = pickle.loads(metadata_bytes)
         except Exception as e:
