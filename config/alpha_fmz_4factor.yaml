@@ -1,0 +1,197 @@
+# Alpha Factor Analysis Configuration
+# Evaluates factor quality using alphalens IC/ICIR analysis
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/alpha_fmz_4factor.yaml
+
+# Data source
+catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-012-fmz-strategy/data/catalog"
+bar_spec: "1h"
+
+# Factor definition
+factor_config_path: "config/factors_fmz_4factor.yaml"
+
+# Instrument universe
+instrument_ids:
+  - "1000LUNCUSDT.BINANCE"
+  - "1000SHIBUSDT.BINANCE"
+  - "1000XECUSDT.BINANCE"
+  - "1INCHUSDT.BINANCE"
+  - "AAVEUSDT.BINANCE"
+  - "ADAUSDT.BINANCE"
+  - "ALGOUSDT.BINANCE"
+  - "ALICEUSDT.BINANCE"
+  - "ALPHAUSDT.BINANCE"
+  - "ANKRUSDT.BINANCE"
+  - "ANTUSDT.BINANCE"
+  - "APEUSDT.BINANCE"
+  - "API3USDT.BINANCE"
+  - "ARPAUSDT.BINANCE"
+  - "ARUSDT.BINANCE"
+  - "ATAUSDT.BINANCE"
+  - "ATOMUSDT.BINANCE"
+  - "AUDIOUSDT.BINANCE"
+  - "AVAXUSDT.BINANCE"
+  - "AXSUSDT.BINANCE"
+  - "BAKEUSDT.BINANCE"
+  - "BALUSDT.BINANCE"
+  - "BANDUSDT.BINANCE"
+  - "BATUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+  - "BELUSDT.BINANCE"
+  - "BLZUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "BTCDOMUSDT.BINANCE"
+  - "BTCUSDT.BINANCE"
+  - "C98USDT.BINANCE"
+  - "CELOUSDT.BINANCE"
+  - "CELRUSDT.BINANCE"
+  - "CHRUSDT.BINANCE"
+  - "CHZUSDT.BINANCE"
+  - "COMPUSDT.BINANCE"
+  - "COTIUSDT.BINANCE"
+  - "CRVUSDT.BINANCE"
+  - "CTKUSDT.BINANCE"
+  - "CTSIUSDT.BINANCE"
+  - "CVCUSDT.BINANCE"
+  - "CVXUSDT.BINANCE"
+  - "DARUSDT.BINANCE"
+  - "DASHUSDT.BINANCE"
+  - "DEFIUSDT.BINANCE"
+  - "DENTUSDT.BINANCE"
+  - "DGBUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "DUSKUSDT.BINANCE"
+  - "DYDXUSDT.BINANCE"
+  - "EGLDUSDT.BINANCE"
+  - "ENJUSDT.BINANCE"
+  - "ENSUSDT.BINANCE"
+  - "ETCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "FILUSDT.BINANCE"
+  - "FLMUSDT.BINANCE"
+  - "FLOWUSDT.BINANCE"
+  - "FTMUSDT.BINANCE"
+  - "GALAUSDT.BINANCE"
+  - "GALUSDT.BINANCE"
+  - "GMTUSDT.BINANCE"
+  - "GRTUSDT.BINANCE"
+  - "GTCUSDT.BINANCE"
+  - "HBARUSDT.BINANCE"
+  - "HOTUSDT.BINANCE"
+  - "ICPUSDT.BINANCE"
+  - "ICXUSDT.BINANCE"
+  - "IMXUSDT.BINANCE"
+  - "INJUSDT.BINANCE"
+  - "IOSTUSDT.BINANCE"
+  - "IOTAUSDT.BINANCE"
+  - "IOTXUSDT.BINANCE"
+  - "JASMYUSDT.BINANCE"
+  - "KAVAUSDT.BINANCE"
+  - "KLAYUSDT.BINANCE"
+  - "KSMUSDT.BINANCE"
+  - "LDOUSDT.BINANCE"
+  - "LINAUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "LITUSDT.BINANCE"
+  - "LPTUSDT.BINANCE"
+  - "LRCUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "LUNA2USDT.BINANCE"
+  - "MANAUSDT.BINANCE"
+  - "MASKUSDT.BINANCE"
+  - "MATICUSDT.BINANCE"
+  - "MKRUSDT.BINANCE"
+  - "MTLUSDT.BINANCE"
+  - "NEARUSDT.BINANCE"
+  - "NEOUSDT.BINANCE"
+  - "NKNUSDT.BINANCE"
+  - "OCEANUSDT.BINANCE"
+  - "OGNUSDT.BINANCE"
+  - "OMGUSDT.BINANCE"
+  - "ONEUSDT.BINANCE"
+  - "ONTUSDT.BINANCE"
+  - "OPUSDT.BINANCE"
+  - "PEOPLEUSDT.BINANCE"
+  - "QTUMUSDT.BINANCE"
+  - "REEFUSDT.BINANCE"
+  - "RENUSDT.BINANCE"
+  - "RLCUSDT.BINANCE"
+  - "ROSEUSDT.BINANCE"
+  - "RSRUSDT.BINANCE"
+  - "RUNEUSDT.BINANCE"
+  - "RVNUSDT.BINANCE"
+  - "SANDUSDT.BINANCE"
+  - "SCUSDT.BINANCE"
+  - "SFPUSDT.BINANCE"
+  - "SKLUSDT.BINANCE"
+  - "SNXUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "SPELLUSDT.BINANCE"
+  - "STGUSDT.BINANCE"
+  - "STMXUSDT.BINANCE"
+  - "STORJUSDT.BINANCE"
+  - "SUSHIUSDT.BINANCE"
+  - "SXPUSDT.BINANCE"
+  - "THETAUSDT.BINANCE"
+  - "TLMUSDT.BINANCE"
+  - "TRBUSDT.BINANCE"
+  - "TRXUSDT.BINANCE"
+  - "UNFIUSDT.BINANCE"
+  - "UNIUSDT.BINANCE"
+  - "VETUSDT.BINANCE"
+  - "WAVESUSDT.BINANCE"
+  - "WOOUSDT.BINANCE"
+  - "XEMUSDT.BINANCE"
+  - "XLMUSDT.BINANCE"
+  - "XMRUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "XTZUSDT.BINANCE"
+  - "YFIUSDT.BINANCE"
+  - "ZECUSDT.BINANCE"
+  - "ZENUSDT.BINANCE"
+  - "ZILUSDT.BINANCE"
+  - "ZRXUSDT.BINANCE"
+
+# Analysis scope (empty = all factors)
+factors:
+  - volume
+  - momentum_3h
+  - volatility
+  - corr
+  - composite
+
+# alphalens parameters
+periods: [1, 4, 8, 24, 48, 72]   # forward returns: 1h, 4h, 8h, 24h
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+# Charts per factor (all alphalens capabilities)
+charts:
+  # Returns analysis
+  - quantile_returns_bar         # Mean returns per quantile (bar chart)
+  - quantile_returns_violin      # Return distribution per quantile (violin + box)
+  - cumulative_returns           # Cumulative returns by quantile
+  - cumulative_returns_long_short # Long-short portfolio cumulative returns
+  - quantile_spread              # Top-bottom quantile return spread over time
+  - returns_table                # Alpha/Beta summary table
+  # IC analysis
+  - ic_time_series               # IC over time with moving average
+  - ic_histogram                 # IC distribution histogram
+  - ic_qq                        # IC Q-Q plot vs normal distribution
+  - monthly_ic_heatmap           # Monthly IC heatmap (year x month)
+  # Turnover analysis
+  - turnover                     # Top/bottom quantile turnover over time
+  - turnover_table               # Turnover summary table
+  - factor_rank_autocorrelation  # Factor rank autocorrelation over time
+  # Event study & distribution
+  - event_study                  # Average cumulative return around signals
+  - events_distribution          # Factor signal distribution over time
+  - quantile_statistics_table    # Factor value statistics per quantile
+
+# Output
+output_dir: "logs/alpha_analysis"
+output_format:
+  - png

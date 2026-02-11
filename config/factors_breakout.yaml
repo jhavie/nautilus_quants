@@ -1,0 +1,119 @@
+# Breakout Factor Configuration
+# 突破型因子 - 用于验证放量突破在加密市场的有效性
+#
+# 核心思路：将"绝对量"转化为"相对变化量"
+# 原始 volume IC < 0 是因为它衡量"谁量大"（静态属性）
+# 突破因子衡量"谁在放量"（动态变化），预期可获得正 IC
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/alpha_breakout.yaml
+
+metadata:
+  name: breakout_factors
+  version: "1.0"
+  description: "Breakout factors - volume surge, price breakout, and composite signals"
+
+# 中间变量 (可被因子表达式引用)
+variables:
+  returns: "close / delay(close, 1) - 1"
+  returns_3h: "(close - delay(close, 3)) / delay(close, 3)"
+
+factors:
+  # ========== 基础时序因子 (Phase 1: Time-Series) ==========
+
+  # --- 成交量放大因子 ---
+
+  # 成交量放大倍数 (24h 窗口)
+  # 当前量 / 过去24h均量，>2 = 放量2倍
+  volume_surge_24h:
+    expression: "volume / ts_mean(volume, 24)"
+    description: "Volume surge ratio vs 24h average"
+
+  # 成交量放大倍数 (短窗口 6h)
+  volume_surge_6h:
+    expression: "volume / ts_mean(volume, 6)"
+    description: "Volume surge ratio vs 6h average (more sensitive)"
+
+  # 成交量时序排名
+  # 当前量在过去24h中的百分位排名 (0~1)
+  volume_ts_rank:
+    expression: "ts_rank(volume, 24)"
+    description: "Percentile rank of current volume in 24h window"
+
+  # --- 价格突破因子 ---
+
+  # 价格突破 24h 高点程度
+  # >0 = 突破高点，越大突破越强
+  price_break_high:
+    expression: "(close - ts_max(high, 24)) / ts_std(close, 24)"
+    description: "Standardized distance above 24h high"
+
+  # 价格突破 24h 低点程度 (跌破)
+  # <0 = 跌破低点
+  price_break_low:
+    expression: "(close - ts_min(low, 24)) / ts_std(close, 24)"
+    description: "Standardized distance above 24h low"
+
+  # 价格区间位置
+  # 0 = 在24h最低点，1 = 在24h最高点
+  price_position:
+    expression: "(close - ts_min(low, 24)) / (ts_max(high, 24) - ts_min(low, 24))"
+    description: "Position within 24h high-low range (0=bottom, 1=top)"
+
+  # --- 波动率变化因子 (Volatility Squeeze/Expansion) ---
+
+  # 波动率收缩/扩张比
+  # <1 = 波动率收缩(蓄力)，>1 = 波动率扩张(突破)
+  volatility_ratio:
+    expression: "ts_std(close, 6) / ts_std(close, 24)"
+    description: "Short-term vs long-term volatility ratio (squeeze detection)"
+
+  # --- 动量确认因子 ---
+
+  # 3小时动量 (与原始4factor一致，用于对比)
+  momentum_3h:
+    expression: "(close - delay(close, 3)) / delay(close, 3)"
+    description: "3-hour momentum factor"
+
+  # --- 组合突破因子 ---
+
+  # 放量突破分数 = 量放大 × 价格突破
+  # 只有同时满足"放量"和"突破"才会得到高分
+  breakout_score:
+    expression: "(volume / ts_mean(volume, 24)) * ((close - ts_max(high, 24)) / ts_std(close, 24))"
+    description: "Volume-confirmed breakout score (surge * price break)"
+
+  # 放量动量 = 量放大 × 动量
+  volume_momentum:
+    expression: "(volume / ts_mean(volume, 24)) * ((close - delay(close, 3)) / delay(close, 3))"
+    description: "Volume-weighted momentum (surge * 3h return)"
+
+  # ========== 归一化因子 (Phase 2: Cross-Sectional) ==========
+
+  volume_surge_24h_norm:
+    expression: "normalize(clip_quantile(volume_surge_24h, 0.2, 0.8), true, 0)"
+    description: "Normalized volume surge 24h"
+
+  price_break_high_norm:
+    expression: "normalize(clip_quantile(price_break_high, 0.2, 0.8), true, 0)"
+    description: "Normalized price breakout"
+
+  volatility_ratio_norm:
+    expression: "normalize(clip_quantile(volatility_ratio, 0.2, 0.8), true, 0)"
+    description: "Normalized volatility ratio"
+
+  momentum_3h_norm:
+    expression: "normalize(clip_quantile(momentum_3h, 0.2, 0.8), true, 0)"
+    description: "Normalized 3h momentum"
+
+  # ========== 多因子合成 ==========
+
+  # 突破综合因子
+  # 放量(0.4) + 价格突破(0.3) + 波动率扩张(0.1) + 动量(0.2)
+  breakout_composite:
+    expression: "0.4 * volume_surge_24h_norm + 0.3 * price_break_high_norm + 0.1 * volatility_ratio_norm + 0.2 * momentum_3h_norm"
+    description: "Breakout composite: VolSurge(0.4) + PriceBreak(0.3) + VolRatio(0.1) + Momentum(0.2)"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

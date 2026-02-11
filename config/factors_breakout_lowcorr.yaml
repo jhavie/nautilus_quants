@@ -1,0 +1,82 @@
+# Low-Correlation Breakout Factor Configuration
+# 基于 alpha_breakout 分析的相关性矩阵，选取低相关因子组合
+#
+# 因子选择依据 (summary.txt 2026-02-07):
+#   10 因子 Spearman 相关性矩阵分析，从 3 个高相关簇中各选 ICIR 最强者：
+#   - 动量簇 (momentum_3h ↔ volume_momentum = 0.981): → momentum_3h (ICIR -0.251)
+#   - 价格簇 (price_position ↔ price_break_high = 0.918): → price_position (ICIR -0.222)
+#   - 量簇 (volume_surge_24h ↔ volume_ts_rank = 0.945): → volume_surge_24h (ICIR -0.085)
+#   + 独立维度: volatility_ratio (ICIR -0.058, max corr 0.381)
+#
+# 最终 4 因子两两相关性均 ≤ 0.525
+#
+# 权重分配 (ICIR 比例归一化, sum=1.0):
+#   momentum_3h: 0.40
+#   price_position: 0.35
+#   volume_surge_24h: 0.15
+#   volatility_ratio: 0.10
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/alpha_breakout_lowcorr.yaml
+
+metadata:
+  name: breakout_lowcorr_4factor
+  version: "1.0"
+  description: "Low-correlation 4-factor composite selected from breakout factor analysis"
+
+# 中间变量
+variables:
+  returns: "close / delay(close, 1) - 1"
+
+factors:
+  # ========== 基础时序因子 (Phase 1: Time-Series) ==========
+
+  # 3小时动量 — ICIR -0.251, 最强信号
+  momentum_3h:
+    expression: "(close - delay(close, 3)) / delay(close, 3)"
+    description: "3-hour momentum factor"
+
+  # 价格区间位置 — ICIR -0.222, 0=24h最低 1=24h最高
+  price_position:
+    expression: "(close - ts_min(low, 24)) / (ts_max(high, 24) - ts_min(low, 24))"
+    description: "Position within 24h high-low range (0=bottom, 1=top)"
+
+  # 成交量放大倍数 — ICIR -0.085, 当前量 / 过去24h均量
+  volume_surge_24h:
+    expression: "volume / ts_mean(volume, 24)"
+    description: "Volume surge ratio vs 24h average"
+
+  # 波动率收缩/扩张比 — ICIR -0.058, <1=蓄力 >1=突破
+  volatility_ratio:
+    expression: "ts_std(close, 6) / ts_std(close, 24)"
+    description: "Short-term vs long-term volatility ratio (squeeze detection)"
+
+  # ========== 归一化因子 (Phase 2: Cross-Sectional) ==========
+
+  momentum_3h_norm:
+    expression: "normalize(clip_quantile(momentum_3h, 0.2, 0.8), true, 0)"
+    description: "Normalized 3h momentum"
+
+  price_position_norm:
+    expression: "normalize(clip_quantile(price_position, 0.2, 0.8), true, 0)"
+    description: "Normalized price position"
+
+  volume_surge_24h_norm:
+    expression: "normalize(clip_quantile(volume_surge_24h, 0.2, 0.8), true, 0)"
+    description: "Normalized volume surge 24h"
+
+  volatility_ratio_norm:
+    expression: "normalize(clip_quantile(volatility_ratio, 0.2, 0.8), true, 0)"
+    description: "Normalized volatility ratio"
+
+  # ========== 4 因子合成 (ICIR 比例加权, sum=1.0, 取负使高突破=低composite) ==========
+  # 策略固定逻辑: LONG 底部N, SHORT 顶部N
+  # 突破因子: 高值=正在突破(应做多), 低值=正在下跌(应做空)
+  # 取负后: 突破币 composite 值最低 → 被 LONG; 下跌币 composite 值最高 → 被 SHORT
+  composite:
+    expression: "-0.4 * momentum_3h_norm + -0.35 * price_position_norm + -0.15 * volume_surge_24h_norm + -0.1 * volatility_ratio_norm"
+    description: "Low-corr 4-factor composite (negated for trend-following): LONG breakout, SHORT decline"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

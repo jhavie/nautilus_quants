@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from nautilus_quants.factors.operators.base import (
     TimeSeriesOperator,
@@ -30,17 +31,20 @@ class TsMean(TimeSeriesOperator):
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """
         Compute rolling mean.
-        
+
         Args:
             data: Historical data array
             window: Lookback window size
-            
+
         Returns:
             Mean of the last `window` values
         """
         if len(data) < window:
             return float('nan')
         return float(np.mean(data[-window:]))
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).mean()
 
 
 @register_operator
@@ -57,50 +61,62 @@ class TsSum(TimeSeriesOperator):
             return float('nan')
         return float(np.sum(data[-window:]))
 
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).sum()
+
 
 @register_operator
 class TsStd(TimeSeriesOperator):
     """Rolling standard deviation."""
-    
+
     name = "ts_std"
     min_args = 2
     max_args = 2
-    
+
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """Compute rolling standard deviation (sample std, ddof=1)."""
         if len(data) < window:
             return float('nan')
         return float(np.std(data[-window:], ddof=1))
 
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).std(ddof=1)
+
 
 @register_operator
 class TsMin(TimeSeriesOperator):
     """Rolling minimum."""
-    
+
     name = "ts_min"
     min_args = 2
     max_args = 2
-    
+
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """Compute rolling minimum."""
         if len(data) < window:
             return float('nan')
         return float(np.min(data[-window:]))
 
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).min()
+
 
 @register_operator
 class TsMax(TimeSeriesOperator):
     """Rolling maximum."""
-    
+
     name = "ts_max"
     min_args = 2
     max_args = 2
-    
+
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """Compute rolling maximum."""
         if len(data) < window:
             return float('nan')
         return float(np.max(data[-window:]))
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).max()
 
 
 @register_operator
@@ -201,6 +217,9 @@ class Delta(TimeSeriesOperator):
             return float('nan')
         return float(data[-1] - data[-window - 1])
 
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.diff(int(window))
+
 
 @register_operator
 class Delay(TimeSeriesOperator):
@@ -218,6 +237,9 @@ class Delay(TimeSeriesOperator):
         if len(data) <= window:
             return float('nan')
         return float(data[-window - 1])
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.shift(int(window))
 
 
 @register_operator
@@ -257,6 +279,13 @@ class Correlation(TimeSeriesOperator):
         
         return float(np.corrcoef(x, y)[0, 1])
 
+    def compute_vectorized(
+        self, data: pd.Series, window: int, data2: pd.Series | None = None, **kwargs: Any,
+    ) -> pd.Series:
+        if data2 is None:
+            return pd.Series(np.nan, index=data.index)
+        return data.rolling(int(window)).corr(data2)
+
 
 @register_operator
 class Covariance(TimeSeriesOperator):
@@ -286,6 +315,13 @@ class Covariance(TimeSeriesOperator):
         y = data2[-window:]
         
         return float(np.cov(x, y, ddof=1)[0, 1])
+
+    def compute_vectorized(
+        self, data: pd.Series, window: int, data2: pd.Series | None = None, **kwargs: Any,
+    ) -> pd.Series:
+        if data2 is None:
+            return pd.Series(np.nan, index=data.index)
+        return data.rolling(int(window)).cov(data2, ddof=1)
 
 
 # Convenience function wrappers for use in evaluator
@@ -363,4 +399,20 @@ TIME_SERIES_OPERATORS = {
     "delay": delay,
     "correlation": correlation,
     "covariance": covariance,
+}
+
+# Instance registry for vectorized evaluator (lookup by operator name)
+TS_OPERATOR_INSTANCES: dict[str, TimeSeriesOperator] = {
+    "ts_mean": TsMean(),
+    "ts_sum": TsSum(),
+    "ts_std": TsStd(),
+    "ts_min": TsMin(),
+    "ts_max": TsMax(),
+    "ts_rank": TsRank(),
+    "ts_argmax": TsArgmax(),
+    "ts_argmin": TsArgmin(),
+    "delta": Delta(),
+    "delay": Delay(),
+    "correlation": Correlation(),
+    "covariance": Covariance(),
 }

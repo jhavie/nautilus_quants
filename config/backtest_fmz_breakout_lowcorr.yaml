@@ -1,17 +1,18 @@
-# FMZ Multi-Factor Strategy Backtest Configuration
-# https://www.fmz.com/digest-topic/9647
+# FMZ Low-Correlation Breakout Factor Strategy Backtest Configuration
+# 基于 breakout_lowcorr 因子分析结果的低相关因子组合回测
 #
-# 时间范围: 2023-01-01 ~ 2025-12-31 (样本外验证)
+# 时间范围: 2022-01-01 ~ 2022-01-31 (与原 4factor 一致)
 # 初始资金: 10000 USDT
 # 持仓数量: 多空各40个
 # 单品种仓位: 300 USDT
-# 调仓周期: 8小时 (与 notebook cell 31b 一致)
+# 调仓周期: 4 bars (4h)
 # 手续费: 0.02% (与FMZ原文一致)
 #
-# 三因子合成 (cell 31b):
-#   - 24h Momentum: 0.6
-#   - Volume: 0.2
-#   - Price-Volume Corr: 0.2
+# 低相关 4 因子合成 (ICIR 比例加权, sum=1.0):
+#   - momentum_3h: 0.40 (ICIR -0.251)
+#   - price_position: 0.35 (ICIR -0.222)
+#   - volume_surge_24h: 0.15 (ICIR -0.085)
+#   - volatility_ratio: 0.10 (ICIR -0.058)
 
 venues:
   - name: "BINANCE"
@@ -168,10 +169,10 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2025-12-31"
+    end_time: "2022-09-14"
 
 engine:
-  trader_id: "BACKTESTER-FMZ-001"
+  trader_id: "BACKTESTER-BREAKOUT-LOWCORR-001"
   logging:
     log_level: "INFO"
   risk_engine:
@@ -181,7 +182,7 @@ engine:
     - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
       config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/factors_fmz_4factor.yaml"
+        factor_config_path: "config/factors_breakout_lowcorr.yaml"
         interval: "1h"
         signal_prefix: "factor"
         max_history: 200
@@ -339,13 +340,13 @@ engine:
         composite_factor: "composite"
 
 report:
-  output_dir: "logs/fmz_backtest"
+  output_dir: "logs/fmz_backtest_breakout_lowcorr"
   formats:
     - csv
     - html
   tearsheet:
     enabled: true
-    title: "FMZ Multi-Factor Strategy Backtest (2022-2025)"
+    title: "FMZ Breakout Low-Corr 4-Factor Strategy Backtest"
     theme: "nautilus"
     height: 1500
     charts:
@@ -359,13 +360,13 @@ report:
       - yearly_returns
   quantstats:
     enabled: true
-    title: "FMZ Strategy QuantStats Analysis"
+    title: "FMZ Breakout Low-Corr Strategy QuantStats Analysis"
     output_format:
       - html
       - png
   position_viz:
     enabled: true
-    title: "FMZ Strategy Position Timeline"
+    title: "FMZ Breakout Low-Corr Strategy Position Timeline"
     output_subdir: "echarts"
     chart_height: 500
     interval: "8h"

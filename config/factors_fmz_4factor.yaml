@@ -1,18 +1,19 @@
-# FMZ 4-Factor Strategy Configuration
-# Exact replication of fmz_4factor_detailed.py
+# FMZ 5-Factor Strategy Configuration
+# Based on fmz_4factor_detailed.py + MA deviation factor
 #
-# 4 因子公式 (来自 fmz_4factor_detailed.py):
+# 5 因子公式:
 #   - volume: 成交量 (权重 0.6)
 #   - factor_1 (momentum_3h): 3小时动量 (权重 0.4)
 #   - factor_7 (volatility): 波动率 (权重 0.3)
 #   - factor_8 (corr): 量价相关性 (权重 0.4)
+#   - ma_deviation: 收盘价离20日均线距离 (权重 0.4)
 #
 # 归一化方法 (norm_factor):
 #   1. quantile(0.2, 0.8) clip
 #   2. z-score (subtract mean, divide by std)
 #
 # 合成公式:
-#   composite = 0.6 * volume_norm + 0.4 * momentum_norm + 0.3 * volatility_norm + 0.4 * corr_norm
+#   composite = 0.6 * volume_norm + 0.4 * momentum_norm + 0.3 * volatility_norm + 0.4 * corr_norm + 0.4 * ma_deviation_norm
 
 metadata:
   name: fmz_4factor
@@ -49,6 +50,11 @@ factors:
     expression: "correlation(close, volume, 96)"
     description: "96-hour price-volume correlation"
 
+  # 收盘价离20日均线距离 (20天 x 24小时 = 480根1h K线)
+  ma_deviation:
+    expression: "(close - ts_mean(close, 480)) / ts_mean(close, 480)"
+    description: "Percentage deviation from 20-day moving average"
+
   # ========== 归一化因子 (Phase 2: Cross-Sectional) ==========
   # FMZ norm_factor:
   #   factor_clip = factor.apply(lambda x: x.clip(x.quantile(0.2), x.quantile(0.8)), axis=1)
@@ -74,11 +80,15 @@ factors:
     expression: "normalize(clip_quantile(corr, 0.2, 0.8), true, 0)"
     description: "Normalized correlation (quantile clip + z-score)"
 
+  ma_deviation_norm:
+    expression: "normalize(clip_quantile(ma_deviation, 0.2, 0.8), true, 0)"
+    description: "Normalized MA deviation (quantile clip + z-score)"
+
   # ========== 4 因子合成 ==========
-  # FMZ: 0.6 * df_volume_norm + 0.4 * factor_1_norm + 0.3 * factor_7_norm + 0.4 * factor_8_norm
+  # 0.6 * volume + 0.4 * momentum + 0.3 * volatility + 0.4 * corr + 0.4 * ma_deviation
   composite:
-    expression: "0.6 * volume_norm + 0.4 * momentum_3h_norm + 0.3 * volatility_norm + 0.4 * corr_norm"
-    description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
+    expression: "0.6 * volume_norm + 0.4 * momentum_3h_norm + 0.3 * volatility_norm + 0.4 * corr_norm + 0.4 * ma_deviation_norm"
+    description: "5-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4) + MA_Dev(0.4)"
 
 performance:
   enable_timing: true

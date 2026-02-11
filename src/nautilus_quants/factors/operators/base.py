@@ -14,6 +14,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pandas as pd
 
 if TYPE_CHECKING:
     from nautilus_quants.factors.types import FactorInput
@@ -101,26 +102,35 @@ class TimeSeriesOperator(Operator):
     """
     
     operator_type = OperatorType.TIME_SERIES
-    
+
     @abstractmethod
     def compute(
-        self, 
-        data: np.ndarray, 
+        self,
+        data: np.ndarray,
         window: int,
         **kwargs: Any,
     ) -> float | np.ndarray:
         """
         Compute the time-series operator result.
-        
+
         Args:
             data: Historical data array (most recent at the end)
             window: Lookback window size
             **kwargs: Additional operator-specific arguments
-            
+
         Returns:
             Computed result
         """
         pass
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        """Vectorized computation over full time-series.
+
+        Default: rolling apply wrapping scalar ``compute``. Override for performance.
+        """
+        return data.rolling(window).apply(
+            lambda x: self.compute(x.values, window, **kwargs), raw=False,
+        )
 
 
 class CrossSectionalOperator(Operator):
@@ -132,24 +142,37 @@ class CrossSectionalOperator(Operator):
     """
     
     operator_type = OperatorType.CROSS_SECTIONAL
-    
+
     @abstractmethod
     def compute(
-        self, 
+        self,
         values: dict[str, float],
         **kwargs: Any,
     ) -> dict[str, float]:
         """
         Compute the cross-sectional operator result.
-        
+
         Args:
             values: Dict of {instrument_id: value} for all instruments
             **kwargs: Additional operator-specific arguments
-            
+
         Returns:
             Dict of {instrument_id: computed_value}
         """
         pass
+
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        """Vectorized computation across instruments for all timestamps.
+
+        Default: apply scalar ``compute`` row-by-row. Override for performance.
+        """
+        def _apply_row(row: pd.Series) -> pd.Series:
+            values = row.dropna().to_dict()
+            if not values:
+                return row
+            result = self.compute(values, **kwargs)
+            return pd.Series(result, index=row.index)
+        return df.apply(_apply_row, axis=1)
 
 
 class MathOperator(Operator):
