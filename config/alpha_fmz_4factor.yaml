@@ -160,7 +160,7 @@ factors:
   - momentum_3h
   - volatility
   - corr
-  - composite
+  # - composite
 
 # alphalens parameters
 periods: [1, 4, 8, 24, 48, 72]   # forward returns: 1h, 4h, 8h, 24h
@@ -174,7 +174,7 @@ charts:
   - quantile_returns_bar         # Mean returns per quantile (bar chart)
   - quantile_returns_violin      # Return distribution per quantile (violin + box)
   - cumulative_returns           # Cumulative returns by quantile
-  - cumulative_returns_long_short # Long-short portfolio cumulative returns
+  # - cumulative_returns_long_short # Long-short portfolio cumulative returns
   - quantile_spread              # Top-bottom quantile return spread over time
   # - returns_table                # Alpha/Beta summary table
   # IC analysis
