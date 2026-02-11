@@ -176,7 +176,7 @@ charts:
   - cumulative_returns           # Cumulative returns by quantile
   - cumulative_returns_long_short # Long-short portfolio cumulative returns
   - quantile_spread              # Top-bottom quantile return spread over time
-  - returns_table                # Alpha/Beta summary table
+  # - returns_table                # Alpha/Beta summary table
   # IC analysis
   - ic_time_series               # IC over time with moving average
   - ic_histogram                 # IC distribution histogram
@@ -184,12 +184,12 @@ charts:
   - monthly_ic_heatmap           # Monthly IC heatmap (year x month)
   # Turnover analysis
   - turnover                     # Top/bottom quantile turnover over time
-  - turnover_table               # Turnover summary table
+  # - turnover_table               # Turnover summary table
   - factor_rank_autocorrelation  # Factor rank autocorrelation over time
   # Event study & distribution
-  - event_study                  # Average cumulative return around signals
-  - events_distribution          # Factor signal distribution over time
-  - quantile_statistics_table    # Factor value statistics per quantile
+  # - event_study                  # Average cumulative return around signals
+  # - events_distribution          # Factor signal distribution over time
+  # - quantile_statistics_table    # Factor value statistics per quantile
 
 # Output
 output_dir: "logs/alpha_analysis"
