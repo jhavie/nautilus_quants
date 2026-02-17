@@ -46,7 +46,7 @@ class TimeSeriesFactor(Factor):
         )
         self.lookback = lookback
     
-    def compute(self, data: FactorInput) -> float:
+    def compute(self, data: FactorInput, var_cache: dict | None = None) -> float:
         """
         Compute factor value from input data.
         

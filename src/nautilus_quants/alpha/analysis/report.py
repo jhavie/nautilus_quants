@@ -46,6 +46,79 @@ def _render_dataframe_as_table(df: pd.DataFrame, title: str = "") -> None:
     table.scale(1.2, 1.5)
 
 
+def _infer_bars_per_day(index: pd.Index) -> int:
+    """Infer the number of observations per day from a DatetimeIndex.
+
+    Falls back to 1 (daily) when frequency cannot be determined.
+    """
+    if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
+        return 1
+    freq = index.freq or pd.infer_freq(index[:min(len(index), 100)])
+    if freq is not None:
+        td = pd.Timedelta(pd.tseries.frequencies.to_offset(freq))  # type: ignore[arg-type]
+        if td.total_seconds() > 0:
+            return max(int(pd.Timedelta(days=1) / td), 1)
+    # Fallback: median diff
+    median_diff = pd.Series(index).diff().dropna().median()
+    if pd.notna(median_diff) and median_diff.total_seconds() > 0:
+        return max(int(pd.Timedelta(days=1) / median_diff), 1)
+    return 1
+
+
+def _newey_west_tstat(series: pd.Series) -> tuple[float, float, int]:
+    """Compute Newey-West adjusted t-statistic for H0: mean=0.
+
+    Uses Bartlett kernel with frequency-aware lag selection:
+    - Base lag from Newey-West (1994): floor(4 * (T/100)^(2/9))
+    - Minimum lag: bars_per_day * 10  (covers ~10 days of autocorrelation)
+
+    For sub-daily data the classic formula severely underestimates the
+    required bandwidth, producing inflated t-statistics.
+
+    Returns:
+        (t_stat, p_value, n_eff) tuple.  (NaN, NaN, 0) when data is
+        insufficient.  *n_eff* is the effective sample size after
+        accounting for serial correlation: ``N * gamma_0 / nw_var``.
+    """
+    x = series.dropna().values
+    n = len(x)
+    if n < 2:
+        return np.nan, np.nan, 0
+
+    x_bar = x.mean()
+    # Automatic bandwidth selection (Newey-West 1994)
+    nw_lag = max(int(np.floor(4 * (n / 100) ** (2 / 9))), 1)
+    # Frequency-aware minimum: cover at least 10 days of autocorrelation
+    bars_per_day = _infer_bars_per_day(series.index)
+    freq_lag = bars_per_day * 10
+    max_lag = min(max(nw_lag, freq_lag), n // 3)
+
+    # Newey-West HAC variance estimate
+    gamma_0 = np.mean((x - x_bar) ** 2)
+    nw_var = gamma_0
+    for j in range(1, max_lag + 1):
+        weight = 1 - j / (max_lag + 1)  # Bartlett kernel
+        gamma_j = np.mean((x[j:] - x_bar) * (x[:-j] - x_bar))
+        nw_var += 2 * weight * gamma_j
+
+    # Effective sample size: N / VIF where VIF = nw_var / gamma_0
+    if nw_var > 1e-15:
+        n_eff = min(max(int(round(n * gamma_0 / nw_var)), 1), n)
+    else:
+        n_eff = n
+
+    se = np.sqrt(nw_var / n)
+    if se < 1e-15:
+        return np.nan, np.nan, 0
+
+    t_stat = x_bar / se
+    # Two-sided p-value using t-distribution with n_eff-1 degrees of freedom;
+    # more conservative than normal for small n_eff, avoids sf underflow.
+    df = max(n_eff - 1, 1)
+    p_value = float(2 * scipy_stats.t.sf(abs(t_stat), df))
+    return t_stat, p_value, n_eff
+
+
 def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
     """Compute IC statistics with proper NaN handling.
 
@@ -53,9 +126,13 @@ def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
     through ``scipy.stats.ttest_1samp``, this function drops NaN values
     before computing t-stat and p-value.
 
+    Includes both raw t-stat (assumes independence) and Newey-West
+    adjusted t-stat (accounts for serial correlation in high-frequency
+    IC series).
+
     Returns a DataFrame indexed by period with columns:
         IC Mean, IC Std., Risk-Adjusted IC, t-stat(IC), p-value(IC),
-        IC Skew, IC Kurtosis, N
+        t-stat(NW), p-value(NW), N_eff, IC Skew, IC Kurtosis, N
     """
     table = pd.DataFrame()
     ic_clean = ic_df.dropna()
@@ -65,6 +142,12 @@ def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
     t_stat, p_value = scipy_stats.ttest_1samp(ic_clean, 0, nan_policy="omit")
     table["t-stat(IC)"] = t_stat
     table["p-value(IC)"] = p_value
+    # Newey-West adjusted t-stat (robust to autocorrelation)
+    for col in ic_clean.columns:
+        nw_t, nw_p, n_eff = _newey_west_tstat(ic_clean[col])
+        table.loc[col, "t-stat(NW)"] = nw_t
+        table.loc[col, "p-value(NW)"] = nw_p
+        table.loc[col, "N_eff"] = n_eff
     table["IC Skew"] = scipy_stats.skew(ic_clean, nan_policy="omit")
     table["IC Kurtosis"] = scipy_stats.kurtosis(ic_clean, nan_policy="omit")
     table["N"] = ic_clean.count()
@@ -349,10 +432,10 @@ class AnalysisReportGenerator:
     ) -> Path:
         """Generate IC/ICIR summary text file.
 
-        Uses alphalens plot_information_table for IC Mean, IC Std,
-        Risk-Adjusted IC (ICIR), t-stat, p-value, Skew, Kurtosis.
-        IC DataFrames are pre-cleaned (NaN dropped) before passing to
-        alphalens to avoid NaN propagation in scipy.stats.ttest_1samp.
+        Uses ``compute_ic_summary`` for IC Mean, IC Std, Risk-Adjusted IC
+        (ICIR), raw t-stat, **Newey-West adjusted t-stat**, p-value, Skew,
+        Kurtosis.  The NW t-stat corrects for serial correlation in
+        high-frequency IC series.
 
         Args:
             ic_results: {factor_name: IC DataFrame}
@@ -362,26 +445,24 @@ class AnalysisReportGenerator:
         Returns:
             Path to summary file
         """
-        import alphalens.plotting as plotting
-
         lines = ["Factor Analysis Summary", "=" * 60, ""]
 
         for factor_name, ic_df in ic_results.items():
             lines.append(f"Factor: {factor_name}")
             lines.append("-" * 40)
 
-            ic_clean = ic_df.dropna()
-            ic_table = plotting.plot_information_table(ic_clean, return_df=True)
-            for period in ic_table.index:
-                row = ic_table.loc[period]
-                n = int(ic_clean[period].count()) if period in ic_clean.columns else 0
+            ic_summary = compute_ic_summary(ic_df)
+            for period in ic_summary.index:
+                row = ic_summary.loc[period]
+                n = int(row["N"])
+                n_eff = int(row["N_eff"])
                 lines.append(
                     f"  Period {period}: "
                     f"IC={row['IC Mean']:.4f}, "
                     f"ICIR={row['Risk-Adjusted IC']:.4f}, "
-                    f"t={row['t-stat(IC)']:.2f}, "
-                    f"p={row['p-value(IC)']:.4f}, "
-                    f"N={n}"
+                    f"t(NW)={row['t-stat(NW)']:.2f}, "
+                    f"p(NW)={row['p-value(NW)']:.2e}, "
+                    f"N={n}, N_eff={n_eff}"
                 )
 
             lines.append("")
@@ -405,16 +486,13 @@ class AnalysisReportGenerator:
     ) -> None:
         """Print IC/ICIR summary table to console.
 
-        Uses alphalens plot_information_table for consistent metrics.
-        IC DataFrames are pre-cleaned (NaN dropped) before passing to
-        alphalens to avoid NaN propagation in scipy.stats.ttest_1samp.
+        Uses ``compute_ic_summary`` for consistent metrics including
+        Newey-West adjusted t-statistics.
 
         Args:
             ic_results: {factor_name: IC DataFrame}
             factor_series: {factor_name: Series(MultiIndex[date, asset])} for correlation
         """
-        import alphalens.plotting as plotting
-
         if not ic_results:
             return
 
@@ -433,14 +511,13 @@ class AnalysisReportGenerator:
 
         # Rows
         for factor_name, ic_df in ic_results.items():
-            ic_clean = ic_df.dropna()
-            ic_table = plotting.plot_information_table(ic_clean, return_df=True)
+            ic_summary = compute_ic_summary(ic_df)
             row = f"  {factor_name:<20}"
             icir_values = []
             for p in periods:
-                if p in ic_table.index:
-                    row += f"  {ic_table.loc[p, 'IC Mean']:>6.3f}"
-                    icir_values.append(ic_table.loc[p, "Risk-Adjusted IC"])
+                if p in ic_summary.index:
+                    row += f"  {ic_summary.loc[p, 'IC Mean']:>6.3f}"
+                    icir_values.append(ic_summary.loc[p, "Risk-Adjusted IC"])
                 else:
                     row += f"  {'N/A':>6}"
 

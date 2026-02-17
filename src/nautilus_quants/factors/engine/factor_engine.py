@@ -74,6 +74,7 @@ class FactorEngine:
         # Factor storage
         self._factors: dict[str, Factor] = {}
         self._variables: dict[str, str] = {}
+        self._variable_asts: dict[str, Any] = {}
         self._parameters: dict[str, Any] = {}
         
         # Performance tracking
@@ -173,6 +174,9 @@ class FactorEngine:
         """
         self._variables[name] = expression
         self.resolver.add_variable(name, expression)
+        
+        # Pre-parse AST for the variable
+        self._variable_asts[name] = parse_expression(expression)
     
     def _estimate_warmup(self, expression: str) -> int:
         """Estimate warmup period from expression."""
@@ -185,6 +189,46 @@ class FactorEngine:
         if matches:
             return max(int(m[1]) for m in matches) + 1
         return 1
+    
+    def _compute_variable_cache(
+        self,
+        factor_input: FactorInput,
+    ) -> dict[str, Any]:
+        """Compute all variable expressions once for a given bar.
+        
+        Returns a dict of {var_name: computed_value} that can be passed
+        to each factor's compute() as var_cache, avoiding redundant
+        per-factor variable evaluation.
+        """
+        if not self._variable_asts:
+            return {}
+        
+        from nautilus_quants.factors.expression import EvaluationContext, Evaluator
+        
+        # Build base variables from input data
+        variables: dict[str, Any] = {
+            "open": factor_input.history.get("open", np.array([factor_input.open])),
+            "high": factor_input.history.get("high", np.array([factor_input.high])),
+            "low": factor_input.history.get("low", np.array([factor_input.low])),
+            "close": factor_input.history.get("close", np.array([factor_input.close])),
+            "volume": factor_input.history.get("volume", np.array([factor_input.volume])),
+        }
+        variables.update(self._parameters)
+        
+        evaluator = Evaluator(EvaluationContext(
+            variables=variables,
+            operators=self._operators,
+            parameters=self._parameters,
+        ))
+        
+        # Evaluate each variable in declaration order (later vars may reference earlier ones)
+        cache: dict[str, Any] = {}
+        for var_name, var_ast in self._variable_asts.items():
+            var_value = evaluator.evaluate(var_ast)
+            evaluator.context.set_variable(var_name, var_value)
+            cache[var_name] = var_value
+        
+        return cache
     
     def on_bar(self, bar: Bar) -> FactorValues | None:
         """
@@ -220,12 +264,15 @@ class FactorEngine:
             history=arrays,
         )
         
+        # Compute variable cache once for this (instrument, bar)
+        var_cache = self._compute_variable_cache(factor_input)
+        
         # Compute all factors
         factor_results: dict[str, dict[str, float]] = {}
         
         for factor_name, factor in self._factors.items():
             try:
-                value = factor.update(factor_input)
+                value = factor.update(factor_input, var_cache=var_cache)
                 if factor_name not in factor_results:
                     factor_results[factor_name] = {}
                 factor_results[factor_name][instrument_id] = value
@@ -278,10 +325,13 @@ class FactorEngine:
             history=history,
         )
         
+        # Build variable cache once
+        var_cache = self._compute_variable_cache(factor_input)
+        
         results: dict[str, float] = {}
         for factor_name, factor in self._factors.items():
             try:
-                results[factor_name] = factor.compute(factor_input)
+                results[factor_name] = factor.compute(factor_input, var_cache=var_cache)
             except Exception:
                 results[factor_name] = float('nan')
         

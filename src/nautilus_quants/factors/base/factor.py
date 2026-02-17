@@ -54,19 +54,22 @@ class Factor(ABC):
         self._compute_count = 0
     
     @abstractmethod
-    def compute(self, data: FactorInput) -> float:
+    def compute(self, data: FactorInput, var_cache: dict[str, Any] | None = None) -> float:
         """
         Compute the factor value for given input.
         
         Args:
             data: Factor input containing current and historical data
+            var_cache: Pre-computed variable values from the engine.
+                ExpressionFactor uses this to avoid redundant variable
+                evaluation. Other subclasses may ignore it.
             
         Returns:
             Computed factor value (float)
         """
         pass
     
-    def update(self, data: FactorInput) -> float:
+    def update(self, data: FactorInput, var_cache: dict[str, Any] | None = None) -> float:
         """
         Update factor with new data and return computed value.
         
@@ -74,6 +77,7 @@ class Factor(ABC):
         
         Args:
             data: Factor input containing current and historical data
+            var_cache: Pre-computed variable values from the engine.
             
         Returns:
             Computed factor value, or NaN if not warmed up
@@ -87,7 +91,7 @@ class Factor(ABC):
             else:
                 return float('nan')
         
-        return self.compute(data)
+        return self.compute(data, var_cache=var_cache)
     
     @property
     def is_warmed_up(self) -> bool:
@@ -145,8 +149,15 @@ class ExpressionFactor(Factor):
         for var_name, var_expr in self.variables.items():
             self._variable_asts[var_name] = parse_expression(var_expr)
     
-    def compute(self, data: FactorInput) -> float:
-        """Compute factor value by evaluating the expression."""
+    def compute(self, data: FactorInput, var_cache: dict[str, Any] | None = None) -> float:
+        """Compute factor value by evaluating the expression.
+        
+        Args:
+            data: Factor input containing current bar and history.
+            var_cache: Pre-computed variable values from the engine.
+                When provided, skips redundant per-factor variable
+                evaluation — the main performance optimization.
+        """
         from nautilus_quants.factors.expression import EvaluationContext, Evaluator
         from nautilus_quants.factors.operators.math import MATH_OPERATORS
         from nautilus_quants.factors.operators.time_series import TIME_SERIES_OPERATORS
@@ -168,6 +179,10 @@ class ExpressionFactor(Factor):
         # Add parameters
         variables.update(self.parameters)
         
+        # Inject pre-computed variable values from engine cache
+        if var_cache:
+            variables.update(var_cache)
+
         # Create evaluation context
         context = EvaluationContext(
             variables=variables,
@@ -175,12 +190,13 @@ class ExpressionFactor(Factor):
             parameters=self.parameters,
         )
         evaluator = Evaluator(context)
-        
-        # First evaluate variable expressions
-        for var_name, var_ast in self._variable_asts.items():
-            var_value = evaluator.evaluate(var_ast)
-            context.set_variable(var_name, var_value)
-        
+
+        # Evaluate variable expressions if not pre-computed by engine
+        if not var_cache:
+            for var_name, var_ast in self._variable_asts.items():
+                var_value = evaluator.evaluate(var_ast)
+                context.set_variable(var_name, var_value)
+
         # Evaluate main expression
         result = evaluator.evaluate(self._ast)
         
