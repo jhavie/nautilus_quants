@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 from nautilus_quants.factors.operators.base import (
@@ -63,8 +64,34 @@ class CsRank(CrossSectionalOperator):
         for k, v in values.items():
             if np.isnan(v):
                 result[k] = float('nan')
-        
+
         return result
+
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        # Match scalar behavior exactly, including tie handling:
+        # ties are ordered by original column order (stable sort).
+        values = df.to_numpy(dtype=float, copy=False)
+        valid_mask = ~np.isnan(values)
+        counts = valid_mask.sum(axis=1)
+
+        # Stable argsort preserves column-order tie-breaking used by scalar path.
+        order = np.argsort(values, axis=1, kind="stable")
+
+        n_rows, n_cols = values.shape
+        pos = np.broadcast_to(np.arange(n_cols, dtype=float), (n_rows, n_cols))
+        denom = np.where(counts > 1, counts - 1, 1)[:, None]
+        rank_sorted = pos / denom
+        rank_sorted = np.where(pos < counts[:, None], rank_sorted, np.nan)
+
+        out = np.full((n_rows, n_cols), np.nan, dtype=float)
+        row_idx = np.arange(n_rows)[:, None]
+        out[row_idx, order] = rank_sorted
+
+        single_mask = counts == 1
+        if single_mask.any():
+            out[single_mask] = np.where(valid_mask[single_mask], 0.5, np.nan)
+
+        return pd.DataFrame(out, index=df.index, columns=df.columns)
 
 
 @register_operator
@@ -110,8 +137,13 @@ class CsZscore(CrossSectionalOperator):
                 result[k] = float('nan')
             else:
                 result[k] = float((v - mean) / std)
-        
+
         return result
+
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        row_mean = df.mean(axis=1)
+        row_std = df.std(axis=1, ddof=1)
+        return df.sub(row_mean, axis=0).div(row_std, axis=0)
 
 
 @register_operator
@@ -162,6 +194,21 @@ class CsScale(CrossSectionalOperator):
         
         return result
 
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        total = df.abs().sum(axis=1)
+        result = df.div(total.replace(0, np.nan), axis=0)
+
+        # Match scalar behavior: when total == 0, distribute equally across valid entries.
+        valid_count = df.notna().sum(axis=1)
+        zero_total_mask = total.eq(0) & valid_count.gt(0)
+        if zero_total_mask.any():
+            eq = df.loc[zero_total_mask].notna().astype(float).div(
+                valid_count.loc[zero_total_mask], axis=0,
+            )
+            result.loc[zero_total_mask] = eq.where(df.loc[zero_total_mask].notna(), np.nan)
+
+        return result
+
 
 @register_operator
 class CsDemean(CrossSectionalOperator):
@@ -201,11 +248,14 @@ class CsDemean(CrossSectionalOperator):
                 result[k] = float('nan')
             else:
                 result[k] = float(v - mean)
-        
+
         return result
 
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        return df.sub(df.mean(axis=1), axis=0)
 
-@register_operator  
+
+@register_operator
 class CsMax(CrossSectionalOperator):
     """Cross-sectional maximum value."""
     
@@ -354,6 +404,23 @@ class CsNormalize(CrossSectionalOperator):
 
         return result
 
+    def compute_vectorized(
+        self, df: pd.DataFrame, use_std: bool = False, limit: float = 0.0, **kwargs: Any,
+    ) -> pd.DataFrame:
+        valid_count = df.notna().sum(axis=1)
+        result = df.sub(df.mean(axis=1), axis=0)
+        # Match scalar behavior: fewer than 2 valid values -> all NaN.
+        result = result.where(valid_count >= 2, np.nan)
+
+        if use_std:
+            row_std = result.std(axis=1, ddof=1)
+            scaled = result.div(row_std.replace(0, np.nan), axis=0)
+            # Match scalar behavior: when std == 0, keep demeaned values (typically 0.0).
+            result = scaled.where(row_std.ne(0), result)
+        if limit > 0:
+            result = result.clip(-limit, limit)
+        return result
+
 
 @register_operator
 class CsWinsorize(CrossSectionalOperator):
@@ -406,6 +473,15 @@ class CsWinsorize(CrossSectionalOperator):
                 result[k] = float(max(lower, min(upper, v)))
 
         return result
+
+    def compute_vectorized(
+        self, df: pd.DataFrame, std_mult: float = 4.0, **kwargs: Any,
+    ) -> pd.DataFrame:
+        row_mean = df.mean(axis=1)
+        row_std = df.std(axis=1, ddof=0)
+        lower = row_mean - std_mult * row_std
+        upper = row_mean + std_mult * row_std
+        return df.clip(lower, upper, axis=0)
 
 
 @register_operator
@@ -460,6 +536,27 @@ class CsScaleDown(CrossSectionalOperator):
 
         return result
 
+    def compute_vectorized(
+        self, df: pd.DataFrame, constant: float = 0.0, **kwargs: Any,
+    ) -> pd.DataFrame:
+        valid_count = df.notna().sum(axis=1)
+        row_min = df.min(axis=1)
+        row_max = df.max(axis=1)
+        range_val = row_max - row_min
+        result = df.sub(row_min, axis=0).div(range_val.replace(0, np.nan), axis=0).sub(constant)
+
+        # Match scalar behavior: fewer than 2 valid values -> all NaN.
+        result = result.where(valid_count >= 2, np.nan)
+
+        # Match scalar behavior: zero range -> 0.5 - constant for valid entries.
+        zero_range_mask = range_val.eq(0) & valid_count.ge(2)
+        if zero_range_mask.any():
+            fill_val = 0.5 - constant
+            fill = df.loc[zero_range_mask].notna().astype(float) * fill_val
+            result.loc[zero_range_mask] = fill.where(df.loc[zero_range_mask].notna(), np.nan)
+
+        return result
+
 
 @register_operator
 class CsClipQuantile(CrossSectionalOperator):
@@ -511,6 +608,13 @@ class CsClipQuantile(CrossSectionalOperator):
                 result[k] = float(max(q_lower, min(q_upper, v)))
 
         return result
+
+    def compute_vectorized(
+        self, df: pd.DataFrame, lower: float = 0.2, upper: float = 0.8, **kwargs: Any,
+    ) -> pd.DataFrame:
+        q_lo = df.quantile(lower, axis=1)
+        q_hi = df.quantile(upper, axis=1)
+        return df.clip(q_lo, q_hi, axis=0)
 
 
 def clip_quantile(
@@ -582,7 +686,10 @@ class CsQuantile(CrossSectionalOperator):
                 elif driver == "uniform":
                     result[k] = float(p - 0.5)
                 else:
-                    result[k] = float(stats.norm.ppf(p) * sigma)
+                    raise ValueError(
+                        f"Invalid quantile driver '{driver}'. "
+                        f"Must be 'gaussian', 'cauchy', or 'uniform'"
+                    )
 
         return result
 
@@ -638,6 +745,9 @@ class CsRankAlias(CrossSectionalOperator):
         # rate parameter is for precision control, ignored in our implementation
         return CsRank().compute(values)
 
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        return CsRank().compute_vectorized(df)
+
 
 @register_operator
 class CsScaleAlias(CrossSectionalOperator):
@@ -658,6 +768,9 @@ class CsScaleAlias(CrossSectionalOperator):
         # WorldQuant scale has more parameters, but basic behavior is same
         return CsScale().compute(values)
 
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        return CsScale().compute_vectorized(df)
+
 
 @register_operator
 class CsZscoreAlias(CrossSectionalOperator):
@@ -674,6 +787,9 @@ class CsZscoreAlias(CrossSectionalOperator):
     ) -> dict[str, float]:
         return CsZscore().compute(values)
 
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        return CsZscore().compute_vectorized(df)
+
 
 @register_operator
 class CsDemeanAlias(CrossSectionalOperator):
@@ -689,6 +805,9 @@ class CsDemeanAlias(CrossSectionalOperator):
         **kwargs: Any,
     ) -> dict[str, float]:
         return CsDemean().compute(values)
+
+    def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
+        return CsDemean().compute_vectorized(df)
 
 
 # Alias function wrappers
@@ -737,4 +856,23 @@ CROSS_SECTIONAL_OPERATORS = {
     "scale": scale,
     "zscore": zscore,
     "demean": demean,
+}
+
+# Instance registry for vectorized evaluator (lookup by operator name)
+CS_OPERATOR_INSTANCES: dict[str, CrossSectionalOperator] = {
+    "cs_rank": CsRank(),
+    "cs_zscore": CsZscore(),
+    "cs_scale": CsScale(),
+    "cs_demean": CsDemean(),
+    "cs_max": CsMax(),
+    "cs_min": CsMin(),
+    "normalize": CsNormalize(),
+    "winsorize": CsWinsorize(),
+    "scale_down": CsScaleDown(),
+    "clip_quantile": CsClipQuantile(),
+    "quantile": CsQuantile(),
+    "rank": CsRankAlias(),
+    "scale": CsScaleAlias(),
+    "zscore": CsZscoreAlias(),
+    "demean": CsDemeanAlias(),
 }

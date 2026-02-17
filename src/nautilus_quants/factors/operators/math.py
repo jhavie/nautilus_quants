@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from nautilus_quants.factors.operators.base import (
     MathOperator,
@@ -29,10 +30,8 @@ class Log(MathOperator):
     
     def compute(self, value: float | np.ndarray, **kwargs: Any) -> float | np.ndarray:
         """Compute natural logarithm."""
-        # Handle negative values
-        if isinstance(value, np.ndarray):
-            result = np.log(np.where(value > 0, value, np.nan))
-            return result
+        if isinstance(value, (np.ndarray, pd.Series)):
+            return np.log(np.where(value > 0, value, np.nan))
         return float(np.log(value)) if value > 0 else float('nan')
 
 
@@ -72,7 +71,7 @@ class Sqrt(MathOperator):
     
     def compute(self, value: float | np.ndarray, **kwargs: Any) -> float | np.ndarray:
         """Compute square root."""
-        if isinstance(value, np.ndarray):
+        if isinstance(value, (np.ndarray, pd.Series)):
             return np.sqrt(np.where(value >= 0, value, np.nan))
         return float(np.sqrt(value)) if value >= 0 else float('nan')
 
@@ -85,9 +84,8 @@ class Power(MathOperator):
     min_args = 2
     max_args = 2
     
-    def compute(self, value: float | np.ndarray, **kwargs: Any) -> float | np.ndarray:
-        """Compute power. Expects exponent as second positional arg."""
-        exponent = kwargs.get('exponent', 2)
+    def compute(self, value: float | np.ndarray, exponent: float = 2, **kwargs: Any) -> float | np.ndarray:
+        """Compute power."""
         return np.power(value, exponent)
 
 
@@ -99,9 +97,8 @@ class Max(MathOperator):
     min_args = 2
     max_args = 2
     
-    def compute(self, value: float | np.ndarray, **kwargs: Any) -> float | np.ndarray:
+    def compute(self, value: float | np.ndarray, other: float | np.ndarray = 0, **kwargs: Any) -> float | np.ndarray:
         """Return maximum of two values."""
-        other = kwargs.get('other', 0)
         return np.maximum(value, other)
 
 
@@ -113,9 +110,8 @@ class Min(MathOperator):
     min_args = 2
     max_args = 2
     
-    def compute(self, value: float | np.ndarray, **kwargs: Any) -> float | np.ndarray:
+    def compute(self, value: float | np.ndarray, other: float | np.ndarray = 0, **kwargs: Any) -> float | np.ndarray:
         """Return minimum of two values."""
-        other = kwargs.get('other', 0)
         return np.minimum(value, other)
 
 
@@ -166,9 +162,8 @@ class Round(MathOperator):
     min_args = 1
     max_args = 2
     
-    def compute(self, value: float | np.ndarray, **kwargs: Any) -> float | np.ndarray:
+    def compute(self, value: float | np.ndarray, decimals: int = 0, **kwargs: Any) -> float | np.ndarray:
         """Round to specified decimals (default 0)."""
-        decimals = kwargs.get('decimals', 0)
         return np.round(value, int(decimals))
 
 

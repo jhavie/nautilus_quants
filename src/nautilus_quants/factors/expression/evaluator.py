@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import numpy as np
+import pandas as pd
 
 from nautilus_quants.factors.expression.ast import (
     ASTNode,
@@ -143,8 +144,15 @@ class Evaluator(ASTVisitor):
         elif op == "*":
             return left * right  # type: ignore
         elif op == "/":
-            # Handle division by zero
+            # Handle division by zero for scalars and arrays
+            if isinstance(right, np.ndarray):
+                out = np.full_like(right, np.nan, dtype=float)
+                mask = right != 0
+                np.divide(left, right, out=out, where=mask)
+                return out
             if isinstance(right, (int, float)) and right == 0:
+                if isinstance(left, np.ndarray):
+                    return np.full_like(left, np.nan, dtype=float)
                 return float('nan')
             return left / right  # type: ignore
         elif op == "^":
@@ -257,3 +265,128 @@ def evaluate_expression(
     )
     evaluator = Evaluator(context)
     return evaluator.evaluate(node)
+
+
+class VectorizedEvaluator(ASTVisitor):
+    """Evaluate AST nodes over full pd.Series time-series.
+
+    Variables are bound to ``pd.Series`` (complete time-series per instrument).
+    Function calls dispatch to operator ``compute_vectorized()`` methods.
+    Binary operations use element-wise pandas arithmetic.
+    """
+
+    def __init__(
+        self,
+        variables: dict[str, pd.Series],
+        ts_operators: dict[str, Any],
+        math_operators: dict[str, Callable[..., Any]],
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        self.variables = variables
+        self.ts_operators = ts_operators  # name -> operator instance
+        self.math_operators = math_operators  # name -> callable (already vectorized)
+        self.parameters = parameters or {}
+
+    def evaluate(self, node: ASTNode) -> pd.Series | float:
+        return node.accept(self)
+
+    def visit_number(self, node: NumberNode) -> float:
+        return node.value
+
+    def visit_string(self, node: StringNode) -> str:
+        return node.value
+
+    def visit_variable(self, node: VariableNode) -> pd.Series | float:
+        if node.name in self.variables:
+            return self.variables[node.name]
+        if node.name in self.parameters:
+            return self.parameters[node.name]
+        raise EvaluationError(f"Unknown variable: '{node.name}'")
+
+    def visit_binary_op(self, node: BinaryOpNode) -> pd.Series | float:
+        left = self.evaluate(node.left)
+        right = self.evaluate(node.right)
+        op = node.operator
+        if op == "+":
+            return left + right  # type: ignore
+        elif op == "-":
+            return left - right  # type: ignore
+        elif op == "*":
+            return left * right  # type: ignore
+        elif op == "/":
+            if isinstance(right, pd.Series):
+                return left.divide(right).where(right != 0, np.nan) if isinstance(left, pd.Series) else pd.Series(
+                    np.where(right != 0, left / right, np.nan), index=right.index,
+                )
+            if isinstance(right, (int, float)) and right == 0:
+                if isinstance(left, pd.Series):
+                    return pd.Series(np.nan, index=left.index)
+                return float("nan")
+            return left / right  # type: ignore
+        elif op == "^":
+            return np.power(left, right)
+        elif op == ">":
+            return (left > right).astype(float) if isinstance(left, pd.Series) else float(left > right)  # type: ignore
+        elif op == "<":
+            return (left < right).astype(float) if isinstance(left, pd.Series) else float(left < right)  # type: ignore
+        elif op == ">=":
+            return (left >= right).astype(float) if isinstance(left, pd.Series) else float(left >= right)  # type: ignore
+        elif op == "<=":
+            return (left <= right).astype(float) if isinstance(left, pd.Series) else float(left <= right)  # type: ignore
+        elif op == "==":
+            return (left == right).astype(float) if isinstance(left, pd.Series) else float(left == right)  # type: ignore
+        elif op == "!=":
+            return (left != right).astype(float) if isinstance(left, pd.Series) else float(left != right)  # type: ignore
+        raise EvaluationError(f"Unknown operator: '{op}'")
+
+    def visit_unary_op(self, node: UnaryOpNode) -> pd.Series | float:
+        operand = self.evaluate(node.operand)
+        if node.operator == "-":
+            return -operand  # type: ignore
+        elif node.operator == "!":
+            if isinstance(operand, pd.Series):
+                return (~operand.astype(bool)).astype(float)
+            return float(not bool(operand))
+        raise EvaluationError(f"Unknown unary operator: '{node.operator}'")
+
+    def visit_ternary(self, node: TernaryNode) -> pd.Series | float:
+        condition = self.evaluate(node.condition)
+        true_val = self.evaluate(node.true_expr)
+        false_val = self.evaluate(node.false_expr)
+        if isinstance(condition, pd.Series):
+            return pd.Series(
+                np.where(condition.astype(bool), true_val, false_val),
+                index=condition.index,
+            )
+        return true_val if bool(condition) else false_val
+
+    def visit_function_call(self, node: FunctionCallNode) -> pd.Series | float:
+        func_name = node.name
+
+        # Check time-series operators first
+        if func_name in self.ts_operators:
+            op_instance = self.ts_operators[func_name]
+            args = [self.evaluate(arg) for arg in node.arguments]
+            data = args[0]
+            extra_kwargs: dict[str, Any] = {}
+            if func_name in ("correlation", "covariance") and len(args) > 2:
+                # correlation(x, y, window) -> data=x, window=window, data2=y
+                extra_kwargs["data2"] = args[1]
+                window = int(args[2])
+            else:
+                window = int(args[1]) if len(args) > 1 else 1
+            return op_instance.compute_vectorized(data, window, **extra_kwargs)
+
+        # Check math operators
+        if func_name in self.math_operators:
+            math_fn = self.math_operators[func_name]
+            args = [self.evaluate(arg) for arg in node.arguments]
+            result = math_fn(*args)
+            # Preserve pd.Series type when input was Series
+            if isinstance(result, np.ndarray) and not isinstance(result, pd.Series):
+                for a in args:
+                    if isinstance(a, pd.Series):
+                        return pd.Series(result, index=a.index)
+            return result
+
+        raise EvaluationError(f"Unknown operator: '{func_name}'")

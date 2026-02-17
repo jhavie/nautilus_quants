@@ -27,6 +27,9 @@ dependencies = [
     "lark>=1.1.0",  # Expression parser for Alpha101-style factors
     # Report enhancement
     "quantstats>=0.0.64",  # QuantStats for enhanced backtest reports
+    # Alpha factor analysis
+    "alphalens-reloaded>=0.0.12",  # Factor quality evaluation (IC/ICIR/quantile returns)
+    "scipy>=1.11.0",  # Statistical distributions for cross-sectional quantile operator
 ]
 
 [project.optional-dependencies]
@@ -43,14 +46,14 @@ packages = ["src/nautilus_quants"]
 
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ["py312"]
 
 [tool.isort]
 profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 

@@ -32,6 +32,7 @@ from nautilus_quants.factors.expression.evaluator import (
     EvaluationContext,
     EvaluationError,
     Evaluator,
+    VectorizedEvaluator,
     evaluate_expression,
 )
 from nautilus_quants.factors.expression.parser import (
@@ -55,6 +56,7 @@ __all__ = [
     "parse_expression",
     # Evaluator
     "Evaluator",
+    "VectorizedEvaluator",
     "EvaluationContext",
     "EvaluationError",
     "evaluate_expression",

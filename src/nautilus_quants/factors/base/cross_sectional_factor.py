@@ -41,7 +41,7 @@ class CrossSectionalFactor(Factor):
             warmup_period=1,
         )
     
-    def compute(self, data: FactorInput) -> float:
+    def compute(self, data: FactorInput, var_cache: dict | None = None) -> float:
         """
         Compute factor for single instrument.
         
