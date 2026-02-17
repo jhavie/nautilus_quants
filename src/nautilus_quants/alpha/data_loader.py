@@ -76,7 +76,10 @@ class CatalogDataLoader:
 
     @staticmethod
     def bars_to_dataframe(bars: list[Bar]) -> pd.DataFrame:
-        """Convert Bar list to DataFrame.
+        """Convert Bar list to DataFrame using Nautilus-native serialization.
+
+        Uses ``Bar.to_dict()`` (Cython) for faster batch conversion than
+        manual Python-side field extraction.
 
         Args:
             bars: List of Nautilus Bar objects
@@ -85,20 +88,15 @@ class CatalogDataLoader:
             DataFrame with columns [open, high, low, close, volume]
             and datetime index named 'timestamp'
         """
+        from nautilus_trader.model.data import Bar as BarModel
+
         if not bars:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
-        records = []
-        for bar in bars:
-            records.append({
-                "timestamp": pd.Timestamp(bar.ts_event, unit="ns"),
-                "open": float(bar.open),
-                "high": float(bar.high),
-                "low": float(bar.low),
-                "close": float(bar.close),
-                "volume": float(bar.volume),
-            })
-
-        df = pd.DataFrame(records)
-        df = df.set_index("timestamp")
-        return df
+        df = pd.DataFrame(BarModel.to_dict(b) for b in bars)
+        df.index = pd.to_datetime(df["ts_event"], unit="ns")
+        df.index.name = "timestamp"
+        ohlcv_cols = ["open", "high", "low", "close", "volume"]
+        for col in ohlcv_cols:
+            df[col] = df[col].astype(float)
+        return df[ohlcv_cols]

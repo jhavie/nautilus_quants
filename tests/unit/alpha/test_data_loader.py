@@ -55,22 +55,27 @@ class TestCatalogDataLoader:
         assert "BTCUSDT.BINANCE" in result
         assert result["BTCUSDT.BINANCE"] == []
 
-    def test_bars_to_dataframe(self):
+    @patch("nautilus_trader.model.data.Bar")
+    def test_bars_to_dataframe(self, mock_bar_model):
+        """bars_to_dataframe should use Bar.to_dict() for conversion."""
         mock_bar1 = MagicMock()
-        mock_bar1.ts_event = 1_000_000_000_000  # nanoseconds
-        mock_bar1.open = MagicMock(__float__=lambda s: 100.0)
-        mock_bar1.high = MagicMock(__float__=lambda s: 105.0)
-        mock_bar1.low = MagicMock(__float__=lambda s: 95.0)
-        mock_bar1.close = MagicMock(__float__=lambda s: 102.0)
-        mock_bar1.volume = MagicMock(__float__=lambda s: 1000.0)
-
         mock_bar2 = MagicMock()
-        mock_bar2.ts_event = 2_000_000_000_000
-        mock_bar2.open = MagicMock(__float__=lambda s: 102.0)
-        mock_bar2.high = MagicMock(__float__=lambda s: 110.0)
-        mock_bar2.low = MagicMock(__float__=lambda s: 100.0)
-        mock_bar2.close = MagicMock(__float__=lambda s: 108.0)
-        mock_bar2.volume = MagicMock(__float__=lambda s: 1500.0)
+
+        # Bar.to_dict() returns dicts with string OHLCV values
+        mock_bar_model.to_dict.side_effect = [
+            {
+                "ts_event": 1_000_000_000_000,
+                "open": "100.00", "high": "105.00", "low": "95.00",
+                "close": "102.00", "volume": "1000.00",
+                "type": "Bar", "bar_type": "TEST",
+            },
+            {
+                "ts_event": 2_000_000_000_000,
+                "open": "102.00", "high": "110.00", "low": "100.00",
+                "close": "108.00", "volume": "1500.00",
+                "type": "Bar", "bar_type": "TEST",
+            },
+        ]
 
         df = CatalogDataLoader.bars_to_dataframe([mock_bar1, mock_bar2])
 
@@ -78,6 +83,9 @@ class TestCatalogDataLoader:
         assert len(df) == 2
         assert list(df.columns) == ["open", "high", "low", "close", "volume"]
         assert df.index.name == "timestamp"
+        # Verify float conversion from string values
+        assert df["close"].iloc[0] == 102.0
+        assert df["volume"].iloc[1] == 1500.0
 
     def test_bars_to_dataframe_empty(self):
         df = CatalogDataLoader.bars_to_dataframe([])

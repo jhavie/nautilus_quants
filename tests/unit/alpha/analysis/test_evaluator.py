@@ -142,26 +142,64 @@ class TestFactorEvaluator:
         assert "ic" in result
 
 
-class TestBuildPricingDataFrame:
-    """Test pricing DataFrame construction."""
+class TestCsExpressionParser:
+    """Test CS expression vectorized evaluation (Issues 5, H4)."""
 
-    def test_pricing_has_correct_shape(self):
-        """Pricing should have instruments as columns and timestamps as index."""
-        mock_factor_config = MagicMock()
-        evaluator = FactorEvaluator(mock_factor_config)
+    @pytest.fixture()
+    def evaluator(self):
+        mock_config = MagicMock()
+        return FactorEvaluator(mock_config)
 
-        # Simulate records: {ts: {instrument: close_price}}
-        records = {
-            1000: {"A": 100.0, "B": 50.0},
-            2000: {"A": 101.0, "B": 51.0},
-            3000: {"A": 102.0, "B": 52.0},
+    @pytest.fixture()
+    def panels(self) -> dict[str, pd.DataFrame]:
+        idx = pd.date_range("2024-01-01", periods=5, freq="h")
+        return {
+            "x": pd.DataFrame({"A": [1, 2, 3, 4, 5], "B": [5, 4, 3, 2, 1]}, index=idx, dtype=float),
+            "y": pd.DataFrame({"A": [10, 20, 30, 40, 50], "B": [50, 40, 30, 20, 10]}, index=idx, dtype=float),
         }
 
-        pricing = evaluator._build_pricing(records)
+    def test_simple_weighted_sum(self, evaluator, panels):
+        result = evaluator._evaluate_cs_expression_vectorized("0.6 * x + 0.4 * y", panels)
+        expected = panels["x"] * 0.6 + panels["y"] * 0.4
+        pd.testing.assert_frame_equal(result, expected)
 
-        assert isinstance(pricing, pd.DataFrame)
-        assert set(pricing.columns) == {"A", "B"}
-        assert len(pricing) == 3
+    def test_negative_leading_weighted_sum(self, evaluator, panels):
+        result = evaluator._evaluate_cs_expression_vectorized("- 0.5 * x - 0.5 * y", panels)
+        expected = panels["x"] * (-0.5) + panels["y"] * (-0.5)
+        pd.testing.assert_frame_equal(result, expected)
+
+    def test_scientific_notation_weights(self, evaluator, panels):
+        result = evaluator._evaluate_cs_expression_vectorized("1e-3 * x + 2e-3 * y", panels)
+        expected = panels["x"] * 1e-3 + panels["y"] * 2e-3
+        pd.testing.assert_frame_equal(result, expected)
+
+    def test_simple_variable_reference(self, evaluator, panels):
+        result = evaluator._evaluate_cs_expression_vectorized("x", panels)
+        pd.testing.assert_frame_equal(result, panels["x"])
+
+    def test_missing_factor_returns_none_with_warning(self, evaluator, panels, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            result = evaluator._evaluate_cs_expression_vectorized("0.5 * x + 0.5 * z", panels)
+        assert result is None
+
+    def test_weighted_sum_fallback_to_function(self, evaluator, panels):
+        """When weighted-sum parse fails, should fallback to function path."""
+        # "-1 * normalize(...)" looks like weighted sum but 'normalize' is not a panel key
+        # Should fall through to function path (which may also return None here,
+        # but the fallback mechanism itself should work without error)
+        result = evaluator._evaluate_cs_expression_vectorized("-1 * nonexistent_func(x)", panels)
+        # Neither weighted-sum nor function parse succeeds → None
+        assert result is None
+
+    def test_is_cs_weighted_sum_ignores_scientific_notation(self, evaluator):
+        assert evaluator._is_cs_weighted_sum("1e-3 * x") is False  # no binary +/- at depth 0
+        assert evaluator._is_cs_weighted_sum("1e-3 * x + 2e-3 * y") is True
+        assert evaluator._is_cs_weighted_sum("normalize(x, true, 0)") is False
+
+    def test_is_cs_weighted_sum_leading_minus_not_binary(self, evaluator):
+        # Leading '-' at i=0 should not be treated as binary operator
+        assert evaluator._is_cs_weighted_sum("-x") is False
 
 
 class TestVectorizedEvaluator:

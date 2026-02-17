@@ -124,7 +124,8 @@ def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
 
     Unlike alphalens ``plot_information_table`` which propagates NaN
     through ``scipy.stats.ttest_1samp``, this function drops NaN values
-    before computing t-stat and p-value.
+    **per column** before computing statistics.  This avoids cross-column
+    contamination where long-period NaN tails truncate short-period samples.
 
     Includes both raw t-stat (assumes independence) and Newey-West
     adjusted t-stat (accounts for serial correlation in high-frequency
@@ -135,22 +136,34 @@ def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
         t-stat(NW), p-value(NW), N_eff, IC Skew, IC Kurtosis, N
     """
     table = pd.DataFrame()
-    ic_clean = ic_df.dropna()
-    table["IC Mean"] = ic_clean.mean()
-    table["IC Std."] = ic_clean.std()
-    table["Risk-Adjusted IC"] = ic_clean.mean() / ic_clean.std()
-    t_stat, p_value = scipy_stats.ttest_1samp(ic_clean, 0, nan_policy="omit")
-    table["t-stat(IC)"] = t_stat
-    table["p-value(IC)"] = p_value
-    # Newey-West adjusted t-stat (robust to autocorrelation)
-    for col in ic_clean.columns:
-        nw_t, nw_p, n_eff = _newey_west_tstat(ic_clean[col])
+    for col in ic_df.columns:
+        col_clean = ic_df[col].dropna()
+        n = len(col_clean)
+        ic_mean = col_clean.mean() if n > 0 else np.nan
+        ic_std = col_clean.std() if n > 1 else np.nan
+        table.loc[col, "IC Mean"] = ic_mean
+        table.loc[col, "IC Std."] = ic_std
+        table.loc[col, "Risk-Adjusted IC"] = (
+            ic_mean / ic_std if ic_std is not None and ic_std > 1e-15 else np.nan
+        )
+        if n >= 2:
+            t_val, p_val = scipy_stats.ttest_1samp(col_clean, 0)
+            table.loc[col, "t-stat(IC)"] = t_val
+            table.loc[col, "p-value(IC)"] = p_val
+        else:
+            table.loc[col, "t-stat(IC)"] = np.nan
+            table.loc[col, "p-value(IC)"] = np.nan
+        nw_t, nw_p, n_eff = _newey_west_tstat(col_clean)
         table.loc[col, "t-stat(NW)"] = nw_t
         table.loc[col, "p-value(NW)"] = nw_p
         table.loc[col, "N_eff"] = n_eff
-    table["IC Skew"] = scipy_stats.skew(ic_clean, nan_policy="omit")
-    table["IC Kurtosis"] = scipy_stats.kurtosis(ic_clean, nan_policy="omit")
-    table["N"] = ic_clean.count()
+        table.loc[col, "IC Skew"] = (
+            float(scipy_stats.skew(col_clean)) if n >= 3 else np.nan
+        )
+        table.loc[col, "IC Kurtosis"] = (
+            float(scipy_stats.kurtosis(col_clean)) if n >= 4 else np.nan
+        )
+        table.loc[col, "N"] = n
     nan_count = ic_df.isna().sum()
     if nan_count.any():
         table["NaN Count"] = nan_count
@@ -340,7 +353,14 @@ def _chart_turnover_table(factor_data: pd.DataFrame, period: str, **kwargs: Any)
     ac: dict[str, pd.Series] = {}
     for p in period_cols:
         qt[p] = {q: perf.quantile_turnover(quantile_factor, q) for q in quantiles}
-        ac[p] = perf.factor_rank_autocorrelation(factor_data, period=1)
+        # Derive lag from period label (e.g., "4h" with 1h bars → lag=4)
+        try:
+            bar_freq = factor_data.index.levels[0].freq or "1h"
+            period_bars = int(pd.Timedelta(p) / pd.Timedelta(bar_freq))
+            period_bars = max(period_bars, 1)
+        except (ValueError, TypeError):
+            period_bars = 1
+        ac[p] = perf.factor_rank_autocorrelation(factor_data, period=period_bars)
 
     turnover_df, auto_corr_df = plotting.plot_turnover_table(ac, qt, return_df=True)
     combined = pd.concat([turnover_df, auto_corr_df])

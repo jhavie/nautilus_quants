@@ -153,6 +153,13 @@ class FactorEvaluator:
             )
             if result_df is not None:
                 factor_panels[cs_def.name] = result_df
+            else:
+                logger.warning(
+                    "CS factor '%s' expression '%s' evaluated to None "
+                    "— check factor dependencies",
+                    cs_def.name,
+                    cs_def.expression,
+                )
 
         # --- Step 4: Convert to alphalens format ---
         factor_series: dict[str, pd.Series] = {}
@@ -164,15 +171,6 @@ class FactorEvaluator:
 
         return factor_series, pricing
 
-    @staticmethod
-    def _build_pricing(records: dict[int, dict[str, float]]) -> pd.DataFrame:
-        """Build pricing DataFrame from {timestamp_ns: {asset: close}} records."""
-        if not records:
-            return pd.DataFrame()
-        pricing = pd.DataFrame.from_dict(records, orient="index").sort_index()
-        pricing.index = pd.to_datetime(pricing.index, unit="ns")
-        return pricing
-
     def _evaluate_cs_expression_vectorized(
         self,
         expression: str,
@@ -183,7 +181,11 @@ class FactorEvaluator:
 
         # Handle weighted sum (e.g., "0.6 * a + 0.4 * b")
         if self._is_cs_weighted_sum(expression):
-            return self._eval_cs_weighted_sum_vec(expression, factor_panels)
+            result = self._eval_cs_weighted_sum_vec(expression, factor_panels)
+            if result is not None:
+                return result
+            # Fallback: weighted-sum heuristic matched but parsing failed
+            # (e.g., "-1 * normalize(x, true, 0)"), try function path.
 
         # Handle function call
         if "(" in expression:
@@ -193,14 +195,22 @@ class FactorEvaluator:
         return factor_panels.get(expression)
 
     def _is_cs_weighted_sum(self, expr: str) -> bool:
+        """Check if expression is a weighted sum of factor names."""
         depth = 0
-        for char in expr:
+        i = 0
+        while i < len(expr):
+            char = expr[i]
             if char == "(":
                 depth += 1
             elif char == ")":
                 depth -= 1
-            elif char in "+-" and depth == 0:
+            elif char in "+-" and depth == 0 and i > 0:
+                # Skip scientific notation (e.g., 1e-3)
+                if expr[i - 1] in "eE" and i >= 2 and expr[i - 2].isdigit():
+                    i += 1
+                    continue
                 return True
+            i += 1
         return False
 
     def _eval_cs_weighted_sum_vec(
@@ -208,7 +218,7 @@ class FactorEvaluator:
         expression: str,
         factor_panels: dict[str, pd.DataFrame],
     ) -> pd.DataFrame | None:
-        pattern = r'([+-]?\s*[\d.]+)\s*\*\s*(\w+)'
+        pattern = r'([+-]?\s*[\d.]+(?:[eE][+-]?\d+)?)\s*\*\s*(\w+)'
         matches = re.findall(pattern, expression)
         if not matches:
             return None
@@ -404,11 +414,8 @@ class FactorEvaluator:
         import alphalens.utils as al_utils
 
         if forward_returns is not None:
-            factor_data = al_utils.get_clean_factor(
-                factor=factor_series,
-                forward_returns=forward_returns,
-                quantiles=config.quantiles,
-                max_loss=config.max_loss,
+            return run_alphalens_with_forward_returns(
+                factor_series, forward_returns, config.quantiles, config.max_loss,
             )
         else:
             # Fallback: compute everything (slower, for backward compatibility)
@@ -442,6 +449,34 @@ class FactorEvaluator:
             "ic": ic,
             "mean_returns": mean_returns,
         }
+
+
+def run_alphalens_with_forward_returns(
+    factor_series: pd.Series,
+    forward_returns: pd.DataFrame,
+    quantiles: int,
+    max_loss: float,
+) -> dict[str, Any]:
+    """Run alphalens analysis with pre-computed forward returns.
+
+    Module-level function suitable for ProcessPoolExecutor pickling.
+    """
+    import alphalens.performance as perf
+    import alphalens.utils as al_utils
+
+    factor_data = al_utils.get_clean_factor(
+        factor=factor_series,
+        forward_returns=forward_returns,
+        quantiles=quantiles,
+        max_loss=max_loss,
+    )
+    ic = perf.factor_information_coefficient(factor_data)
+    mean_returns, _ = perf.mean_return_by_quantile(factor_data, by_date=False)
+    return {
+        "factor_data": factor_data,
+        "ic": ic,
+        "mean_returns": mean_returns,
+    }
 
 
 def _format_bar_period(n_bars: int, bar_td: pd.Timedelta) -> str:

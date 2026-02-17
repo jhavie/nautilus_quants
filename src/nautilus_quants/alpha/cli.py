@@ -28,23 +28,13 @@ def _run_alphalens_worker(
     Runs in a subprocess via ProcessPoolExecutor. Returns (name, result_dict)
     on success or (name, error_string) on failure.
     """
-    import alphalens.performance as perf
-    import alphalens.utils as al_utils
+    from nautilus_quants.alpha.analysis.evaluator import run_alphalens_with_forward_returns
 
     try:
-        factor_data = al_utils.get_clean_factor(
-            factor=factor_series,
-            forward_returns=forward_returns,
-            quantiles=config.quantiles,
-            max_loss=config.max_loss,
+        result = run_alphalens_with_forward_returns(
+            factor_series, forward_returns, config.quantiles, config.max_loss,
         )
-        ic = perf.factor_information_coefficient(factor_data)
-        mean_returns, _ = perf.mean_return_by_quantile(factor_data, by_date=False)
-        return factor_name, {
-            "factor_data": factor_data,
-            "ic": ic,
-            "mean_returns": mean_returns,
-        }
+        return factor_name, result
     except Exception as e:
         return factor_name, str(e)
 
@@ -185,10 +175,19 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
             sys.exit(1)
 
         # 6. Filter to requested factors
+        computed_factor_names = list(factor_series.keys())
         if config.factors:
             factor_series = {
                 k: v for k, v in factor_series.items() if k in config.factors
             }
+
+        if not factor_series:
+            click.echo(
+                f"Error: None of the requested factors {config.factors} "
+                f"were found in computed factors: {computed_factor_names}",
+                err=True,
+            )
+            sys.exit(1)
 
         if not quiet:
             click.echo(

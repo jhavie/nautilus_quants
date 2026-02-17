@@ -91,7 +91,11 @@ class Factor(ABC):
             else:
                 return float('nan')
         
-        return self.compute(data, var_cache=var_cache)
+        try:
+            return self.compute(data, var_cache=var_cache)
+        except TypeError:
+            # Backward compatibility: subclass hasn't adopted var_cache parameter
+            return self.compute(data)
     
     @property
     def is_warmed_up(self) -> bool:

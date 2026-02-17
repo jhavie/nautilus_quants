@@ -248,6 +248,32 @@ class TestComputeIcSummary:
         table = compute_ic_summary(ic_df)
         assert "NaN Count" not in table.columns
 
+    def test_per_column_nan_independence(self):
+        """Each period column should independently drop NaN (Issue 2).
+
+        When 1h has 10 valid values and 4h has only 8 (2 trailing NaN),
+        N for 1h should still be 10, not truncated to 8.
+        """
+        ic_df = pd.DataFrame(
+            {
+                "1h": [0.05, 0.03, -0.02, 0.01, 0.04, -0.01, 0.02, 0.03, -0.03, 0.01],
+                "4h": [0.04, 0.02, -0.01, 0.03, 0.05, -0.02, 0.01, 0.02, np.nan, np.nan],
+            },
+            index=pd.date_range("2024-01-01", periods=10, freq="h"),
+        )
+        table = compute_ic_summary(ic_df)
+        assert table.loc["1h", "N"] == 10
+        assert table.loc["4h", "N"] == 8
+
+    def test_zero_std_produces_nan_icir(self):
+        """Risk-Adjusted IC should be NaN when IC std is zero (Issue 2 div-by-zero)."""
+        ic_df = pd.DataFrame(
+            {"1h": [0.05, 0.05, 0.05, 0.05]},
+            index=pd.date_range("2024-01-01", periods=4, freq="h"),
+        )
+        table = compute_ic_summary(ic_df)
+        assert np.isnan(table.loc["1h", "Risk-Adjusted IC"])
+
     def test_includes_nw_columns(self):
         """compute_ic_summary should have t-stat(NW), p-value(NW), and N_eff columns."""
         np.random.seed(42)
