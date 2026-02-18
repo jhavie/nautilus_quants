@@ -410,3 +410,43 @@ class TestQuantStatsChartGeneration:
 
         # rolling_beta should be skipped without benchmark
         assert "quantstats_rolling_beta" not in result
+
+
+class TestGetReturnsSeriesNoInfValues:
+    """End-to-end test verifying _get_returns_series never contains inf."""
+
+    def test_get_returns_series_no_inf_values(self, tmp_path: Path) -> None:
+        """Verify _get_returns_series output never contains inf values."""
+        import pickle
+
+        engine = MagicMock()
+        engine.cache.orders.return_value = []
+        engine.cache.positions.return_value = []
+        engine.cache.accounts.return_value = []
+
+        # Simulate equity points with near-zero dip (root cause of +603% bug)
+        base_ns = pd.Timestamp("2024-11-01").value
+        day_ns = 86400 * 1_000_000_000
+        equity_points = [
+            (base_ns, 10000.0),
+            (base_ns + day_ns, 5000.0),
+            (base_ns + 2 * day_ns, 100.0),
+            (base_ns + 3 * day_ns, 0.01),     # Near-zero equity
+            (base_ns + 4 * day_ns, 5000.0),    # "Recovery" → would be +inf
+            (base_ns + 5 * day_ns, 8000.0),
+        ]
+        engine.cache.get.return_value = pickle.dumps(equity_points)
+
+        config = ReportConfig(formats=["csv"])
+        generator = ReportGenerator(
+            engine=engine,
+            output_dir=tmp_path,
+            config=config,
+        )
+
+        returns = generator._get_returns_series()
+
+        # Must not contain any inf values
+        assert not returns.isin([float("inf"), float("-inf")]).any()
+        # Should still have valid return data
+        assert not returns.empty

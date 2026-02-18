@@ -146,7 +146,27 @@
     </div>
 
     <script>
-        const data = ${data_json};
+        const rawData = ${data_json};
+        // Reconstruct unified data from two-tier JSON (chart + detail)
+        const data = {
+            timestamps: rawData.chart.timestamps,
+            equityData: rawData.chart.equityData,
+            longValues: rawData.chart.longValues,
+            shortValues: rawData.chart.shortValues,
+            columnConfig: rawData.chart.columnConfig,
+            timelineData: rawData.chart.timestamps.map((t, i) => {
+                const d = rawData.detail[i] || {};
+                return {
+                    timestamp: t,
+                    equity: rawData.chart.equityData[i],
+                    positions: d.positions || {},
+                    long_count: d.long_count || 0,
+                    short_count: d.short_count || 0,
+                    long_total_value: d.long_total_value || 0,
+                    short_total_value: d.short_total_value || 0,
+                };
+            })
+        };
         const columnConfig = data.columnConfig || [];
 
         // Build table headers dynamically
