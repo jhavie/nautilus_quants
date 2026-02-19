@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 # Cache key for strategy → report metadata transfer via engine.cache
 POSITION_METADATA_CACHE_KEY = "position_metadata"
 
+# Cache key for EquitySnapshotActor → ReportGenerator MTM equity transfer
+EQUITY_SNAPSHOTS_CACHE_KEY = "equity_snapshots"
+
 
 class ColumnConfig(TypedDict):
     """Configuration for a table column in position timeline.

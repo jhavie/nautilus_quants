@@ -1,3 +1,11 @@
-"""Actors module - 非交易组件"""
+"""Actors module for non-trading components."""
 
-__all__: list[str] = []
+from nautilus_quants.actors.equity_snapshot import (
+    EquitySnapshotActor,
+    EquitySnapshotActorConfig,
+)
+
+__all__ = [
+    "EquitySnapshotActor",
+    "EquitySnapshotActorConfig",
+]

@@ -1,17 +1,19 @@
-# FMZ Multi-Factor Strategy Backtest Configuration
-# https://www.fmz.com/digest-topic/9647
+# Mean Convergence Factor Strategy Backtest Configuration
+# Reference: https://mp.weixin.qq.com/s/qq_gVUSgVYA0Siil2SxmtQ
 #
-# Time range: 2023-01-01 ~ 2025-12-31 (out-of-sample validation)
+# Time range: 2022-01-01 ~ 2025-12-31
 # Initial capital: 10000 USDT
 # Number of positions: 40 long + 40 short
 # Per-symbol allocation: 300 USDT
-# Rebalance interval: 8 hours (matches notebook cell 31b)
-# Fee rate: 0.02% (matches original FMZ article)
+# Rebalance interval: 8 hours
+# Fee rate: 0.02%
 #
-# Three-factor blend (cell 31b):
-#   - 24h Momentum: 0.6
-#   - Volume: 0.2
-#   - Price-Volume Corr: 0.2
+# Factors:
+#   - PCF: Price Convergence Factor
+#   - VCF: Volume Convergence Factor
+#   - ACF: Amount Convergence Factor (proxy)
+#   - TRCF: Turnover-Rate Convergence Factor (proxy)
+#   - PVCF: pcf_norm + vcf_norm
 
 venues:
   - name: "BINANCE"
@@ -167,21 +169,31 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2023-01-01"
-    end_time: "2025-12-31"
+    start_time: "2022-01-01"
+    end_time: "2022-09-14"
 
 engine:
-  trader_id: "BACKTESTER-FMZ-001"
+  trader_id: "BACKTESTER-CONV-001"
   logging:
     log_level: "INFO"
   risk_engine:
     bypass: true
 
+  controller:
+    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
+    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    config:
+      interval: "1h"
+      venue_name: "BINANCE"
+      currency: "USDT"
+      min_equity_ratio: 0
+      guarded_strategy_ids: []    # empty = stop all strategies
+
   actors:
     - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
       config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/factors_fmz_4factor.yaml"
+        factor_config_path: "config/factors_convergence.yaml"
         interval: "1h"
         signal_prefix: "factor"
         max_history: 200
@@ -189,7 +201,7 @@ engine:
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
       config:
-        interval: "8h"
+        interval: "4h"
         venue_name: "BINANCE"
         currency: "USDT"
   strategies:
@@ -339,18 +351,18 @@ engine:
           - "ZRXUSDT.BINANCE"
         n_long: 40
         n_short: 40
-        position_value: 300
+        position_value: 100
         rebalance_period: 4
         composite_factor: "composite"
 
 report:
-  output_dir: "logs/fmz_backtest"
+  output_dir: "logs/convergence_backtest"
   formats:
     - csv
     - html
   tearsheet:
     enabled: true
-    title: "FMZ Multi-Factor Strategy Backtest (2022-2025)"
+    title: "Mean Convergence Factor Strategy Backtest (2022-2025)"
     theme: "nautilus"
     height: 1500
     charts:
@@ -364,14 +376,14 @@ report:
       - yearly_returns
   quantstats:
     enabled: true
-    title: "FMZ Strategy QuantStats Analysis"
+    title: "Convergence Factor QuantStats Analysis"
     output_format:
       - html
       - png
   position_viz:
     enabled: true
-    title: "FMZ Strategy Position Timeline"
+    title: "Convergence Factor Position Timeline"
     output_subdir: "echarts"
     chart_height: 500
-    interval: "8h"
+    interval: "4h"
     metadata_renderer: "fmz"

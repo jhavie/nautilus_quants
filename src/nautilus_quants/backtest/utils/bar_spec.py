@@ -1,16 +1,16 @@
 """Bar specification parsing utilities."""
 
+from datetime import timedelta
+
 from nautilus_trader.model.data import BarSpecification
 from nautilus_trader.model.enums import BarAggregation, PriceType
 
 
 def parse_timeframe(tf: str) -> tuple[int, str]:
-    """解析时间框架字符串为 (step, unit)
-
-    用于构造 bar aggregation 的 @ 语法源部分。
+    """Parse timeframe string into ``(step, unit)``.
 
     Args:
-        tf: 时间框架 (e.g., "1m", "1h", "4h", "1d")
+        tf: Timeframe (e.g., "1m", "1h", "4h", "1d")
 
     Returns:
         (step, unit) tuple, e.g., (1, "MINUTE"), (4, "HOUR")
@@ -33,6 +33,31 @@ def parse_timeframe(tf: str) -> tuple[int, str]:
         return int(tf_lower[:-1]), "DAY"
     else:
         raise ValueError(f"Invalid timeframe: {tf}. Use format like '1m', '1h', '4h', '1d'")
+
+
+def parse_interval_to_timedelta(interval: str) -> timedelta:
+    """Convert interval string to timedelta.
+
+    Args:
+        interval: Interval string (e.g., "1m", "1h", "4h", "8h", "1d")
+
+    Returns:
+        Corresponding timedelta object
+
+    Examples:
+        >>> parse_interval_to_timedelta("1h")
+        datetime.timedelta(seconds=3600)
+        >>> parse_interval_to_timedelta("8h")
+        datetime.timedelta(seconds=28800)
+    """
+    step, unit = parse_timeframe(interval)
+    if unit == "MINUTE":
+        return timedelta(minutes=step)
+    if unit == "HOUR":
+        return timedelta(hours=step)
+    if unit == "DAY":
+        return timedelta(days=step)
+    raise ValueError(f"Unsupported interval unit: {unit}")
 
 
 def parse_bar_spec(bar_spec: str) -> BarSpecification:

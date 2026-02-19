@@ -1,5 +1,6 @@
 """Report generation for backtest module."""
 
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -7,6 +8,7 @@ import pandas as pd
 
 from nautilus_quants.backtest.exceptions import BacktestReportError
 from nautilus_quants.backtest.protocols import (
+    EQUITY_SNAPSHOTS_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
     BaseMetadataRenderer,
     MetadataRenderer,
@@ -42,6 +44,16 @@ class ReportGenerator:
         self.output_dir = Path(output_dir)
         self.config = config
         self.metadata_renderer = metadata_renderer or BaseMetadataRenderer()
+
+    @cached_property
+    def _mtm_equity(self) -> pd.Series | None:
+        """Lazy-cached MTM equity from EquitySnapshotActor."""
+        return self._build_equity_from_actor_snapshots()
+
+    @cached_property
+    def _realized_equity(self) -> pd.Series:
+        """Lazy-cached realized equity from engine account data."""
+        return self._get_realized_equity_series()
 
     def _get_closed_positions(self) -> list["Position"]:
         """Get all closed positions from the engine.
@@ -313,16 +325,28 @@ class ReportGenerator:
     def _get_returns_series(self) -> pd.Series:
         """Get returns as a pandas Series with datetime index for QuantStats.
 
-        Calculates daily returns from account equity changes instead of summing
-        position returns. This is more accurate for HEDGING mode venues with
-        multiple concurrent positions closing at the same timestamp.
+        Priority 1: Use EquitySnapshotActor MTM equity from cache (includes
+                     unrealized PnL, avoids end-of-backtest equity jumps).
+        Priority 2: Fall back to realized account equity.
 
         Returns:
             pd.Series with daily returns indexed by datetime
         """
+        # Priority 1: MTM equity from EquitySnapshotActor (cached)
+        if self._mtm_equity is not None and not self._mtm_equity.empty:
+            mtm_returns = self._build_daily_returns_from_equity(self._mtm_equity)
+            if not mtm_returns.empty:
+                return mtm_returns
+
+        # Priority 2: Realized account equity (cached)
+        if self._realized_equity.empty:
+            return pd.Series(dtype=float)
+        return self._build_daily_returns_from_equity(self._realized_equity)
+
+    def _get_realized_equity_series(self) -> pd.Series:
+        """Build realized equity series from account report data."""
         from nautilus_trader.analysis import ReportProvider
 
-        # Get account equity data
         accounts = list(self.engine.cache.accounts())
         if not accounts:
             return pd.Series(dtype=float)
@@ -333,8 +357,6 @@ class ReportGenerator:
         if account_df.empty:
             return pd.Series(dtype=float)
 
-        # Get equity column - try 'total' first (common in backtest reports),
-        # then fall back to 'equity' if available
         equity_col = None
         for col in ["total", "equity"]:
             if col in account_df.columns:
@@ -344,23 +366,132 @@ class ReportGenerator:
         if equity_col is None:
             return pd.Series(dtype=float)
 
-        # Get equity series
         equity = account_df[equity_col].astype(float)
-
-        # Ensure datetime index
         if not isinstance(equity.index, pd.DatetimeIndex):
             equity.index = pd.to_datetime(equity.index)
 
-        # Resample to daily (take last value of each day)
+        return equity.sort_index()
+
+    def _build_daily_returns_from_equity(self, equity: pd.Series) -> pd.Series:
+        """Resample equity to daily frequency and calculate daily returns."""
+        if equity.empty:
+            return pd.Series(dtype=float)
+
         daily_equity = equity.resample("1D").last().dropna()
 
         if len(daily_equity) < 2:
             return pd.Series(dtype=float)
 
-        # Calculate daily returns = (equity_t - equity_{t-1}) / equity_{t-1}
-        daily_returns = daily_equity.pct_change().dropna()
+        returns = daily_equity.pct_change().dropna()
+        returns = returns.replace([float("inf"), float("-inf")], float("nan")).dropna()
+        return returns
 
-        return daily_returns
+    def _build_equity_from_actor_snapshots(self) -> pd.Series | None:
+        """Read EquitySnapshotActor data from cache and build equity Series.
+
+        Returns:
+            pd.Series indexed by datetime with equity values, or None if
+            no actor data available.
+        """
+        import pickle
+
+        try:
+            data = self.engine.cache.get(EQUITY_SNAPSHOTS_CACHE_KEY)
+        except Exception:
+            return None
+
+        if not data:
+            return None
+
+        try:
+            equity_points: list[tuple[int, float]] = pickle.loads(data)
+        except Exception:
+            return None
+
+        if not equity_points:
+            return None
+
+        # Build Series from (ts_ns, equity) pairs
+        timestamps = [pd.Timestamp(ts_ns, unit="ns", tz="UTC") for ts_ns, _ in equity_points]
+        values = [val for _, val in equity_points]
+
+        return pd.Series(values, index=pd.DatetimeIndex(timestamps)).sort_index()
+
+    def _build_position_records_from_cache(self) -> list[dict]:
+        """Build position records directly from engine cache.
+
+        Eliminates CSV reading and string parsing by using Position objects.
+
+        Returns:
+            List of dicts with inst_id, side, value, ts_opened, ts_closed
+        """
+        from nautilus_trader.model.enums import OrderSide
+
+        records: list[dict] = []
+        all_positions = self._get_closed_positions()
+
+        # Include still-open positions
+        open_positions = list(self.engine.cache.positions_open())
+        seen_ids = {p.id for p in all_positions}
+        for p in open_positions:
+            if p.id not in seen_ids:
+                all_positions.append(p)
+
+        for pos in all_positions:
+            inst_id = str(pos.instrument_id)
+            side = "LONG" if pos.entry == OrderSide.BUY else "SHORT"
+            qty = float(pos.peak_qty)
+            value = qty * pos.avg_px_open
+
+            ts_opened = pd.Timestamp(pos.ts_opened, unit="ns", tz="UTC")
+            if pos.ts_closed > 0:
+                ts_closed = pd.Timestamp(pos.ts_closed, unit="ns", tz="UTC")
+            else:
+                ts_closed = pd.Timestamp.max.tz_localize("UTC")
+
+            records.append({
+                "inst_id": inst_id,
+                "side": side,
+                "value": value,
+                "ts_opened": ts_opened,
+                "ts_closed": ts_closed,
+            })
+
+        return records
+
+    def _load_position_metadata(self) -> dict[str, dict]:
+        """Load position metadata from engine cache."""
+        import pickle
+
+        try:
+            metadata_bytes = self.engine.cache.get(POSITION_METADATA_CACHE_KEY)
+            if metadata_bytes:
+                return pickle.loads(metadata_bytes)
+        except Exception as e:
+            import warnings
+
+            warnings.warn(f"Failed to read position metadata from cache: {e}")
+        return {}
+
+    def _build_metadata_index(self, position_metadata: dict[str, dict]) -> dict[str, dict]:
+        """Build O(1) lookup index for position metadata.
+
+        Handles both direct inst_id keys and closed position keys with
+        format 'INST.VENUE:hour_count'.
+
+        Args:
+            position_metadata: Raw metadata dict from cache
+
+        Returns:
+            Dict mapping inst_id to metadata for O(1) lookup
+        """
+        metadata_by_inst: dict[str, dict] = {}
+        for key, meta in position_metadata.items():
+            metadata_by_inst[key] = meta
+            base_id = key.split(":")[0] if ":" in key else key
+            if base_id not in metadata_by_inst:
+                metadata_by_inst[base_id] = meta
+        return metadata_by_inst
 
     def generate_quantstats_reports(self) -> dict[str, Path]:
         """Generate QuantStats HTML report and/or PNG charts.
@@ -541,170 +672,95 @@ class ReportGenerator:
         except Exception as e:
             raise BacktestReportError(f"Failed to generate position visualization: {e}") from e
 
-    def _find_metadata_for_position(
-        self,
-        position_metadata: dict[str, dict],
-        inst_id: str,
-        ts_opened: pd.Timestamp,
-    ) -> dict | None:
-        """Find metadata for a position by inst_id and ts_opened.
-
-        Handles closed positions with keys like 'INST.VENUE:hour_count'.
-        """
-        # First check direct match
-        if inst_id in position_metadata:
-            return position_metadata[inst_id]
-
-        # Look for closed position with matching inst_id prefix
-        ts_ns = int(ts_opened.value) if pd.notna(ts_opened) else 0
-        for key, meta in position_metadata.items():
-            if key.startswith(f"{inst_id}:"):
-                # Check if ts_opened roughly matches
-                meta_ts = meta.get("ts_opened", 0)
-                if meta_ts and abs(meta_ts - ts_ns) < 4 * 3600 * 1_000_000_000:  # 4h tolerance
-                    return meta
-        return None
-
     def _get_position_timeline_data(self, interval: str) -> list[dict]:
-        """Extract position timeline data from account report.
+        """Extract position timeline data from engine cache.
+
+        Uses event-driven sweep algorithm for O(E + T) complexity.
+        Eliminates CSV reading, ast.literal_eval, and nested loops.
 
         Args:
             interval: Resampling interval (e.g., "4h", "1d")
 
         Returns:
-            List of dicts with timestamp, equity, positions (with value, side, rank), and totals
+            List of dicts with timestamp, equity, positions, and totals
         """
-        import ast
-        import pickle
+        # 1. Equity from cached property — no CSV
+        equity = self._mtm_equity
+        if equity is not None and not equity.empty:
+            equity = equity[~equity.index.duplicated(keep="last")]
+        else:
+            equity = self._realized_equity
+            if equity.empty:
+                return []
 
-        # Read from CSV files (already generated by generate_csv_reports)
-        account_csv = self.output_dir / "account_report.csv"
-        positions_csv = self.output_dir / "positions_report.csv"
-
-        if not account_csv.exists():
+        resampled_equity = equity.resample(interval).last().dropna()
+        if resampled_equity.empty:
             return []
 
-        account_df = pd.read_csv(account_csv, index_col=0, parse_dates=True)
+        # 2. Positions from engine cache — no CSV
+        position_records = self._build_position_records_from_cache()
 
-        if account_df.empty:
-            return []
+        # 3. Metadata: pre-build O(1) index
+        position_metadata = self._load_position_metadata()
+        metadata_by_inst = self._build_metadata_index(position_metadata)
 
-        # Read position metadata from cache (stored by strategy via pickle)
-        position_metadata: dict[str, dict] = {}
-        try:
-            metadata_bytes = self.engine.cache.get(POSITION_METADATA_CACHE_KEY)
-            if metadata_bytes:
-                position_metadata = pickle.loads(metadata_bytes)
-        except Exception as e:
-            import warnings
-            warnings.warn(f"Failed to read position metadata from cache: {e}")
+        # 4. Event-driven sweep: O(E + T)
+        events: list[tuple[pd.Timestamp, int, dict]] = []
+        for rec in position_records:
+            events.append((rec["ts_opened"], 1, rec))   # 1 = open
+            events.append((rec["ts_closed"], 0, rec))   # 0 = close (sorted before open)
+        events.sort(key=lambda e: (e[0], e[1]))
 
-        # Build position records with time ranges for proper lookup
-        # Each instrument may have multiple positions over time
-        position_records: list[dict] = []
-        if positions_csv.exists():
-            positions_df = pd.read_csv(positions_csv, index_col=0)
-            if not positions_df.empty and "entry" in positions_df.columns:
-                for _, row in positions_df.iterrows():
-                    inst_id = str(row.get("instrument_id", ""))
-                    entry = row.get("entry", "")
-                    qty = abs(float(row.get("peak_qty", 0) or row.get("quantity", 0)))
-                    avg_px = float(row.get("avg_px_open", 0))
-                    value = qty * avg_px
-                    ts_opened = pd.to_datetime(row.get("ts_opened", ""))
-                    ts_closed = pd.to_datetime(row.get("ts_closed", ""))
+        active: dict[str, dict] = {}
+        render_cache: dict[str, dict] = {}
+        event_idx = 0
+        timeline_data: list[dict] = []
 
-                    if inst_id and entry and pd.notna(ts_opened):
-                        position_records.append({
-                            "inst_id": inst_id,
-                            "side": "LONG" if entry == "BUY" else "SHORT",
-                            "value": value,
-                            "ts_opened": ts_opened,
-                            "ts_closed": ts_closed if pd.notna(ts_closed) else pd.Timestamp.max,
-                        })
+        for ts, equity_val in resampled_equity.items():
+            # Advance event pointer
+            while event_idx < len(events) and events[event_idx][0] <= ts:
+                _, action, rec = events[event_idx]
+                inst_id = rec["inst_id"]
+                if action == 1:
+                    active[inst_id] = rec
+                else:
+                    active.pop(inst_id, None)
+                    render_cache.pop(inst_id, None)
+                event_idx += 1
 
-        # Ensure datetime index
-        if not isinstance(account_df.index, pd.DatetimeIndex):
-            account_df.index = pd.to_datetime(account_df.index)
+            # Build position snapshot for current timestamp
+            positions: dict[str, dict] = {}
+            long_count = short_count = 0
+            long_total_value = short_total_value = 0.0
 
-        # Get equity column
-        equity_col = None
-        for col in ["total", "equity"]:
-            if col in account_df.columns:
-                equity_col = col
-                break
+            for inst_id, rec in active.items():
+                symbol = inst_id.split(".")[0] if "." in inst_id else inst_id
 
-        if equity_col is None:
-            return []
+                if inst_id not in render_cache:
+                    meta = metadata_by_inst.get(inst_id)
+                    position_info = {
+                        "value": rec["value"],
+                        "side": rec["side"],
+                        "ts_opened": rec["ts_opened"].isoformat(),
+                    }
+                    render_cache[inst_id] = self.metadata_renderer.render_position(
+                        symbol=symbol,
+                        position_info=position_info,
+                        metadata=meta,
+                        timestamp_ns=int(ts.value),
+                    )
+                positions[symbol] = render_cache[inst_id]
 
-        # Resample to specified interval
-        resampled = account_df.resample(interval).last().dropna(subset=[equity_col])
-
-        timeline_data = []
-        for timestamp, row in resampled.iterrows():
-            equity = float(row[equity_col])
-
-            # Parse margins to get current positions with values
-            positions: dict[str, dict] = {}  # symbol -> {value, side}
-            long_total_value = 0.0
-            short_total_value = 0.0
-            long_count = 0
-            short_count = 0
-
-            margins_str = row.get("margins", "[]")
-            if isinstance(margins_str, str) and margins_str.strip():
-                try:
-                    margins = ast.literal_eval(margins_str)
-                    for margin in margins:
-                        if isinstance(margin, dict):
-                            inst_id = margin.get("instrument_id", "")
-                            if inst_id:
-                                # Find the position record active at this timestamp
-                                ts = pd.Timestamp(timestamp)
-                                active_pos = None
-                                for rec in position_records:
-                                    if (rec["inst_id"] == inst_id and
-                                        rec["ts_opened"] <= ts <= rec["ts_closed"]):
-                                        active_pos = rec
-                                        break
-                                if active_pos:
-                                    # Extract symbol without venue
-                                    symbol = inst_id.split(".")[0] if "." in inst_id else inst_id
-
-                                    # Find matching metadata for this position
-                                    meta = position_metadata.get(inst_id) or self._find_metadata_for_position(
-                                        position_metadata, inst_id, active_pos["ts_opened"]
-                                    )
-
-                                    # Build basic position info
-                                    ts_ns = int(ts.value)
-                                    position_info = {
-                                        "value": active_pos["value"],
-                                        "side": active_pos["side"],
-                                        "ts_opened": active_pos["ts_opened"].isoformat() if pd.notna(active_pos["ts_opened"]) else None,
-                                    }
-
-                                    # Use renderer to add strategy-specific fields
-                                    rendered = self.metadata_renderer.render_position(
-                                        symbol=symbol,
-                                        position_info=position_info,
-                                        metadata=meta,
-                                        timestamp_ns=ts_ns,
-                                    )
-
-                                    positions[symbol] = rendered
-                                    if active_pos["side"] == "LONG":
-                                        long_total_value += active_pos["value"]
-                                        long_count += 1
-                                    else:
-                                        short_total_value += active_pos["value"]
-                                        short_count += 1
-                except (ValueError, SyntaxError):
-                    pass
+                if rec["side"] == "LONG":
+                    long_total_value += rec["value"]
+                    long_count += 1
+                else:
+                    short_total_value += rec["value"]
+                    short_count += 1
 
             timeline_data.append({
-                "timestamp": timestamp.isoformat(),
-                "equity": equity,
+                "timestamp": ts.isoformat(),
+                "equity": float(equity_val),
                 "long_count": long_count,
                 "short_count": short_count,
                 "positions": positions,
@@ -748,15 +804,31 @@ class ReportGenerator:
         else:
             start_equity = end_equity = pnl = pnl_pct = max_equity = min_equity = 0
 
-        # Convert to JSON for JavaScript
-        data_json = json.dumps({
+        # Two-tier JSON: chart-level arrays + sparse detail data
+        chart_data = {
             "timestamps": timestamps,
-            "equityData": equity_data,
-            "longValues": long_values,
-            "shortValues": short_values,
-            "timelineData": timeline_data,
+            "equityData": [round(e, 2) for e in equity_data],
+            "longValues": [round(v, 2) for v in long_values],
+            "shortValues": [round(v, 2) for v in short_values],
             "columnConfig": column_config,
-        })
+        }
+        detail_data: dict[int, dict] = {}
+        for i, d in enumerate(timeline_data):
+            if d.get("positions"):
+                compact_positions = {}
+                for symbol, info in d["positions"].items():
+                    compact_positions[symbol] = {
+                        k: round(v, 2) if isinstance(v, float) else v
+                        for k, v in info.items()
+                    }
+                detail_data[i] = {
+                    "positions": compact_positions,
+                    "long_count": d["long_count"],
+                    "short_count": d["short_count"],
+                    "long_total_value": round(d["long_total_value"], 2),
+                    "short_total_value": round(d["short_total_value"], 2),
+                }
+        data_json = json.dumps({"chart": chart_data, "detail": detail_data})
 
         # Load template file
         template_path = files("nautilus_quants.backtest.templates").joinpath("position_timeline.html")
