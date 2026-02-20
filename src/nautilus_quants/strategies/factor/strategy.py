@@ -110,6 +110,14 @@ class FactorStrategy(Strategy):
         self._current_bar_ts: int = 0
         self._close_bar_ts: int | None = None
 
+        # Bar close lookup by timestamp.
+        # Ensures on_data() always uses the signal bar's close for entry
+        # pricing, regardless of whether on_bar() or on_data() fires first.
+        # Without this, callback ordering differences between INTERNAL
+        # (aggregated) and EXTERNAL (direct) bar types cause the strategy
+        # to use different close values for the same signal.
+        self._bar_closes: dict[int, float] = {}
+
         # History for trend exit (store signal bar closes)
         self._signal_closes: list[float] = []
         self._current_sma: float | None = None
@@ -176,6 +184,13 @@ class FactorStrategy(Strategy):
         self._current_close = float(bar.close)
         self._current_bar_ts = bar.ts_event
 
+        # Record close indexed by timestamp for signal-bar lookup in on_data()
+        self._bar_closes[bar.ts_event] = self._current_close
+        # Keep only last 10 entries to bound memory
+        if len(self._bar_closes) > 10:
+            oldest = min(self._bar_closes)
+            del self._bar_closes[oldest]
+
         # Check stop loss on every bar
         if self.position_side is not None and self.entry_price is not None:
             self._check_stop_loss(self._current_close)
@@ -207,9 +222,15 @@ class FactorStrategy(Strategy):
         if factor_value is None:
             return
 
+        # Resolve the signal bar's close price.
+        # Use the bar_closes lookup keyed by FactorValues.ts_event so that
+        # entry pricing is always based on the signal bar, regardless of
+        # whether on_bar() or on_data() fires first in this engine tick.
+        signal_close = self._bar_closes.get(data.ts_event, self._current_close)
+
         # Update signal bar close history (for SMA calculation and trend exit)
-        if self._current_close is not None:
-            self._signal_closes.append(self._current_close)
+        if signal_close is not None:
+            self._signal_closes.append(signal_close)
             # Keep only necessary history
             max_history = self.config.sma_period + 10
             if len(self._signal_closes) > max_history:
@@ -224,7 +245,7 @@ class FactorStrategy(Strategy):
             self.log.info(f"Signal #{self._signal_count}: factor_value={factor_value}, sma={self._current_sma}")
 
         # Check for entry/exit conditions
-        if self.position_side is None and self._current_close is not None:
+        if self.position_side is None and signal_close is not None:
             # Same-bar close protection: skip entry if position was closed on this bar
             if self._close_bar_ts is not None and self._close_bar_ts == self._current_bar_ts:
                 self.log.info(
@@ -236,10 +257,10 @@ class FactorStrategy(Strategy):
             # Entry: check factor signal
             if factor_value == self.config.entry_threshold:
                 if self.config.enable_long:
-                    self._open_long(self._current_close)
+                    self._open_long(signal_close)
             elif factor_value == -self.config.entry_threshold:
                 if self.config.enable_short:
-                    self._open_short(self._current_close)
+                    self._open_short(signal_close)
         else:
             # Exit: check trend reversal (SMA exit)
             if self._current_sma is not None:

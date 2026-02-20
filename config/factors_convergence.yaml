@@ -41,11 +41,11 @@ variables:
 
   # --- Volume MAs ---
   v_ma1:   "volume"
-  v_ma5:   "ts_mean(volume, 5)"
-  v_ma10:  "ts_mean(volume, 10)"
-  v_ma20:  "ts_mean(volume, 20)"
-  v_ma60:  "ts_mean(volume, 60)"
-  v_ma120: "ts_mean(volume, 120)"
+  v_ma5:   "ts_mean(quote_volume, 5)"
+  v_ma10:  "ts_mean(quote_volume, 10)"
+  v_ma20:  "ts_mean(quote_volume, 20)"
+  v_ma60:  "ts_mean(quote_volume, 60)"
+  v_ma120: "ts_mean(quote_volume, 120)"
 
   # --- Amount proxy MAs (close * volume) ---
   # a_ma1:   "close * volume"
@@ -57,7 +57,7 @@ variables:
 
   # --- Turnover-rate proxy MAs ---
   # Reuse v_ma* to avoid duplicate ts_mean calls
-  t_baseline: "ts_mean(volume, 168) + 0.000000000001"
+  t_baseline: "ts_mean(quote_volume, 168) + 0.000000000001"
   t_ma1:   "v_ma1 / t_baseline"
   t_ma5:   "v_ma5 / t_baseline"
   t_ma10:  "v_ma10 / t_baseline"

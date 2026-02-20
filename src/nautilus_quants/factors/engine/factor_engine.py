@@ -213,6 +213,10 @@ class FactorEngine:
             "close": factor_input.history.get("close", np.array([factor_input.close])),
             "volume": factor_input.history.get("volume", np.array([factor_input.volume])),
         }
+        # Inject extra bar fields (e.g. quote_volume, count) from history
+        for key, arr in factor_input.history.items():
+            if key not in variables:
+                variables[key] = arr
         variables.update(self._parameters)
         
         evaluator = Evaluator(EvaluationContext(
@@ -413,6 +417,10 @@ class FactorEngine:
             "total_computes": self._total_computes,
         }
     
+    def set_extra_fields(self, fields: list[str]) -> None:
+        """Set extra bar fields to track (e.g. BinanceBar extended fields)."""
+        self.synchronizer.set_extra_fields(fields)
+
     def reset(self) -> None:
         """Reset engine state."""
         self.synchronizer.reset()

@@ -26,6 +26,27 @@ from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
 
 
+def _detect_extra_bar_fields(bar: Bar) -> list[str]:
+    """Detect extra fields from BinanceBar via __dict__ introspection.
+
+    BinanceBar stores its extra fields (quote_volume, count, etc.) in
+    ``__dict__``, while standard OHLCV fields are Cython getset descriptors
+    and therefore absent from ``__dict__``.
+
+    Returns a sorted list of extra field names, or an empty list for
+    non-BinanceBar instances or if the import fails.
+    """
+    try:
+        from nautilus_trader.adapters.binance.common.types import BinanceBar
+    except ImportError:
+        return []
+
+    if not isinstance(bar, BinanceBar):
+        return []
+
+    return sorted(k for k in bar.__dict__ if not k.startswith("_"))
+
+
 class FactorEngineActorConfig(ActorConfig, frozen=True):
     """
     Configuration for FactorEngineActor.
@@ -102,6 +123,7 @@ class FactorEngineActor(Actor):
             lambda: defaultdict(dict)
         )
         self._last_processed_ts: int = 0
+        self._extra_fields_detected: bool = False
 
     def on_start(self) -> None:
         """
@@ -150,31 +172,39 @@ class FactorEngineActor(Actor):
         self.log.info(f"Using {len(source_bar_type_strs)} bar types from config")
 
         # Determine if aggregation is needed based on interval
+        from nautilus_quants.strategies.utils import create_aggregated_bar_type, interval_to_minutes
+        from nautilus_trader.model.enums import BarAggregation
+
         interval = self._config.interval.lower()
+        target_minutes = interval_to_minutes(interval)
 
-        if interval == "1m":
-            # No aggregation needed - use source bars directly
-            for bar_type_str in source_bar_type_strs:
-                bar_type = BarType.from_str(bar_type_str)
-                self._bar_types.append(bar_type)
-                self.subscribe_bars(bar_type)
-                self.log.info(f"Subscribed to {bar_type}")
-        else:
-            # Aggregation needed - create INTERNAL bar types
-            from nautilus_quants.strategies.utils import create_aggregated_bar_type
-            from nautilus_trader.model.enums import BarAggregation
+        for bar_type_str in source_bar_type_strs:
+            source_bar_type = BarType.from_str(bar_type_str)
 
-            for bar_type_str in source_bar_type_strs:
-                source_bar_type = BarType.from_str(bar_type_str)
+            # Compute source interval in minutes for comparison
+            source_agg = source_bar_type.spec.aggregation
+            if isinstance(source_agg, int):
+                source_agg = BarAggregation(source_agg)
+            source_minutes = self._aggregation_to_minutes(
+                source_bar_type.spec.step, source_agg,
+            )
+
+            if source_minutes == target_minutes:
+                # Source already at target interval - subscribe directly.
+                # This preserves the original bar type (e.g. BinanceBar)
+                # so extra fields like quote_volume remain accessible.
+                self._bar_types.append(source_bar_type)
+                self.subscribe_bars(source_bar_type)
+                self.log.info(
+                    f"Subscribed to {source_bar_type} "
+                    f"(source matches target interval, no aggregation)"
+                )
+            else:
+                # Aggregation needed - create INTERNAL bar types
                 instrument_id = str(source_bar_type.instrument_id)
-                # Build source spec from bar type string
-                # spec.aggregation may be int or enum, handle both
-                aggregation = source_bar_type.spec.aggregation
-                if isinstance(aggregation, int):
-                    aggregation_name = BarAggregation(aggregation).name
-                else:
-                    aggregation_name = aggregation.name
-                source_spec = f"{source_bar_type.spec.step}-{aggregation_name}-EXTERNAL"
+                source_spec = (
+                    f"{source_bar_type.spec.step}-{source_agg.name}-EXTERNAL"
+                )
 
                 target_str, subscribe_str = create_aggregated_bar_type(
                     instrument_id,
@@ -190,6 +220,20 @@ class FactorEngineActor(Actor):
                 self.log.info(f"Subscribed to aggregated bars: {subscribe_str}")
 
         self.log.info("FactorEngineActor started successfully")
+
+    @staticmethod
+    def _aggregation_to_minutes(step: int, aggregation) -> int:
+        """Convert a BarSpec step + BarAggregation enum to total minutes."""
+        from nautilus_trader.model.enums import BarAggregation
+
+        if aggregation == BarAggregation.MINUTE:
+            return step
+        if aggregation == BarAggregation.HOUR:
+            return step * 60
+        if aggregation == BarAggregation.DAY:
+            return step * 1440
+        # For unsupported aggregations, return -1 to force aggregation path
+        return -1
 
     def on_stop(self) -> None:
         """Actions to perform on actor stop."""
@@ -226,6 +270,14 @@ class FactorEngineActor(Actor):
 
         if self._engine is None or self._cs_engine is None:
             return
+
+        # Auto-detect extra bar fields on first bar
+        if not self._extra_fields_detected:
+            self._extra_fields_detected = True
+            extra = _detect_extra_bar_fields(bar)
+            if extra:
+                self._engine.set_extra_fields(extra)
+                self.log.info(f"Auto-detected extra bar fields: {extra}")
 
         instrument_id = str(bar.bar_type.instrument_id)
         ts = bar.ts_event

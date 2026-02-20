@@ -179,7 +179,11 @@ class ExpressionFactor(Factor):
             "close": data.history.get("close", np.array([data.close])),
             "volume": data.history.get("volume", np.array([data.volume])),
         }
-        
+        # Inject extra bar fields (e.g. quote_volume, count) from history
+        for key, arr in data.history.items():
+            if key not in variables:
+                variables[key] = arr
+
         # Add parameters
         variables.update(self.parameters)
         

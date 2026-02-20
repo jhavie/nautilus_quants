@@ -31,7 +31,16 @@ class InstrumentData:
     volume_history: list[float] = field(default_factory=list)
     timestamps: list[int] = field(default_factory=list)
     max_history: int = 500  # Maximum history to keep
-    
+    extra_fields: list[str] = field(default_factory=list)
+    extra_history: dict[str, list[float]] = field(default_factory=dict)
+
+    def set_extra_fields(self, fields: list[str]) -> None:
+        """Set extra bar fields for tracking (called once on first bar)."""
+        self.extra_fields = fields
+        for f in fields:
+            if f not in self.extra_history:
+                self.extra_history[f] = []
+
     def update(self, bar: Bar) -> None:
         """Update with new bar data."""
         self.open_history.append(float(bar.open))
@@ -40,7 +49,9 @@ class InstrumentData:
         self.close_history.append(float(bar.close))
         self.volume_history.append(float(bar.volume))
         self.timestamps.append(bar.ts_event)
-        
+        for f in self.extra_fields:
+            self.extra_history[f].append(float(getattr(bar, f, 0)))
+
         # Trim to max history
         if len(self.close_history) > self.max_history:
             self.open_history = self.open_history[-self.max_history:]
@@ -49,16 +60,21 @@ class InstrumentData:
             self.close_history = self.close_history[-self.max_history:]
             self.volume_history = self.volume_history[-self.max_history:]
             self.timestamps = self.timestamps[-self.max_history:]
-    
+            for f in self.extra_fields:
+                self.extra_history[f] = self.extra_history[f][-self.max_history:]
+
     def get_arrays(self) -> dict[str, np.ndarray]:
         """Get history as numpy arrays."""
-        return {
+        result = {
             "open": np.array(self.open_history),
             "high": np.array(self.high_history),
             "low": np.array(self.low_history),
             "close": np.array(self.close_history),
             "volume": np.array(self.volume_history),
         }
+        for f in self.extra_fields:
+            result[f] = np.array(self.extra_history.get(f, []))
+        return result
     
     @property
     def current_close(self) -> float:
@@ -110,15 +126,25 @@ class DataSynchronizer:
         self._data: dict[str, InstrumentData] = {}
         self._pending_bars: dict[int, dict[str, Bar]] = defaultdict(dict)
         self._last_sync_ts: int = 0
+        self._extra_fields: list[str] = []
     
+    def set_extra_fields(self, fields: list[str]) -> None:
+        """Set extra bar fields to track across all instruments."""
+        self._extra_fields = fields
+        for data in self._data.values():
+            data.set_extra_fields(fields)
+
     def add_instrument(self, instrument_id: str) -> None:
         """Add an instrument to track."""
         self.instruments.add(instrument_id)
         if instrument_id not in self._data:
-            self._data[instrument_id] = InstrumentData(
+            inst_data = InstrumentData(
                 instrument_id=instrument_id,
                 max_history=self.max_history,
             )
+            if self._extra_fields:
+                inst_data.set_extra_fields(self._extra_fields)
+            self._data[instrument_id] = inst_data
     
     def remove_instrument(self, instrument_id: str) -> None:
         """Remove an instrument from tracking."""
@@ -247,13 +273,18 @@ class DataSynchronizer:
     
     def reset(self) -> None:
         """Reset all data."""
+        extra_fields = self._extra_fields
         self._data.clear()
         self._pending_bars.clear()
         self._last_sync_ts = 0
-        
+        self._extra_fields = extra_fields
+
         # Re-initialize instrument data
         for instrument_id in self.instruments:
-            self._data[instrument_id] = InstrumentData(
+            inst_data = InstrumentData(
                 instrument_id=instrument_id,
                 max_history=self.max_history,
             )
+            if self._extra_fields:
+                inst_data.set_extra_fields(self._extra_fields)
+            self._data[instrument_id] = inst_data
