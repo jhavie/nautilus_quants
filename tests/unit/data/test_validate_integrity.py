@@ -35,6 +35,8 @@ class TestValidateSchema:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
 
         issues = validate_schema(df)
@@ -60,7 +62,7 @@ class TestValidateSchema:
 
     def test_all_required_columns_defined(self):
         """Verify REQUIRED_COLUMNS contains expected columns."""
-        expected = ["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "trades_count"]
+        expected = ["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "trades_count", "taker_buy_base_volume", "taker_buy_quote_volume"]
         assert set(REQUIRED_COLUMNS) == set(expected)
 
     def test_column_types_defined(self):
@@ -85,6 +87,8 @@ class TestValidateSchema:
             "volume": [100.0],
             "quote_volume": [4200000.0],
             "trades_count": [1000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
             "extra_column": ["some_value"],  # Extra column
         })
 
@@ -123,6 +127,8 @@ class TestValidateFile:
             "volume": [100.0, 150.0, 120.0],
             "quote_volume": [4200000.0, 6300000.0, 5040000.0],
             "trades_count": [1000, 1200, 1100],
+            "taker_buy_base_volume": [50.0, 75.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0, 2520000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -167,6 +173,8 @@ class TestValidateFile:
             "volume": [500.0],
             "quote_volume": [1100000.0],
             "trades_count": [2000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -191,6 +199,8 @@ class TestValidateFile:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -210,7 +220,7 @@ class TestValidateFile:
 
         # Write header only
         with open(csv_path, "w") as f:
-            f.write("timestamp,open,high,low,close,volume,quote_volume,trades_count\n")
+            f.write("timestamp,open,high,low,close,volume,quote_volume,trades_count,taker_buy_base_volume,taker_buy_quote_volume\n")
 
         report = validate_file(csv_path)
 

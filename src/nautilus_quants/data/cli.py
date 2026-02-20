@@ -459,6 +459,9 @@ def transform(
                         raw_data_path=raw_data_path,
                         maker_fee=config.transform.maker_fee,
                         taker_fee=config.transform.taker_fee,
+                        margin_init=config.transform.margin_init,
+                        margin_maint=config.transform.margin_maint,
+                        bar_class=config.transform.bar_class,
                     )
                     results.append(result)
 
@@ -712,6 +715,9 @@ def run(
                         raw_data_path=raw_dir,
                         maker_fee=config.transform.maker_fee,
                         taker_fee=config.transform.taker_fee,
+                        margin_init=config.transform.margin_init,
+                        margin_maint=config.transform.margin_maint,
+                        bar_class=config.transform.bar_class,
                     )
                     transform_results.append(result)
                     if result.success:

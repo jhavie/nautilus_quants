@@ -102,7 +102,14 @@ class FactorStrategy(Strategy):
         self._current_close: float | None = None
         self._bar_count: int = 0
         self._signal_count: int = 0
-        
+
+        # Same-bar close protection: prevents re-entry on the same bar
+        # where a position was closed (stop loss, take profit, etc.).
+        # This ensures deterministic behavior regardless of Actor/Strategy
+        # callback ordering (which can differ between Bar and BinanceBar).
+        self._current_bar_ts: int = 0
+        self._close_bar_ts: int | None = None
+
         # History for trend exit (store signal bar closes)
         self._signal_closes: list[float] = []
         self._current_sma: float | None = None
@@ -167,6 +174,7 @@ class FactorStrategy(Strategy):
 
         self._bar_count += 1
         self._current_close = float(bar.close)
+        self._current_bar_ts = bar.ts_event
 
         # Check stop loss on every bar
         if self.position_side is not None and self.entry_price is not None:
@@ -217,6 +225,14 @@ class FactorStrategy(Strategy):
 
         # Check for entry/exit conditions
         if self.position_side is None and self._current_close is not None:
+            # Same-bar close protection: skip entry if position was closed on this bar
+            if self._close_bar_ts is not None and self._close_bar_ts == self._current_bar_ts:
+                self.log.info(
+                    f"Skip entry: position closed on same bar (ts={self._current_bar_ts})"
+                )
+                self._close_bar_ts = None
+                return
+
             # Entry: check factor signal
             if factor_value == self.config.entry_threshold:
                 if self.config.enable_long:
@@ -375,14 +391,17 @@ class FactorStrategy(Strategy):
         # Guard against re-entry (prevent recursive calls)
         if self.position_side is None:
             return
-            
+
         side = self.position_side
         entry = self.entry_price
-        
+
+        # Record which bar triggered the close (same-bar re-entry protection)
+        self._close_bar_ts = self._current_bar_ts
+
         # Clear state BEFORE calling close_all_positions to prevent re-entry
         self.entry_price = None
         self.position_side = None
-        
+
         # Now safe to close
         self.close_all_positions(self.instrument_id)
         entry_str = f"{entry:.2f}" if entry else "N/A"

@@ -10,8 +10,7 @@ download:
     - ETHUSDT
   timeframes:
     - 1h
-    - 1m
-  start_date: "2025-12-01"
+  start_date: "2025-01-01"
   end_date: "2025-12-31"
 
   # Rate limiting configuration
@@ -46,6 +45,11 @@ transform:
   # Fee configuration for instruments
   maker_fee: "0.0002"    # Default 0.02%
   taker_fee: "0.0004"    # Default 0.04%
+  # Margin configuration for instruments
+  margin_init: "0.05"    # Initial margin rate (5%)
+  margin_maint: "0.025"  # Maintenance margin rate (2.5%)
+  # Bar class: "Bar" (standard) | "BinanceBar" (with taker buy volume)
+  bar_class: "BinanceBar"
 
 paths:
   raw_data: "data/raw"

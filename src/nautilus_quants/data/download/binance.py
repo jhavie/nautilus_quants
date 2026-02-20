@@ -87,6 +87,8 @@ def _parse_kline(kline: list, symbol: str, timeframe: str) -> RawKline:
         volume=Decimal(str(kline[5])),
         quote_volume=Decimal(str(kline[7])),
         trades_count=int(kline[8]),
+        taker_buy_base_volume=Decimal(str(kline[9])),
+        taker_buy_quote_volume=Decimal(str(kline[10])),
         symbol=symbol,
         timeframe=timeframe,
         exchange="binance",
@@ -407,6 +409,8 @@ class BinanceDownloader:
                             "volume",
                             "quote_volume",
                             "trades_count",
+                            "taker_buy_base_volume",
+                            "taker_buy_quote_volume",
                         ]
                     )
 
@@ -427,6 +431,8 @@ class BinanceDownloader:
                             str(raw_kline.volume),
                             str(raw_kline.quote_volume),
                             raw_kline.trades_count,
+                            str(raw_kline.taker_buy_base_volume),
+                            str(raw_kline.taker_buy_quote_volume),
                         ]
                     )
 

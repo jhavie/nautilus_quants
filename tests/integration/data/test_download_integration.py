@@ -49,6 +49,8 @@ class TestDownloadIntegration:
                 "volume": 100.0,
                 "quote_volume": 4200000.0,
                 "trades_count": 1000,
+                "taker_buy_base_volume": 50.0,
+                "taker_buy_quote_volume": 2100000.0,
             })
         return pd.DataFrame(data)
 

@@ -121,6 +121,8 @@ paths:
                 "volume": float(kline[5]),
                 "quote_volume": float(kline[7]),
                 "trades_count": kline[8],
+                "taker_buy_base_volume": float(kline[9]),
+                "taker_buy_quote_volume": float(kline[10]),
             })
         df_raw = pd.DataFrame(raw_data)
         df_raw.to_csv(raw_csv, index=False)
@@ -173,6 +175,8 @@ paths:
             "volume": [100.0, 105.0, 150.0, 120.0, 130.0],
             "quote_volume": [4200000.0, 4410000.0, 6300000.0, 5040000.0, 5460000.0],
             "trades_count": [1000, 1050, 1200, 1100, 1150],
+            "taker_buy_base_volume": [50.0, 52.5, 75.0, 60.0, 65.0],
+            "taker_buy_quote_volume": [2100000.0, 2205000.0, 3150000.0, 2520000.0, 2730000.0],
         })
         df.to_csv(raw_csv, index=False)
 
@@ -213,6 +217,8 @@ paths:
             "volume": [100.0],
             "quote_volume": [4200000.0],
             "trades_count": [1000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(raw_dir / "BTCUSDT_1h_data.csv", index=False)
 
@@ -281,6 +287,8 @@ paths:
             "volume": [100.0],
             "quote_volume": [4200000.0],
             "trades_count": [1000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(proc_dir / "BTCUSDT_1h_processed.csv", index=False)
 
@@ -319,6 +327,8 @@ paths:
                 "volume": [100.0, 150.0],
                 "quote_volume": [4200000.0, 6300000.0],
                 "trades_count": [1000, 1200],
+                "taker_buy_base_volume": [50.0, 75.0],
+                "taker_buy_quote_volume": [2100000.0, 3150000.0],
             })
             df.to_csv(raw_csv, index=False)
 
@@ -354,6 +364,8 @@ paths:
             "volume": [100.0],
             "quote_volume": [4200000.0],
             "trades_count": [1000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(proc_dir / "BTCUSDT_1h_processed.csv", index=False)
 
@@ -386,6 +398,8 @@ paths:
             "volume": [100.0],
             "quote_volume": [4200000.0],
             "trades_count": [1000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(proc_dir / "BTCUSDT_1h_processed.csv", index=False)
 

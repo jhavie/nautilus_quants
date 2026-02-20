@@ -44,6 +44,8 @@ class TestProcessIntegration:
             "volume": [100.0, 105.0, 150.0, 120.0, 130.0],
             "quote_volume": [4200000.0, 4410000.0, 6300000.0, 5040000.0, 5460000.0],
             "trades_count": [1000, 1050, 1200, 1100, 1150],
+            "taker_buy_base_volume": [50.0, 52.5, 75.0, 60.0, 65.0],
+            "taker_buy_quote_volume": [2100000.0, 2205000.0, 3150000.0, 2520000.0, 2730000.0],
         })
         df.to_csv(csv_path, index=False)
         return csv_path
@@ -110,6 +112,8 @@ class TestProcessIntegration:
             "volume": [500.0, 600.0],
             "quote_volume": [1100000.0, 1400000.0],
             "trades_count": [2000, 2200],
+            "taker_buy_base_volume": [250.0, 300.0],
+            "taker_buy_quote_volume": [550000.0, 700000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -141,6 +145,8 @@ class TestProcessIntegration:
             "volume": [100.0, 150.0, 120.0],
             "quote_volume": [4200000.0, 6300000.0, 5040000.0],
             "trades_count": [1000, 1200, 1100],
+            "taker_buy_base_volume": [50.0, 75.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0, 2520000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -193,6 +199,8 @@ class TestProcessIntegration:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -245,6 +253,8 @@ class TestProcessIntegration:
             "volume": [100.0, 120.0],
             "quote_volume": [4200000.0, 5040000.0],
             "trades_count": [1000, 1100],
+            "taker_buy_base_volume": [50.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -290,6 +300,8 @@ class TestProcessIntegration:
                 "volume": [100.0, 150.0],
                 "quote_volume": [4200000.0, 6300000.0],
                 "trades_count": [1000, 1200],
+                "taker_buy_base_volume": [50.0, 75.0],
+                "taker_buy_quote_volume": [2100000.0, 3150000.0],
             })
             df.to_csv(csv_path, index=False)
 

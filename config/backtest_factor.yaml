@@ -18,12 +18,13 @@ venues:
     default_leverage: 5
 
 data:
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/catalog"
+  - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
+    # data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
     instrument_ids:
       - "ETHUSDT.BINANCE"
-    bar_spec: "1m"
-    start_time: "2024-01-01"
+    bar_spec: "1h"
+    start_time: "2025-01-01"
     end_time: "2025-12-31"
 
 engine:
@@ -55,7 +56,7 @@ engine:
 
 # Project-specific configuration (parsed separately from Nautilus config)
 report:
-  output_dir: "/Users/joe/Sync/nautilus_quants2/logs/backtest_runs"
+  output_dir: "logs/backtest_runs"
   formats:
     - csv
     - html
@@ -73,3 +74,17 @@ report:
       - distribution
       - rolling_sharpe
       - yearly_returns
+  quantstats:
+    enabled: true
+    title: "QuantStats Analysis"
+    output_format:
+      - html
+      - png
+    charts:
+      - returns
+      - log_returns
+      - yearly_returns
+      - monthly_heatmap
+      - drawdown
+      - rolling_sharpe
+      - rolling_volatility

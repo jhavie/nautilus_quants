@@ -97,6 +97,8 @@ def _create_instrument(
     size_precision: int = DEFAULT_QUANTITY_PRECISION,
     maker_fee: str = "0.0002",
     taker_fee: str = "0.0004",
+    margin_init: str = "0.05",
+    margin_maint: str = "0.025",
 ) -> CryptoPerpetual:
     """Create a CryptoPerpetual instrument for the catalog.
 
@@ -108,6 +110,8 @@ def _create_instrument(
         size_precision: Number of decimal places for quantity
         maker_fee: Maker fee rate as string (e.g., "0.0002" for 0.02%)
         taker_fee: Taker fee rate as string (e.g., "0.0004" for 0.04%)
+        margin_init: Initial margin rate as string (e.g., "0.05" for 5%)
+        margin_maint: Maintenance margin rate as string (e.g., "0.025" for 2.5%)
 
     Returns:
         CryptoPerpetual instrument
@@ -140,8 +144,8 @@ def _create_instrument(
         min_notional=Money(1, USDT),
         max_price=Price.from_str("10000000"),
         min_price=Price.from_str(price_increment_str),
-        margin_init=Decimal("0.05"),
-        margin_maint=Decimal("0.025"),
+        margin_init=Decimal(margin_init),
+        margin_maint=Decimal(margin_maint),
         maker_fee=Decimal(maker_fee),
         taker_fee=Decimal(taker_fee),
         ts_event=ts_init,
@@ -232,6 +236,66 @@ def csv_to_bars(
     return wrangler.process(df)
 
 
+def csv_to_binance_bars(
+    csv_path: Path | str,
+    instrument: CryptoPerpetual,
+    bar_type: BarType,
+) -> list:
+    """Convert CSV data to BinanceBar objects with taker buy volume fields.
+
+    Creates BinanceBar objects manually since BarDataWrangler only supports
+    standard Bar objects. Includes quote_volume, trades_count, and taker buy
+    volume fields from the processed CSV.
+
+    Args:
+        csv_path: Path to processed CSV file
+        instrument: CryptoPerpetual instrument (provides precision)
+        bar_type: BarType for the bars
+
+    Returns:
+        List of BinanceBar objects
+    """
+    # Lazy import to avoid hard dependency when bar_class="Bar"
+    import nautilus_trader.adapters.binance  # noqa: F401 — triggers Arrow schema registration
+    from nautilus_trader.adapters.binance.common.types import BinanceBar
+
+    csv_path = Path(csv_path)
+    df = pd.read_csv(csv_path)
+
+    if df.empty:
+        return []
+
+    # Use instrument precision to format prices/quantities consistently.
+    # Without this, float-to-str drops trailing zeros (e.g., 3364.50 -> "3364.5")
+    # causing Price.precision=1 which mismatches instrument.price_precision=2.
+    price_prec = instrument.price_precision
+    size_prec = instrument.size_precision
+    price_fmt = f"{{:.{price_prec}f}}"
+    size_fmt = f"{{:.{size_prec}f}}"
+
+    bars: list[BinanceBar] = []
+    for _, row in df.iterrows():
+        ts_ns = int(row["timestamp"]) * 1_000_000  # ms -> ns
+
+        bar = BinanceBar(
+            bar_type=bar_type,
+            open=Price.from_str(price_fmt.format(row["open"])),
+            high=Price.from_str(price_fmt.format(row["high"])),
+            low=Price.from_str(price_fmt.format(row["low"])),
+            close=Price.from_str(price_fmt.format(row["close"])),
+            volume=Quantity.from_str(size_fmt.format(row["volume"])),
+            quote_volume=Decimal(str(row["quote_volume"])),
+            count=int(row["trades_count"]),
+            taker_buy_base_volume=Decimal(str(row["taker_buy_base_volume"])),
+            taker_buy_quote_volume=Decimal(str(row["taker_buy_quote_volume"])),
+            ts_event=ts_ns,
+            ts_init=ts_ns,
+        )
+        bars.append(bar)
+
+    return bars
+
+
 def transform_to_parquet(
     input_path: Path | str,
     catalog_path: Path | str,
@@ -241,6 +305,9 @@ def transform_to_parquet(
     raw_data_path: Path | str | None = None,
     maker_fee: str = "0.0002",
     taker_fee: str = "0.0004",
+    margin_init: str = "0.05",
+    margin_maint: str = "0.025",
+    bar_class: str = "Bar",
 ) -> TransformResult:
     """Transform processed CSV to Nautilus Parquet format.
 
@@ -256,6 +323,9 @@ def transform_to_parquet(
         raw_data_path: Path to raw data directory for precision lookup
         maker_fee: Maker fee rate as string (e.g., "0.0002" for 0.02%)
         taker_fee: Taker fee rate as string (e.g., "0.0004" for 0.04%)
+        margin_init: Initial margin rate as string (e.g., "0.05" for 5%)
+        margin_maint: Maintenance margin rate as string (e.g., "0.025" for 2.5%)
+        bar_class: Bar class to use ("Bar" or "BinanceBar")
 
     Returns:
         TransformResult with output path and row count
@@ -279,13 +349,18 @@ def transform_to_parquet(
             size_precision=quantity_precision,
             maker_fee=maker_fee,
             taker_fee=taker_fee,
+            margin_init=margin_init,
+            margin_maint=margin_maint,
         )
 
         # 3. Get bar_type
         bar_type = _get_bar_type(symbol, timeframe)
 
-        # 4. Convert CSV to bars using BarDataWrangler
-        bars = csv_to_bars(input_path, instrument, bar_type)
+        # 4. Convert CSV to bars based on bar_class configuration
+        if bar_class == "BinanceBar":
+            bars = csv_to_binance_bars(input_path, instrument, bar_type)
+        else:
+            bars = csv_to_bars(input_path, instrument, bar_type)
 
         if not bars:
             return TransformResult(
@@ -307,6 +382,8 @@ def transform_to_parquet(
             size_precision=quantity_precision,
             maker_fee=maker_fee,
             taker_fee=taker_fee,
+            margin_init=margin_init,
+            margin_maint=margin_maint,
         )
 
         # 6. Create catalog and write data
