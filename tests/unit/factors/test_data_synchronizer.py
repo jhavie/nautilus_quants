@@ -72,6 +72,90 @@ class TestInstrumentData:
         assert len(arrays["close"]) == 3
 
 
+class MockBarWithExtras(MockBar):
+    """Mock bar with extra attributes simulating BinanceBar."""
+
+    def __init__(
+        self,
+        instrument_id: str,
+        open_: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+        ts_event: int,
+        quote_volume: float = 0.0,
+        count: int = 0,
+        taker_buy_base_volume: float = 0.0,
+        taker_buy_quote_volume: float = 0.0,
+    ):
+        super().__init__(instrument_id, open_, high, low, close, volume, ts_event)
+        self.quote_volume = quote_volume
+        self.count = count
+        self.taker_buy_base_volume = taker_buy_base_volume
+        self.taker_buy_quote_volume = taker_buy_quote_volume
+
+
+class TestInstrumentDataExtraFields:
+    """Tests for InstrumentData extra field support."""
+
+    def test_extra_fields_update(self):
+        """Extra fields should be appended on each update."""
+        data = InstrumentData(instrument_id="TEST")
+        data.set_extra_fields(["quote_volume", "count"])
+
+        bar = MockBarWithExtras(
+            "TEST", 100, 105, 95, 102, 1000, 1,
+            quote_volume=5000.0, count=42,
+        )
+        data.update(bar)
+
+        assert data.extra_history["quote_volume"] == [5000.0]
+        assert data.extra_history["count"] == [42.0]
+
+    def test_extra_fields_get_arrays(self):
+        """get_arrays should include extra field arrays."""
+        data = InstrumentData(instrument_id="TEST")
+        data.set_extra_fields(["quote_volume"])
+
+        for i in range(3):
+            bar = MockBarWithExtras(
+                "TEST", 100, 105, 95, 102, 1000, i,
+                quote_volume=1000.0 + i,
+            )
+            data.update(bar)
+
+        arrays = data.get_arrays()
+        assert "quote_volume" in arrays
+        assert len(arrays["quote_volume"]) == 3
+        assert arrays["quote_volume"][2] == 1002.0
+
+    def test_extra_fields_trimming(self):
+        """Extra history should be trimmed to max_history."""
+        data = InstrumentData(instrument_id="TEST", max_history=5)
+        data.set_extra_fields(["quote_volume"])
+
+        for i in range(10):
+            bar = MockBarWithExtras(
+                "TEST", 100, 105, 95, 102, 1000, i,
+                quote_volume=float(i),
+            )
+            data.update(bar)
+
+        assert len(data.extra_history["quote_volume"]) == 5
+        assert data.extra_history["quote_volume"][0] == 5.0
+
+    def test_extra_fields_missing_attr_defaults_to_zero(self):
+        """When bar lacks the extra attribute, default to 0."""
+        data = InstrumentData(instrument_id="TEST")
+        data.set_extra_fields(["nonexistent_field"])
+
+        bar = MockBar("TEST", 100, 105, 95, 102, 1000, 1)
+        data.update(bar)
+
+        assert data.extra_history["nonexistent_field"] == [0.0]
+
+
 class TestDataSynchronizer:
     """Tests for DataSynchronizer."""
 
@@ -142,16 +226,57 @@ class TestDataSynchronizer:
         
         assert sync.min_history_length == 3
 
+    def test_set_extra_fields_propagates(self):
+        """set_extra_fields should propagate to all instruments."""
+        sync = DataSynchronizer(instruments=["BTCUSDT", "ETHUSDT"])
+
+        bar1 = MockBar("BTCUSDT", 50000, 51000, 49000, 50500, 100, 1)
+        bar2 = MockBar("ETHUSDT", 3000, 3100, 2900, 3050, 200, 1)
+        sync.on_bar(bar1)
+        sync.on_bar(bar2)
+
+        sync.set_extra_fields(["quote_volume"])
+
+        for inst_id in ["BTCUSDT", "ETHUSDT"]:
+            data = sync.get_instrument_data(inst_id)
+            assert data is not None
+            assert data.extra_fields == ["quote_volume"]
+
+    def test_extra_fields_preserved_on_add_instrument(self):
+        """New instruments should inherit extra_fields."""
+        sync = DataSynchronizer()
+        sync.set_extra_fields(["count", "quote_volume"])
+
+        sync.add_instrument("BTCUSDT")
+        data = sync.get_instrument_data("BTCUSDT")
+        assert data is not None
+        assert data.extra_fields == ["count", "quote_volume"]
+
+    def test_extra_fields_preserved_on_reset(self):
+        """Extra fields should survive reset."""
+        sync = DataSynchronizer(instruments=["BTCUSDT"])
+        sync.set_extra_fields(["quote_volume"])
+
+        bar = MockBarWithExtras("BTCUSDT", 50000, 51000, 49000, 50500, 100, 1, quote_volume=999.0)
+        sync.on_bar(bar)
+
+        sync.reset()
+
+        data = sync.get_instrument_data("BTCUSDT")
+        assert data is not None
+        assert data.extra_fields == ["quote_volume"]
+        assert len(data.extra_history["quote_volume"]) == 0
+
     def test_reset(self):
         """Test reset."""
         sync = DataSynchronizer(instruments=["BTCUSDT"])
         bar = MockBar("BTCUSDT", 50000, 51000, 49000, 50500, 100, 1)
         sync.on_bar(bar)
-        
+
         assert sync.is_ready
-        
+
         sync.reset()
-        
+
         # Should still have instrument registered but no data
         assert "BTCUSDT" in sync.instruments
         data = sync.get_instrument_data("BTCUSDT")

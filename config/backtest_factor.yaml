@@ -22,9 +22,9 @@ data:
     data_cls: "nautilus_trader.model.data:Bar"
     # data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
     instrument_ids:
-      - "ETHUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
     bar_spec: "1h"
-    start_time: "2025-01-01"
+    start_time: "2025-06-01"
     end_time: "2025-12-31"
 
 engine:
@@ -46,7 +46,7 @@ engine:
     - strategy_path: "nautilus_quants.strategies.factor.strategy:FactorStrategy"
       config_path: "nautilus_quants.strategies.factor.strategy:FactorStrategyConfig"
       config:
-        instrument_id: "ETHUSDT.BINANCE"
+        instrument_id: "BTCUSDT.BINANCE"
         signal_name: "alpha_breakout"  # 因子名：+1=做多, -1=做空
         entry_threshold: 1.0
         stop_loss_pct: 0.02
