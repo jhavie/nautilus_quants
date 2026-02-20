@@ -148,6 +148,8 @@ def fill_gaps(
                         "volume": 0.0,
                         "quote_volume": 0.0,
                         "trades_count": 0,
+                        "taker_buy_base_volume": 0.0,
+                        "taker_buy_quote_volume": 0.0,
                     }
 
                     # Add was_filled column if not present

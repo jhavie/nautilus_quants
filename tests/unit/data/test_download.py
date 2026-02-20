@@ -151,7 +151,8 @@ class TestBinanceDownloader:
             assert len(df) == 10
             assert list(df.columns) == [
                 "timestamp", "open", "high", "low", "close",
-                "volume", "quote_volume", "trades_count"
+                "volume", "quote_volume", "trades_count",
+                "taker_buy_base_volume", "taker_buy_quote_volume"
             ]
 
     @pytest.mark.asyncio

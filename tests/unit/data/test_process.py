@@ -127,6 +127,8 @@ class TestFillGaps:
             "volume": [100.0, 150.0, 120.0],
             "quote_volume": [4200000.0, 6300000.0, 5040000.0],
             "trades_count": [1000, 1200, 1100],
+            "taker_buy_base_volume": [50.0, 75.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0, 2520000.0],
         })
 
         result_df, actions = fill_gaps(df, "1h")
@@ -146,6 +148,8 @@ class TestFillGaps:
             "volume": [100.0, 120.0],
             "quote_volume": [4200000.0, 5040000.0],
             "trades_count": [1000, 1100],
+            "taker_buy_base_volume": [50.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0],
         })
 
         result_df, actions = fill_gaps(df, "1h", max_gap_bars=3)
@@ -166,6 +170,8 @@ class TestFillGaps:
             "volume": [100.0, 120.0],
             "quote_volume": [4200000.0, 5040000.0],
             "trades_count": [1000, 1100],
+            "taker_buy_base_volume": [50.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0],
         })
 
         result_df, actions = fill_gaps(df, "1h", max_gap_bars=3)
@@ -184,6 +190,8 @@ class TestFillGaps:
             "volume": [100.0, 120.0],
             "quote_volume": [4200000.0, 5040000.0],
             "trades_count": [1000, 1100],
+            "taker_buy_base_volume": [50.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0],
         })
 
         result_df, actions = fill_gaps(df, "1h", max_gap_bars=3)
@@ -207,6 +215,8 @@ class TestFillGaps:
             "volume": [100.0, 120.0],
             "quote_volume": [4200000.0, 5040000.0],
             "trades_count": [1000, 1100],
+            "taker_buy_base_volume": [50.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0],
         })
 
         result_df, actions = fill_gaps(df, "1h", max_gap_bars=3)
@@ -233,6 +243,8 @@ class TestFillGaps:
             "volume": [100.0, 120.0, 140.0],
             "quote_volume": [4200000.0, 5040000.0, 5880000.0],
             "trades_count": [1000, 1100, 1200],
+            "taker_buy_base_volume": [50.0, 60.0, 70.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0, 2940000.0],
         })
 
         result_df, actions = fill_gaps(df, "1h", max_gap_bars=3)
@@ -252,6 +264,8 @@ class TestFillGaps:
             "volume": [100.0, 120.0],
             "quote_volume": [4200000.0, 5040000.0],
             "trades_count": [1000, 1100],
+            "taker_buy_base_volume": [50.0, 60.0],
+            "taker_buy_quote_volume": [2100000.0, 2520000.0],
         })
 
         result_df, actions = fill_gaps(df, "4h", max_gap_bars=3)
@@ -410,6 +424,8 @@ class TestProcessData:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df.to_csv(input_path, index=False)
 
@@ -438,6 +454,8 @@ class TestProcessData:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df.to_csv(input_path, index=False)
 
@@ -465,6 +483,8 @@ class TestProcessData:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df.to_csv(input_path, index=False)
 
@@ -492,6 +512,8 @@ class TestProcessData:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df.to_csv(input_path, index=False)
 
@@ -519,6 +541,8 @@ class TestProcessData:
             "volume": [500.0],
             "quote_volume": [1100000.0],
             "trades_count": [2000],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(input_path, index=False)
 

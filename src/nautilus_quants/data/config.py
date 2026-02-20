@@ -73,6 +73,9 @@ class TransformConfig:
     catalog_path: str = "data/catalog"
     maker_fee: str = "0.0002"
     taker_fee: str = "0.0004"
+    margin_init: str = "0.05"
+    margin_maint: str = "0.025"
+    bar_class: str = "Bar"
 
 
 @dataclass
@@ -164,6 +167,9 @@ def _parse_transform(data: dict) -> TransformConfig:
         catalog_path=data.get("catalog_path", "data/catalog"),
         maker_fee=data.get("maker_fee", "0.0002"),
         taker_fee=data.get("taker_fee", "0.0004"),
+        margin_init=data.get("margin_init", "0.05"),
+        margin_maint=data.get("margin_maint", "0.025"),
+        bar_class=data.get("bar_class", "Bar"),
     )
 
 
@@ -293,6 +299,9 @@ def config_to_dict(config: PipelineConfig) -> dict:
             "catalog_path": config.transform.catalog_path,
             "maker_fee": config.transform.maker_fee,
             "taker_fee": config.transform.taker_fee,
+            "margin_init": config.transform.margin_init,
+            "margin_maint": config.transform.margin_maint,
+            "bar_class": config.transform.bar_class,
         },
         "paths": {
             "raw_data": config.paths.raw_data,

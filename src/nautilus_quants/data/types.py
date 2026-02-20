@@ -43,6 +43,8 @@ class RawKline:
         volume: Base asset volume
         quote_volume: Quote asset volume
         trades_count: Number of trades
+        taker_buy_base_volume: Taker buy base asset volume
+        taker_buy_quote_volume: Taker buy quote asset volume
         symbol: Trading pair symbol (e.g., "BTCUSDT")
         timeframe: K-line interval (e.g., "1h")
         exchange: Source exchange
@@ -56,6 +58,8 @@ class RawKline:
     volume: Decimal
     quote_volume: Decimal
     trades_count: int
+    taker_buy_base_volume: Decimal
+    taker_buy_quote_volume: Decimal
     symbol: str
     timeframe: str
     exchange: str = "binance"
@@ -128,6 +132,8 @@ class ProcessedKline:
         volume: Base asset volume
         quote_volume: Quote asset volume
         trades_count: Number of trades
+        taker_buy_base_volume: Taker buy base asset volume
+        taker_buy_quote_volume: Taker buy quote asset volume
         symbol: Trading pair symbol
         timeframe: K-line interval
         was_filled: True if this row was gap-filled
@@ -142,6 +148,8 @@ class ProcessedKline:
     volume: Decimal
     quote_volume: Decimal
     trades_count: int
+    taker_buy_base_volume: Decimal
+    taker_buy_quote_volume: Decimal
     symbol: str
     timeframe: str
     was_filled: bool = False

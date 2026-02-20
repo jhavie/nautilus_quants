@@ -43,6 +43,8 @@ class TestTransformIntegration:
             "volume": [100.0, 150.0, 120.0, 130.0, 140.0],
             "quote_volume": [4200000.0, 6300000.0, 5040000.0, 5460000.0, 5880000.0],
             "trades_count": [1000, 1200, 1100, 1150, 1250],
+            "taker_buy_base_volume": [50.0, 75.0, 60.0, 65.0, 70.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0, 2520000.0, 2730000.0, 2940000.0],
         })
         df.to_csv(csv_path, index=False)
         return csv_path
@@ -110,6 +112,8 @@ class TestTransformIntegration:
             "volume": [],
             "quote_volume": [],
             "trades_count": [],
+            "taker_buy_base_volume": [],
+            "taker_buy_quote_volume": [],
         })
         df.to_csv(csv_path, index=False)
 
@@ -149,6 +153,8 @@ class TestTransformIntegration:
                 "volume": [100.0, 150.0],
                 "quote_volume": [4200000.0, 6300000.0],
                 "trades_count": [1000, 1200],
+                "taker_buy_base_volume": [50.0, 75.0],
+                "taker_buy_quote_volume": [2100000.0, 3150000.0],
             })
             df.to_csv(csv_path, index=False)
 
@@ -176,6 +182,8 @@ class TestTransformIntegration:
                 "volume": [100.0],
                 "quote_volume": [4200000.0],
                 "trades_count": [1000],
+                "taker_buy_base_volume": [50.0],
+                "taker_buy_quote_volume": [2100000.0],
             })
             df.to_csv(csv_path, index=False)
 
@@ -202,6 +210,8 @@ class TestTransformIntegration:
             "volume": [123.456789],
             "quote_volume": [5200000.0],
             "trades_count": [1500],
+            "taker_buy_base_volume": [50.0],
+            "taker_buy_quote_volume": [2100000.0],
         })
         df.to_csv(csv_path, index=False)
 
@@ -256,6 +266,8 @@ class TestTransformIntegration:
             "volume": [100.0, 150.0],
             "quote_volume": [4200000.0, 6300000.0],
             "trades_count": [1000, 1200],
+            "taker_buy_base_volume": [50.0, 75.0],
+            "taker_buy_quote_volume": [2100000.0, 3150000.0],
         })
         df1.to_csv(csv1, index=False)
 
@@ -273,6 +285,8 @@ class TestTransformIntegration:
             "volume": [120.0, 130.0],
             "quote_volume": [5040000.0, 5460000.0],
             "trades_count": [1100, 1150],
+            "taker_buy_base_volume": [60.0, 65.0],
+            "taker_buy_quote_volume": [2520000.0, 2730000.0],
         })
         df2.to_csv(csv2, index=False)
 

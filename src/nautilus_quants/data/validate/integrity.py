@@ -28,6 +28,8 @@ REQUIRED_COLUMNS = [
     "volume",
     "quote_volume",
     "trades_count",
+    "taker_buy_base_volume",
+    "taker_buy_quote_volume",
 ]
 
 # Expected data types
@@ -40,6 +42,8 @@ COLUMN_TYPES = {
     "volume": "float64",
     "quote_volume": "float64",
     "trades_count": "int64",
+    "taker_buy_base_volume": "float64",
+    "taker_buy_quote_volume": "float64",
 }
 
 
