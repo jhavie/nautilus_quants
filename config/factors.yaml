@@ -27,8 +27,8 @@ variables:
   log_returns: "log(close / delay(close, 1))"
   
   # Volume metrics (use quote_volume for USDT-denominated turnover when available)
-  adv20: "ts_mean(volume, adv_period)"
-  volume_ratio: "volume / adv20"
+  adv20: "ts_mean(quote_volume, adv_period)"
+  volume_ratio: "quote_volume / adv20"
   
   # SMA for trend filter
   sma: "ts_mean(close, sma_period)"
@@ -44,7 +44,7 @@ variables:
   price_new_low: "ts_argmin(close, breakout_period + 1) == breakout_period + 1"
   
   # Volume breakout condition (use quote_volume for USDT-denominated turnover)
-  volume_breakout: "ts_argmax(volume, breakout_period + 1) == breakout_period + 1"
+  volume_breakout: "ts_argmax(quote_volume, breakout_period + 1) == breakout_period + 1"
   
   # Trend filter conditions
   above_sma: "close > sma"

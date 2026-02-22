@@ -12,6 +12,9 @@ from nautilus_quants.backtest.config import (
 )
 from nautilus_quants.backtest.utils.bar_spec import format_bar_spec
 
+# Standard Bar class path used to distinguish from BinanceBar in injection logic
+_STANDARD_BAR_CLS = "nautilus_trader.model.data:Bar"
+
 
 def parse_report_config(config_dict: dict) -> ReportConfig | None:
     """Parse report configuration from YAML dict.
@@ -116,15 +119,17 @@ def get_nautilus_config_dict(config_dict: dict) -> dict:
 
 
 def extract_data_configs(config_dict: dict) -> list[dict]:
-    """Extract instrument_ids and bar_spec from data section.
+    """Extract instrument_ids, bar_spec, and data_cls from data section.
 
-    Expects catalog format with instrument_ids (plural), catalog_path, and bar_spec.
+    Expects catalog format with instrument_ids (plural), catalog_path, bar_spec,
+    and optionally data_cls.
 
     Args:
         config_dict: Full YAML config dictionary
 
     Returns:
-        List of dicts with instrument_id and bar_spec for each data source
+        List of dicts with instrument_id, bar_spec, bar_type, and data_cls
+        for each data source
     """
     data_section = config_dict.get("data", [])
     result = []
@@ -133,6 +138,7 @@ def extract_data_configs(config_dict: dict) -> list[dict]:
         instrument_ids = data_config.get("instrument_ids", [])
         catalog_path = data_config.get("catalog_path", "")
         bar_spec = data_config.get("bar_spec", "")
+        data_cls = data_config.get("data_cls", "")
 
         if not instrument_ids or not catalog_path or not bar_spec:
             continue
@@ -151,6 +157,7 @@ def extract_data_configs(config_dict: dict) -> list[dict]:
                     "instrument_id": inst_id,
                     "bar_spec": native_spec,
                     "bar_type": bar_type,
+                    "data_cls": data_cls,
                 }
             )
 
@@ -160,12 +167,16 @@ def extract_data_configs(config_dict: dict) -> list[dict]:
 def inject_data_configs(config_dict: dict, data_configs: list[dict]) -> dict:
     """Inject data configs into actor and strategy configurations.
 
-    This allows actors and strategies to know which bar types to subscribe to
-    without querying the cache (which is empty at on_start time).
+    For actors with data_cls set, only injects bar_types matching that
+    data_cls (and optionally bar_spec). This prevents BinanceBar bar_types
+    from being injected into actors that only need standard Bars, and vice versa.
+
+    For strategies without data_cls, prefers standard Bar types over BinanceBar
+    types to ensure stop-loss bars use standard OHLCV data.
 
     Args:
         config_dict: Full YAML config dictionary
-        data_configs: List of extracted data configs
+        data_configs: List of extracted data configs (from extract_data_configs)
 
     Returns:
         Modified config dict with injected bar_type info
@@ -182,29 +193,59 @@ def inject_data_configs(config_dict: dict, data_configs: list[dict]) -> dict:
     actors = engine.get("actors", [])
     for actor in actors:
         actor_config = actor.get("config", {})
-        # Inject bar_types list if not already present
         if "bar_types" not in actor_config:
-            actor_config["bar_types"] = [dc["bar_type"] for dc in data_configs]
+            actor_data_cls = actor_config.get("data_cls", "")
+            actor_bar_spec = actor_config.get("bar_spec", "")
+            if actor_data_cls:
+                # Precise matching: filter by data_cls + optional bar_spec
+                try:
+                    native_bar_spec = format_bar_spec(actor_bar_spec, include_source=False) if actor_bar_spec else ""
+                except ValueError:
+                    native_bar_spec = actor_bar_spec
+
+                matching = [
+                    dc["bar_type"] for dc in data_configs
+                    if dc.get("data_cls") == actor_data_cls
+                    and (not native_bar_spec or dc["bar_spec"] == native_bar_spec)
+                ]
+                # Fall back to all bar_types if no precise match found
+                actor_config["bar_types"] = matching if matching else [dc["bar_type"] for dc in data_configs]
+            else:
+                actor_config["bar_types"] = [dc["bar_type"] for dc in data_configs]
         actor["config"] = actor_config
 
     # Inject into strategies
     strategies = engine.get("strategies", [])
     for strategy in strategies:
         strategy_config = strategy.get("config", {})
+
         # Inject bar_types list if not already present (for multi-instrument strategies)
+        # Strategies prefer standard Bar types for stop-loss bar tracking
         if "bar_types" not in strategy_config:
-            strategy_config["bar_types"] = [dc["bar_type"] for dc in data_configs]
-        # Inject bar_type if not already present and we have data configs (for single-instrument strategies)
+            standard_bars = [
+                dc["bar_type"] for dc in data_configs
+                if not dc.get("data_cls") or dc.get("data_cls") == _STANDARD_BAR_CLS
+            ]
+            strategy_config["bar_types"] = standard_bars if standard_bars else [dc["bar_type"] for dc in data_configs]
+
+        # Inject bar_type if not already present (for single-instrument strategies)
         if "bar_type" not in strategy_config and data_configs:
-            # Find matching data config by instrument_id
             instrument_id = strategy_config.get("instrument_id")
+            # Prefer standard Bar for strategies (not BinanceBar)
             for dc in data_configs:
-                if dc["instrument_id"] == instrument_id:
+                dc_cls = dc.get("data_cls", "")
+                if dc["instrument_id"] == instrument_id and (not dc_cls or dc_cls == _STANDARD_BAR_CLS):
                     strategy_config["bar_type"] = dc["bar_type"]
                     break
             else:
-                # Default to first data config if no match
-                strategy_config["bar_type"] = data_configs[0]["bar_type"]
+                # Fallback: first matching instrument_id regardless of data type
+                for dc in data_configs:
+                    if dc["instrument_id"] == instrument_id:
+                        strategy_config["bar_type"] = dc["bar_type"]
+                        break
+                else:
+                    strategy_config["bar_type"] = data_configs[0]["bar_type"]
+
         strategy["config"] = strategy_config
 
     return config_dict
