@@ -1,12 +1,12 @@
 # Backtest Configuration: Factor Framework Actor 解耦架构
 # 使用 Nautilus 原生 BacktestRunConfig 格式
-# 
+#
 # 运行方式:
 #   python -m nautilus_quants.backtest run config/backtest_factor.yaml
 #
 # 架构:
-#   - FactorEngineActor: 从 data 中的 1m bars 聚合到 1h，计算因子，发布 CustomData
-#   - FactorStrategy: 订阅 1m bars (stop loss)，接收 CustomData (trading signals)
+#   - FactorEngineActor: 直接订阅 BinanceBar 1h（含 quote_volume 等字段），计算因子，发布 CustomData
+#   - FactorStrategy: 订阅 1m 标准 Bars (stop loss)，接收 CustomData (trading signals)
 
 venues:
   - name: "BINANCE"
@@ -19,34 +19,42 @@ venues:
 
 data:
   - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    # data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
+    data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
     instrument_ids:
-      - "BTCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
     bar_spec: "1h"
-    start_time: "2025-06-01"
+    start_time: "2025-01-01"
+    end_time: "2025-12-31"
+
+  - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    instrument_ids:
+      - "ETHUSDT.BINANCE"
+    bar_spec: "1m"
+    start_time: "2025-01-01"
     end_time: "2025-12-31"
 
 engine:
   trader_id: "BACKTESTER-001"
   logging:
     log_level: "INFO"
-  
+
   actors:
     - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
       config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
       config:
         factor_config_path: "config/factors.yaml"
-        interval: "1h"  # 从数据源 1m 聚合到 1h
+        data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
+        bar_spec: "1h"
         signal_prefix: "factor"
         max_history: 500
         publish_signals: true
-  
+
   strategies:
     - strategy_path: "nautilus_quants.strategies.factor.strategy:FactorStrategy"
       config_path: "nautilus_quants.strategies.factor.strategy:FactorStrategyConfig"
       config:
-        instrument_id: "BTCUSDT.BINANCE"
+        instrument_id: "ETHUSDT.BINANCE"
         signal_name: "alpha_breakout"  # 因子名：+1=做多, -1=做空
         entry_threshold: 1.0
         stop_loss_pct: 0.02

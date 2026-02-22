@@ -28,13 +28,15 @@ class TestActorDecouplingArchitecture:
         assert config.max_history == 500
         assert config.publish_signals is True
 
-    def test_factor_engine_actor_config_with_interval(self) -> None:
-        """Test FactorEngineActorConfig with custom interval."""
+    def test_factor_engine_actor_config_with_data_cls_and_bar_spec(self) -> None:
+        """Test FactorEngineActorConfig with data_cls and bar_spec for precise injection."""
         config = FactorEngineActorConfig(
             factor_config_path="config/factors.yaml",
-            interval="1h",
+            data_cls="nautilus_trader.adapters.binance.common.types:BinanceBar",
+            bar_spec="1h",
         )
-        assert config.interval == "1h"
+        assert config.data_cls == "nautilus_trader.adapters.binance.common.types:BinanceBar"
+        assert config.bar_spec == "1h"
 
     def test_factor_strategy_config_creation(self) -> None:
         """Test FactorStrategyConfig can be created with required fields."""

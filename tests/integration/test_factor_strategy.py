@@ -113,7 +113,8 @@ class TestFactorEngineActorConfigIntegration:
         )
 
         assert config.factor_config_path == "config/factors.yaml"
-        assert config.interval == "1h"
+        assert config.data_cls == ""
+        assert config.bar_spec == ""
         assert config.max_history == 500
         assert config.publish_signals is True
         assert config.signal_prefix == "factor"
@@ -122,14 +123,16 @@ class TestFactorEngineActorConfigIntegration:
         """Test custom configuration values."""
         config = FactorEngineActorConfig(
             factor_config_path="config/factors.yaml",
-            interval="4h",
+            data_cls="nautilus_trader.adapters.binance.common.types:BinanceBar",
+            bar_spec="4h",
             max_history=1000,
             publish_signals=False,
             signal_prefix="custom_factor",
         )
 
         assert config.factor_config_path == "config/factors.yaml"
-        assert config.interval == "4h"
+        assert config.data_cls == "nautilus_trader.adapters.binance.common.types:BinanceBar"
+        assert config.bar_spec == "4h"
         assert config.max_history == 1000
         assert config.publish_signals is False
         assert config.signal_prefix == "custom_factor"

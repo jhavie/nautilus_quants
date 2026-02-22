@@ -55,9 +55,15 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     ----------
     factor_config_path : str
         Path to YAML factor configuration file (required).
-    interval : str, default "1h"
-        Target timeframe for factor computation (e.g., "1m", "1h", "4h", "1d").
-        If not "1m", bars will be aggregated from data source to this interval.
+    data_cls : str, default ""
+        Full class path of the bar data type to subscribe to
+        (e.g., "nautilus_trader.adapters.binance.common.types:BinanceBar").
+        Used by CLI to precisely filter bar_types from the data: section.
+        If empty, CLI injects all available bar_types.
+    bar_spec : str, default ""
+        Target timeframe for factor computation (e.g., "1h", "4h", "1d").
+        Used with data_cls by CLI to filter matching bar_types.
+        If empty, all bar_types matching data_cls are injected.
     max_history : int, default 500
         Maximum history to maintain per instrument.
     publish_signals : bool, default True
@@ -66,11 +72,13 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
         Prefix for signal names (e.g., "factor.breakout").
     bar_types : list[str], default []
         List of bar type strings to subscribe to (injected by CLI from data config).
-        If empty, will try to get from cache (legacy behavior).
+        Filtered by data_cls + bar_spec when both are specified.
+        If empty, actor will log an error and not start.
     """
 
     factor_config_path: str
-    interval: str = "1h"
+    data_cls: str = ""
+    bar_spec: str = ""
     max_history: int = 500
     publish_signals: bool = True
     signal_prefix: str = "factor"
@@ -83,10 +91,16 @@ class FactorEngineActor(Actor):
 
     This actor wraps the FactorEngine and integrates it with the Nautilus
     trading system, providing:
-    - Automatic bar subscription with optional aggregation
+    - Direct bar subscription (no aggregation - BinanceBar fields preserved)
     - Two-phase factor computation (time-series then cross-sectional)
     - CustomData publishing for factor values
     - Performance logging via Nautilus Logger
+
+    BinanceBar usage pattern (analogous to OrderBook):
+        FactorEngineActor subscribes directly to BinanceBar (1h),
+        preserving extra fields like quote_volume and count for factor
+        computation. This is the same pattern as using OrderBook for
+        microstructure alpha - never aggregated, subscribed directly.
 
     Example
     -------
@@ -95,7 +109,8 @@ class FactorEngineActor(Actor):
 
     config = FactorEngineActorConfig(
         factor_config_path="config/factors.yaml",
-        interval="1h",  # Aggregate to 1-hour bars
+        data_cls="nautilus_trader.adapters.binance.common.types:BinanceBar",
+        bar_spec="1h",
     )
     actor = FactorEngineActor(config)
     # Add to TradingNode or BacktestEngine
@@ -129,10 +144,11 @@ class FactorEngineActor(Actor):
         """
         Actions to perform on actor start.
 
-        Initializes the FactorEngine and subscribes to bar types.
-        Uses interval config to determine bar aggregation.
+        Initializes the FactorEngine and subscribes directly to bar types.
+        Always uses direct subscription (no aggregation) to preserve
+        BinanceBar extra fields like quote_volume and count.
         """
-        self.log.info(f"Starting FactorEngineActor (interval={self._config.interval})...")
+        self.log.info("Starting FactorEngineActor...")
 
         # Initialize FactorEngine
         factor_config = None
@@ -160,80 +176,25 @@ class FactorEngineActor(Actor):
         self.log.info(f"Registered {len(self._engine.factor_names)} factors: {self._engine.factor_names}")
 
         # Get bar types from injected config (required)
-        # bar_types must be injected by CLI from data config
+        # bar_types is injected by CLI from data config, filtered by data_cls + bar_spec
         if not self._config.bar_types:
             self.log.error(
                 "bar_types not configured. Ensure backtest is run via CLI which injects "
-                "bar_types from data config automatically."
+                "bar_types from data config automatically (filtered by data_cls + bar_spec)."
             )
             return
 
-        source_bar_type_strs = list(self._config.bar_types)
-        self.log.info(f"Using {len(source_bar_type_strs)} bar types from config")
+        self.log.info(f"Using {len(self._config.bar_types)} bar types from config")
 
-        # Determine if aggregation is needed based on interval
-        from nautilus_quants.strategies.utils import create_aggregated_bar_type, interval_to_minutes
-        from nautilus_trader.model.enums import BarAggregation
-
-        interval = self._config.interval.lower()
-        target_minutes = interval_to_minutes(interval)
-
-        for bar_type_str in source_bar_type_strs:
-            source_bar_type = BarType.from_str(bar_type_str)
-
-            # Compute source interval in minutes for comparison
-            source_agg = source_bar_type.spec.aggregation
-            if isinstance(source_agg, int):
-                source_agg = BarAggregation(source_agg)
-            source_minutes = self._aggregation_to_minutes(
-                source_bar_type.spec.step, source_agg,
-            )
-
-            if source_minutes == target_minutes:
-                # Source already at target interval - subscribe directly.
-                # This preserves the original bar type (e.g. BinanceBar)
-                # so extra fields like quote_volume remain accessible.
-                self._bar_types.append(source_bar_type)
-                self.subscribe_bars(source_bar_type)
-                self.log.info(
-                    f"Subscribed to {source_bar_type} "
-                    f"(source matches target interval, no aggregation)"
-                )
-            else:
-                # Aggregation needed - create INTERNAL bar types
-                instrument_id = str(source_bar_type.instrument_id)
-                source_spec = (
-                    f"{source_bar_type.spec.step}-{source_agg.name}-EXTERNAL"
-                )
-
-                target_str, subscribe_str = create_aggregated_bar_type(
-                    instrument_id,
-                    self._config.interval,
-                    source_spec,
-                )
-
-                target_bar_type = BarType.from_str(target_str)
-                subscribe_bar_type = BarType.from_str(subscribe_str)
-
-                self._bar_types.append(target_bar_type)
-                self.subscribe_bars(subscribe_bar_type)
-                self.log.info(f"Subscribed to aggregated bars: {subscribe_str}")
+        # Subscribe directly to all injected bar types (no aggregation)
+        # This preserves BinanceBar extra fields (quote_volume, count, etc.)
+        for bar_type_str in self._config.bar_types:
+            bar_type = BarType.from_str(bar_type_str)
+            self._bar_types.append(bar_type)
+            self.subscribe_bars(bar_type)
+            self.log.info(f"Subscribed to {bar_type} (direct)")
 
         self.log.info("FactorEngineActor started successfully")
-
-    @staticmethod
-    def _aggregation_to_minutes(step: int, aggregation) -> int:
-        """Convert a BarSpec step + BarAggregation enum to total minutes."""
-        from nautilus_trader.model.enums import BarAggregation
-
-        if aggregation == BarAggregation.MINUTE:
-            return step
-        if aggregation == BarAggregation.HOUR:
-            return step * 60
-        if aggregation == BarAggregation.DAY:
-            return step * 1440
-        # For unsupported aggregations, return -1 to force aggregation path
-        return -1
 
     def on_stop(self) -> None:
         """Actions to perform on actor stop."""
@@ -264,20 +225,27 @@ class FactorEngineActor(Actor):
         bar : Bar
             The received bar data.
         """
-        # Only process target bar types (skip source bars when aggregating)
+        # Only process target bar types
         if bar.bar_type not in self._bar_types:
             return
 
         if self._engine is None or self._cs_engine is None:
             return
 
-        # Auto-detect extra bar fields on first bar
+        # Auto-detect extra bar fields on first BinanceBar
+        # Only trigger detection for BinanceBar instances to avoid
+        # standard Bar falsely marking detection as complete.
         if not self._extra_fields_detected:
-            self._extra_fields_detected = True
-            extra = _detect_extra_bar_fields(bar)
-            if extra:
-                self._engine.set_extra_fields(extra)
-                self.log.info(f"Auto-detected extra bar fields: {extra}")
+            try:
+                from nautilus_trader.adapters.binance.common.types import BinanceBar as _BinanceBar
+                if isinstance(bar, _BinanceBar):
+                    self._extra_fields_detected = True
+                    extra = _detect_extra_bar_fields(bar)
+                    if extra:
+                        self._engine.set_extra_fields(extra)
+                        self.log.info(f"Auto-detected extra bar fields: {extra}")
+            except ImportError:
+                self._extra_fields_detected = True
 
         instrument_id = str(bar.bar_type.instrument_id)
         ts = bar.ts_event

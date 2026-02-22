@@ -179,13 +179,14 @@ process:
 transform:
   output_format: parquet
   merge_files: true
-  catalog_path: "data/catalog"
+  catalog_path: "data/fmz_data/catalog"
   # Fee configuration for instruments
   maker_fee: "0.0002"    # Default 0.02%
   taker_fee: "0.0002"    # Default 0.04%
+  bar_class: "BinanceBar"  # Write BinanceBar (includes quote_volume) for factor engine
 
 paths:
-  raw_data: "data/raw"
-  processed_data: "data/processed"
-  catalog: "data/catalog"
+  raw_data: "data/fmz_data/raw"
+  processed_data: "data/fmz_data/processed"
+  catalog: "data/fmz_data/catalog"
   logs: "logs/data_pipeline"
