@@ -23,7 +23,7 @@ factors:
   # ========== 原始因子 (Phase 1: Time-Series) ==========
 
   # 成交量因子
-  volume:
+  quote_volume:
     expression: "quote_volume"
     description: "Quote volume (USDT turnover)"
 
