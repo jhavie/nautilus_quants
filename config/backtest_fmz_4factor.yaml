@@ -166,8 +166,8 @@ engine:
     bypass: true
 
   actors:
-    - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
-      config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
         factor_config_path: "config/factors_fmz_4factor.yaml"
         interval: "1m"  # Use source bars directly (1h EXTERNAL) - no aggregation needed

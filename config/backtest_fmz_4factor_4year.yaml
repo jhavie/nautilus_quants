@@ -23,7 +23,7 @@ venues:
     default_leverage: 1
 
 data:
-  - catalog_path: "data/fmz_data/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "1h"
     instrument_ids:
@@ -169,7 +169,7 @@ data:
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
     end_time: "2022-09-14"
-  - catalog_path: "data/fmz_data/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
     data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
     bar_spec: "1h"
     instrument_ids:
@@ -323,19 +323,19 @@ engine:
     bypass: true
 
   actors:
-    - actor_path: "nautilus_quants.factors.engine.actor:FactorEngineActor"
-      config_path: "nautilus_quants.factors.engine.actor:FactorEngineActorConfig"
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
         factor_config_path: "config/factors_fmz_4factor.yaml"
         data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
         bar_spec: "1h"
         signal_prefix: "factor"
-        max_history: 200
+        max_history: 0
         publish_signals: true
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
       config:
-        interval: "8h"
+        interval: "4h"
         venue_name: "BINANCE"
         currency: "USDT"
   strategies:
@@ -515,7 +515,7 @@ report:
       - html
       - png
   position_viz:
-    enabled: true
+    enabled: false
     title: "FMZ Strategy Position Timeline"
     output_subdir: "echarts"
     chart_height: 500

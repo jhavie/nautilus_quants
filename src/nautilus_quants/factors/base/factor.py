@@ -15,6 +15,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from nautilus_quants.factors.expression import EvaluationContext, Evaluator, parse_expression
+from nautilus_quants.factors.operators.math import MATH_OPERATORS
+from nautilus_quants.factors.operators.time_series import TIME_SERIES_OPERATORS
+
 if TYPE_CHECKING:
     from nautilus_quants.factors.types import FactorInput
 
@@ -69,33 +73,61 @@ class Factor(ABC):
         """
         pass
     
-    def update(self, data: FactorInput, var_cache: dict[str, Any] | None = None) -> float:
+    def update(self, data: FactorInput, var_cache: dict[str, Any] | None = None, extra_operators: dict[str, Any] | None = None) -> float:
         """
         Update factor with new data and return computed value.
-        
+
         This method handles warmup period tracking and calls compute().
-        
+
         Args:
             data: Factor input containing current and historical data
             var_cache: Pre-computed variable values from the engine.
-            
+            extra_operators: Incremental operator closures (forwarded to compute()).
+
         Returns:
             Computed factor value, or NaN if not warmed up
         """
         self._compute_count += 1
-        
-        # Check warmup
-        if not self._is_warmed_up:
-            if self._compute_count >= self.warmup_period:
-                self._is_warmed_up = True
-            else:
-                return float('nan')
-        
-        try:
-            return self.compute(data, var_cache=var_cache)
-        except TypeError:
-            # Backward compatibility: subclass hasn't adopted var_cache parameter
-            return self.compute(data)
+
+        if extra_operators is not None:
+            # ── Incremental mode ──────────────────────────────────────────────
+            # Always call compute() so incremental operators receive this bar's
+            # value even during Factor warmup.  Then apply Factor-level warmup
+            # gating to the *result*: boolean expressions (e.g. close > ts_max)
+            # evaluate to 0.0 rather than NaN when inputs are NaN, so operator-
+            # level NaN propagation alone is insufficient.
+            try:
+                raw = self.compute(data, var_cache=var_cache, extra_operators=extra_operators)
+            except TypeError:
+                try:
+                    raw = self.compute(data, var_cache=var_cache)
+                except TypeError:
+                    raw = self.compute(data)
+
+            if not self._is_warmed_up:
+                if self._compute_count >= self.warmup_period:
+                    self._is_warmed_up = True
+                else:
+                    return float('nan')  # Operators fed; result gated until warm
+            return raw
+
+        else:
+            # ── Batch mode ────────────────────────────────────────────────────
+            # Gate computation before calling compute(); DataSynchronizer
+            # accumulates history in the background regardless.
+            if not self._is_warmed_up:
+                if self._compute_count >= self.warmup_period:
+                    self._is_warmed_up = True
+                else:
+                    return float('nan')
+
+            try:
+                return self.compute(data, var_cache=var_cache, extra_operators=None)
+            except TypeError:
+                try:
+                    return self.compute(data, var_cache=var_cache)
+                except TypeError:
+                    return self.compute(data)
     
     @property
     def is_warmed_up(self) -> bool:
@@ -142,9 +174,6 @@ class ExpressionFactor(Factor):
         self.parameters = parameters or {}
         self.variables = variables or {}
         
-        # Lazy import to avoid circular dependency
-        from nautilus_quants.factors.expression import parse_expression
-        
         # Parse the expression
         self._ast = parse_expression(expression)
         
@@ -152,43 +181,71 @@ class ExpressionFactor(Factor):
         self._variable_asts: dict[str, Any] = {}
         for var_name, var_expr in self.variables.items():
             self._variable_asts[var_name] = parse_expression(var_expr)
+
+        # Pre-build batch operators (static, never changes)
+        self._batch_operators: dict[str, Any] = dict(MATH_OPERATORS)
+        self._batch_operators.update(TIME_SERIES_OPERATORS)
     
-    def compute(self, data: FactorInput, var_cache: dict[str, Any] | None = None) -> float:
+    def compute(
+        self,
+        data: FactorInput,
+        var_cache: dict[str, Any] | None = None,
+        extra_operators: dict[str, Any] | None = None,
+    ) -> float:
         """Compute factor value by evaluating the expression.
-        
+
         Args:
             data: Factor input containing current bar and history.
             var_cache: Pre-computed variable values from the engine.
                 When provided, skips redundant per-factor variable
                 evaluation — the main performance optimization.
+            extra_operators: When provided, replaces TIME_SERIES_OPERATORS
+                with the given callables and evaluates variables as scalars
+                (incremental mode).  Each callable in ``extra_operators``
+                must accept the same positional arguments as the
+                corresponding function in TIME_SERIES_OPERATORS but may
+                receive scalar inputs instead of numpy arrays.
         """
-        from nautilus_quants.factors.expression import EvaluationContext, Evaluator
-        from nautilus_quants.factors.operators.math import MATH_OPERATORS
-        from nautilus_quants.factors.operators.time_series import TIME_SERIES_OPERATORS
-        
-        # Build operator dict
-        operators: dict[str, Any] = {}
-        operators.update(MATH_OPERATORS)
-        operators.update(TIME_SERIES_OPERATORS)
-        
-        # Build variable dict from input data
-        variables: dict[str, Any] = {
-            "open": data.history.get("open", np.array([data.open])),
-            "high": data.history.get("high", np.array([data.high])),
-            "low": data.history.get("low", np.array([data.low])),
-            "close": data.history.get("close", np.array([data.close])),
-            "volume": data.history.get("volume", np.array([data.volume])),
-        }
-        # Inject extra bar fields (e.g. quote_volume, count) from history
-        for key, arr in data.history.items():
-            if key not in variables:
-                variables[key] = arr
+        # Build operator dict — incremental operators override batch ones
+        if extra_operators is not None:
+            operators: dict[str, Any] = dict(MATH_OPERATORS)
+            operators.update(extra_operators)
+        else:
+            operators = self._batch_operators  # reuse pre-built, no copy
+
+        # Build variable dict
+        if extra_operators is not None:
+            # ── Incremental / scalar mode ──────────────────────────────
+            # Variables are current-bar scalars; TS operators maintain
+            # their own O(1) state and do NOT need the full history array.
+            variables: dict[str, Any] = {
+                "open": data.open,
+                "high": data.high,
+                "low": data.low,
+                "close": data.close,
+                "volume": data.volume,
+            }
+            for key, arr in data.history.items():
+                if key not in variables:
+                    variables[key] = float(arr[-1]) if len(arr) > 0 else float("nan")
+        else:
+            # ── Batch / array mode (existing behaviour) ────────────────
+            variables = {
+                "open": data.history.get("open", np.array([data.open])),
+                "high": data.history.get("high", np.array([data.high])),
+                "low": data.history.get("low", np.array([data.low])),
+                "close": data.history.get("close", np.array([data.close])),
+                "volume": data.history.get("volume", np.array([data.volume])),
+            }
+            for key, arr in data.history.items():
+                if key not in variables:
+                    variables[key] = arr
 
         # Add parameters
         variables.update(self.parameters)
-        
-        # Inject pre-computed variable values from engine cache
-        if var_cache:
+
+        # Inject pre-computed variable values from engine cache (batch mode only)
+        if var_cache and extra_operators is None:
             variables.update(var_cache)
 
         # Create evaluation context
@@ -207,9 +264,37 @@ class ExpressionFactor(Factor):
 
         # Evaluate main expression
         result = evaluator.evaluate(self._ast)
-        
+
         # Ensure scalar output
         if isinstance(result, np.ndarray):
-            result = float(result[-1]) if len(result) > 0 else float('nan')
-        
+            result = float(result[-1]) if len(result) > 0 else float("nan")
+
         return float(result)
+
+    def update_with_evaluator(self, evaluator: Evaluator) -> float:
+        """快速路径：使用预构建 Evaluator 的增量 O(1) 评估。
+
+        调用前：调用方已将 OHLCV 及 variable 值更新至 evaluator.context.variables。
+        行为等价于 Factor.update(data, extra_operators=<non-None>)。
+        """
+        self._compute_count += 1
+
+        try:
+            result = evaluator.evaluate(self._ast)
+        except Exception:
+            if not self._is_warmed_up and self._compute_count >= self.warmup_period:
+                self._is_warmed_up = True
+            return float("nan")
+
+        if isinstance(result, np.ndarray):
+            result = float(result[-1]) if len(result) > 0 else float("nan")
+        else:
+            result = float(result)
+
+        if not self._is_warmed_up:
+            if self._compute_count >= self.warmup_period:
+                self._is_warmed_up = True
+            else:
+                return float("nan")
+
+        return result

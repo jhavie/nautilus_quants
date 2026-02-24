@@ -110,8 +110,8 @@ class TestInstrumentDataExtraFields:
         )
         data.update(bar)
 
-        assert data.extra_history["quote_volume"] == [5000.0]
-        assert data.extra_history["count"] == [42.0]
+        assert list(data.extra_history["quote_volume"]) == [5000.0]
+        assert list(data.extra_history["count"]) == [42.0]
 
     def test_extra_fields_get_arrays(self):
         """get_arrays should include extra field arrays."""
@@ -153,7 +153,7 @@ class TestInstrumentDataExtraFields:
         bar = MockBar("TEST", 100, 105, 95, 102, 1000, 1)
         data.update(bar)
 
-        assert data.extra_history["nonexistent_field"] == [0.0]
+        assert list(data.extra_history["nonexistent_field"]) == [0.0]
 
 
 class TestDataSynchronizer:

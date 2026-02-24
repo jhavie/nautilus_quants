@@ -11,7 +11,7 @@ Constitution Compliance:
     - FactorEngineConfig extends ActorConfig (Principle II)
 """
 
-from nautilus_quants.factors.engine.actor import (
+from nautilus_quants.actors.factor_engine import (
     FactorEngineActor,
     FactorEngineActorConfig,
 )

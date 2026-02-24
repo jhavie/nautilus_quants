@@ -20,6 +20,7 @@ from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
 
+from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.factors.config import load_factor_config
 from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
@@ -85,7 +86,7 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     bar_types: list[str] = []
 
 
-class FactorEngineActor(Actor):
+class FactorEngineActor(BarSubscriptionMixin, Actor):
     """
     Nautilus Actor that computes factors and publishes results.
 
@@ -105,7 +106,7 @@ class FactorEngineActor(Actor):
     Example
     -------
     ```python
-    from nautilus_quants.factors.engine import FactorEngineActor, FactorEngineActorConfig
+    from nautilus_quants.actors import FactorEngineActor, FactorEngineActorConfig
 
     config = FactorEngineActorConfig(
         factor_config_path="config/factors.yaml",
@@ -131,7 +132,6 @@ class FactorEngineActor(Actor):
         self._config: FactorEngineActorConfig = config
         self._engine: FactorEngine | None = None
         self._cs_engine: CsFactorEngine | None = None
-        self._bar_types: list[BarType] = []  # Target bar types to process
 
         # Synchronization state for cross-sectional factors
         self._ts_factor_values: dict[int, dict[str, dict[str, float]]] = defaultdict(
@@ -188,11 +188,7 @@ class FactorEngineActor(Actor):
 
         # Subscribe directly to all injected bar types (no aggregation)
         # This preserves BinanceBar extra fields (quote_volume, count, etc.)
-        for bar_type_str in self._config.bar_types:
-            bar_type = BarType.from_str(bar_type_str)
-            self._bar_types.append(bar_type)
-            self.subscribe_bars(bar_type)
-            self.log.info(f"Subscribed to {bar_type} (direct)")
+        self._subscribe_bar_types(self._config.bar_types)
 
         self.log.info("FactorEngineActor started successfully")
 
@@ -225,8 +221,8 @@ class FactorEngineActor(Actor):
         bar : Bar
             The received bar data.
         """
-        # Only process target bar types
-        if bar.bar_type not in self._bar_types:
+        instrument_id = self._resolve_bar(bar)
+        if instrument_id is None:
             return
 
         if self._engine is None or self._cs_engine is None:
@@ -247,7 +243,6 @@ class FactorEngineActor(Actor):
             except ImportError:
                 self._extra_fields_detected = True
 
-        instrument_id = str(bar.bar_type.instrument_id)
         ts = bar.ts_event
 
         # When timestamp changes, process the previous batch
@@ -261,9 +256,9 @@ class FactorEngineActor(Actor):
         # Compute time-series factors for this bar
         result = self._engine.on_bar(bar)
 
-        if result is not None:
+        if result:
             # Store time-series factor values
-            for factor_name, factor_values in result.factors.items():
+            for factor_name, factor_values in result.items():
                 for inst_id, value in factor_values.items():
                     self._ts_factor_values[ts][factor_name][inst_id] = value
 
@@ -373,19 +368,17 @@ class FactorEngineActor(Actor):
 
     def add_bar_type(self, bar_type: BarType) -> None:
         """
-        Add a bar type to subscribe to.
+        Add a bar type to subscribe to at runtime.
 
-        This should be called before on_start() or will subscribe immediately
-        if the actor is already running.
+        Must be called after ``on_start()`` has been invoked (i.e., after
+        ``_subscribe_bar_types`` has initialised ``_bar_type_to_inst_id``).
 
         Parameters
         ----------
         bar_type : BarType
             The bar type to subscribe to.
         """
-        if bar_type not in self._bar_types:
-            self._bar_types.append(bar_type)
-
+        if bar_type not in self._bar_type_to_inst_id:
+            self._bar_type_to_inst_id[bar_type] = str(bar_type.instrument_id)
             if self.is_running():
                 self.subscribe_bars(bar_type)
-                self.log.info(f"Subscribed to {bar_type}")

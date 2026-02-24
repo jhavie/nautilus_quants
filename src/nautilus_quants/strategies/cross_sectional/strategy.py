@@ -24,13 +24,14 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model.data import Bar, BarType, DataType
+from nautilus_trader.model.data import Bar, DataType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
+from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.cross_sectional.metadata import CrossSectionalMetadataProvider
 
@@ -83,7 +84,7 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
     monthly_position_update: bool = True
 
 
-class CrossSectionalFactorStrategy(Strategy):
+class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
     """
     Cross-sectional multi-factor selection strategy.
 
@@ -105,7 +106,6 @@ class CrossSectionalFactorStrategy(Strategy):
             InstrumentId.from_str(iid) for iid in config.instrument_ids
         ]
         self._instruments: dict[InstrumentId, Instrument] = {}
-        self._bar_types: list[BarType] = []
         self._n_instruments = len(config.instrument_ids)
 
         # State tracking
@@ -154,11 +154,7 @@ class CrossSectionalFactorStrategy(Strategy):
             self.stop()
             return
 
-        for bar_type_str in self.config.bar_types:
-            bar_type = BarType.from_str(bar_type_str)
-            self._bar_types.append(bar_type)
-            self.subscribe_bars(bar_type)
-            self.log.debug(f"Subscribed to bars: {bar_type}")
+        self._subscribe_bar_types(self.config.bar_types)
 
         self.subscribe_data(DataType(FactorValues))
         self.log.info("Subscribed to FactorValues Data")
@@ -195,11 +191,11 @@ class CrossSectionalFactorStrategy(Strategy):
 
     def on_bar(self, bar: Bar) -> None:
         """Handle bar updates - track current prices."""
-        if bar.bar_type not in self._bar_types:
+        instrument_id = self._resolve_bar(bar)
+        if instrument_id is None:
             return
 
         self._bar_count += 1
-        instrument_id = str(bar.bar_type.instrument_id)
         self._current_prices[instrument_id] = float(bar.close)
 
     def on_data(self, data) -> None:

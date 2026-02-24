@@ -104,6 +104,9 @@ class Evaluator(ASTVisitor):
     def __init__(self, context: EvaluationContext) -> None:
         """Initialize evaluator with context."""
         self.context = context
+        # Direct references to hot-path dicts (same objects, mutations are visible)
+        self._operators = context.operators
+        self._variables = context.variables
     
     def evaluate(self, node: ASTNode) -> float | np.ndarray:
         """
@@ -127,7 +130,12 @@ class Evaluator(ASTVisitor):
     
     def visit_variable(self, node: VariableNode) -> float | np.ndarray:
         """Evaluate variable reference."""
-        return self.context.get_variable(node.name)
+        v = self._variables.get(node.name)
+        if v is not None:
+            return v
+        if node.name in self._variables:
+            return v  # value itself is None (edge case)
+        raise EvaluationError(f"Unknown variable: '{node.name}'")
     
     def visit_binary_op(self, node: BinaryOpNode) -> float | np.ndarray:
         """Evaluate binary operation."""
@@ -219,19 +227,23 @@ class Evaluator(ASTVisitor):
     
     def visit_function_call(self, node: FunctionCallNode) -> float | np.ndarray:
         """Evaluate function call."""
-        # Get the operator function
-        func = self.context.get_operator(node.name)
-        
-        # Evaluate all arguments
-        args = [self.evaluate(arg) for arg in node.arguments]
-        
-        # Call the function
+        func = self._operators.get(node.name)
+        if func is None:
+            raise EvaluationError(f"Unknown operator: '{node.name}'")
+        a = node.arguments
         try:
-            return func(*args)
+            n = len(a)
+            if n == 1:
+                return func(self.evaluate(a[0]))
+            if n == 2:
+                return func(self.evaluate(a[0]), self.evaluate(a[1]))
+            if n == 3:
+                return func(self.evaluate(a[0]), self.evaluate(a[1]), self.evaluate(a[2]))
+            return func(*[self.evaluate(x) for x in a])
+        except EvaluationError:
+            raise
         except Exception as e:
-            raise EvaluationError(
-                f"Error calling operator '{node.name}': {e}"
-            ) from e
+            raise EvaluationError(f"Error calling operator '{node.name}': {e}") from e
     
     def _to_bool(self, value: Any) -> bool | np.ndarray:
         """Convert value to boolean."""

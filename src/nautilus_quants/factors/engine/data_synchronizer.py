@@ -9,7 +9,7 @@ for cross-sectional factor calculations.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -34,12 +34,20 @@ class InstrumentData:
     extra_fields: list[str] = field(default_factory=list)
     extra_history: dict[str, list[float]] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.open_history   = deque(maxlen=self.max_history)  # type: ignore[assignment]
+        self.high_history   = deque(maxlen=self.max_history)  # type: ignore[assignment]
+        self.low_history    = deque(maxlen=self.max_history)  # type: ignore[assignment]
+        self.close_history  = deque(maxlen=self.max_history)  # type: ignore[assignment]
+        self.volume_history = deque(maxlen=self.max_history)  # type: ignore[assignment]
+        self.timestamps     = deque(maxlen=self.max_history)  # type: ignore[assignment]
+
     def set_extra_fields(self, fields: list[str]) -> None:
         """Set extra bar fields for tracking (called once on first bar)."""
         self.extra_fields = fields
         for f in fields:
             if f not in self.extra_history:
-                self.extra_history[f] = []
+                self.extra_history[f] = deque(maxlen=self.max_history)  # type: ignore[assignment]
 
     def update(self, bar: Bar) -> None:
         """Update with new bar data."""
@@ -51,17 +59,6 @@ class InstrumentData:
         self.timestamps.append(bar.ts_event)
         for f in self.extra_fields:
             self.extra_history[f].append(float(getattr(bar, f, 0)))
-
-        # Trim to max history
-        if len(self.close_history) > self.max_history:
-            self.open_history = self.open_history[-self.max_history:]
-            self.high_history = self.high_history[-self.max_history:]
-            self.low_history = self.low_history[-self.max_history:]
-            self.close_history = self.close_history[-self.max_history:]
-            self.volume_history = self.volume_history[-self.max_history:]
-            self.timestamps = self.timestamps[-self.max_history:]
-            for f in self.extra_fields:
-                self.extra_history[f] = self.extra_history[f][-self.max_history:]
 
     def get_arrays(self) -> dict[str, np.ndarray]:
         """Get history as numpy arrays."""
