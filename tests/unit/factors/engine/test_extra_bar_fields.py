@@ -9,10 +9,6 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from nautilus_quants.factors.engine.data_synchronizer import (
-    DataSynchronizer,
-    InstrumentData,
-)
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
 
@@ -132,26 +128,6 @@ class TestFactorEngineExtraFields:
         engine = FactorEngine(max_history=100)
         engine.set_extra_fields(["quote_volume", "count"])
         return engine
-
-    def test_extra_fields_in_history(self):
-        """Extra fields should appear in instrument data when synchronizer is active (batch path)."""
-        engine = self._make_engine_with_extra_fields()
-
-        bar = MockBinanceBar(
-            "BTCUSDT", 50000, 51000, 49000, 50500, 100, 1,
-            quote_volume=5000.0, count=42,
-        )
-        # Directly update the synchronizer to test batch-path storage.
-        # (engine.on_bar only routes to synchronizer when _has_batch_factors is True)
-        engine.synchronizer.on_bar(bar)
-
-        data = engine.synchronizer.get_instrument_data("BTCUSDT")
-        assert data is not None
-        arrays = data.get_arrays()
-        assert "quote_volume" in arrays
-        assert "count" in arrays
-        assert float(arrays["quote_volume"][0]) == 5000.0
-        assert float(arrays["count"][0]) == 42.0
 
     def test_extra_fields_in_expression_evaluation(self):
         """Expression using extra field (e.g. ts_mean(quote_volume, 3)) should work."""

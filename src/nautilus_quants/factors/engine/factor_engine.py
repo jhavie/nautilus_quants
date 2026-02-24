@@ -17,7 +17,6 @@ import numpy as np
 
 from nautilus_quants.factors.base.factor import ExpressionFactor, Factor
 from nautilus_quants.factors.config import FactorConfig, load_factor_config
-from nautilus_quants.factors.engine.data_synchronizer import DataSynchronizer
 from nautilus_quants.factors.engine.dependency_resolver import DependencyResolver
 from nautilus_quants.factors.expression import EvaluationContext, Evaluator, parse_expression
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
@@ -35,13 +34,12 @@ class FactorEngine:
     """
     Core engine for factor computation.
     
-    Manages factor registration, data synchronization, and computation.
+    Manages factor registration and incremental O(1) computation per bar.
     Can be used standalone or integrated with Nautilus as an Actor.
-    
+
     Attributes:
         config: Factor configuration
         factors: Registered factor instances
-        synchronizer: Multi-instrument data synchronizer
     
     Example:
         ```python
@@ -72,7 +70,6 @@ class FactorEngine:
         self.max_history = max_history
         
         # Core components
-        self.synchronizer = DataSynchronizer(max_history=max_history)
         self.resolver = DependencyResolver()
 
         # Factor storage
@@ -96,9 +93,6 @@ class FactorEngine:
         self._incremental_states: dict[str, dict[str, Any]] = {}
         # Extra bar fields (e.g. BinanceBar.quote_volume) to extract as scalars
         self._extra_fields: list[str] = []
-
-        # Whether any non-ExpressionFactor has been registered (batch path needed)
-        self._has_batch_factors: bool = False
 
         # Reuse single counter list across bar evaluations (avoids list allocation per bar)
         self._call_counter: list[int] = [0]
@@ -148,8 +142,6 @@ class FactorEngine:
         Args:
             factor: Factor to register
         """
-        if not isinstance(factor, ExpressionFactor):
-            self._has_batch_factors = True
         self._factors[factor.name] = factor
     
     def register_expression_factor(
@@ -344,9 +336,6 @@ class FactorEngine:
         """
         Process a bar and compute factor values.
 
-        Uses the incremental O(1) path for ExpressionFactor instances,
-        falling back to the batch path for other Factor subclasses.
-
         Args:
             bar: The bar to process
 
@@ -357,11 +346,6 @@ class FactorEngine:
 
         instrument_id = str(bar.bar_type.instrument_id)
 
-        # Only update synchronizer when batch-path (non-ExpressionFactor) factors exist.
-        # Pure ExpressionFactor setups skip this entirely to avoid O(n) list appends.
-        if self._has_batch_factors:
-            self.synchronizer.on_bar(bar)
-
         # Per-instrument incremental state dict (lazily created)
         inst_states = self._incremental_states.setdefault(instrument_id, {})
 
@@ -369,28 +353,6 @@ class FactorEngine:
         call_counter = self._call_counter
         # Per-instrument eval cache (populated lazily on first bar per instrument/factor)
         inst_evals = self._eval_cache.setdefault(instrument_id, {})
-
-        # Lazy batch FactorInput (only built if a non-ExpressionFactor factor is present)
-        _factor_input_batch: FactorInput | None = None
-
-        def _get_batch_input() -> FactorInput | None:
-            nonlocal _factor_input_batch
-            if _factor_input_batch is None:
-                inst_data = self.synchronizer.get_instrument_data(instrument_id)
-                if inst_data is None:
-                    return None
-                arrays = inst_data.get_arrays()
-                _factor_input_batch = FactorInput(
-                    instrument_id=bar.bar_type.instrument_id,
-                    timestamp_ns=bar.ts_event,
-                    open=float(bar.open),
-                    high=float(bar.high),
-                    low=float(bar.low),
-                    close=float(bar.close),
-                    volume=float(bar.volume),
-                    history=arrays,
-                )
-            return _factor_input_batch
 
         # ── Compute all factors ────────────────────────────────────────────
         factor_results: dict[str, dict[str, float]] = {}
@@ -446,13 +408,7 @@ class FactorEngine:
                     # Fast path: skip compute() init overhead
                     value = factor.update_with_evaluator(evaluator)
                 else:
-                    # ── Batch path (non-ExpressionFactor fallback) ─────────
-                    batch_input = _get_batch_input()
-                    if batch_input is None:
-                        value = float("nan")
-                    else:
-                        var_cache = self._compute_variable_cache(batch_input)
-                        value = factor.update(batch_input, var_cache=var_cache)
+                    continue  # non-ExpressionFactor not supported in incremental mode
 
                 if factor_name not in factor_results:
                     factor_results[factor_name] = {}
@@ -590,11 +546,9 @@ class FactorEngine:
     def set_extra_fields(self, fields: list[str]) -> None:
         """Set extra bar fields to track (e.g. BinanceBar extended fields)."""
         self._extra_fields = list(fields)
-        self.synchronizer.set_extra_fields(fields)
 
     def reset(self) -> None:
         """Reset engine state."""
-        self.synchronizer.reset()
         for factor in self._factors.values():
             factor.reset()
         self._compute_times.clear()

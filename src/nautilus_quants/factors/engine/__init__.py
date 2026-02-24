@@ -16,10 +16,6 @@ from nautilus_quants.actors.factor_engine import (
     FactorEngineActorConfig,
 )
 from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
-from nautilus_quants.factors.engine.data_synchronizer import (
-    DataSynchronizer,
-    InstrumentData,
-)
 from nautilus_quants.factors.engine.dependency_resolver import (
     CircularDependencyError,
     DependencyError,
@@ -34,8 +30,6 @@ __all__ = [
     # Core engines (standalone usage)
     "FactorEngine",
     "CsFactorEngine",
-    "DataSynchronizer",
-    "InstrumentData",
     "DependencyResolver",
     "DependencyError",
     "CircularDependencyError",
