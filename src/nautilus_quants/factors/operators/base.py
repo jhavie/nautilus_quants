@@ -123,6 +123,20 @@ class TimeSeriesOperator(Operator):
         """
         pass
 
+    def make_incremental(self, window: int) -> Any | None:
+        """Return O(1) incremental state object for this operator, or None.
+
+        If non-None, the returned object must have a ``push()`` method:
+        - Single-data operators (min_args == 2): push(float) -> float
+        - Two-data operators (min_args >= 3): push(float, float) -> float
+
+        The default implementation returns None, causing callers to fall back
+        to a deque-backed sliding-window batch computation.
+
+        Override in subclasses that provide an efficient O(1) implementation.
+        """
+        return None
+
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
         """Vectorized computation over full time-series.
 

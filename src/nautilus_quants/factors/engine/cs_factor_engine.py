@@ -211,7 +211,7 @@ class CsFactorEngine:
         expression: str,
         factor_values: dict[str, dict[str, float]],
     ) -> dict[str, float]:
-        """Evaluate weighted sum expression."""
+        """Evaluate weighted sum expression using numpy vectorization."""
         # Pattern: coefficient * factor_name
         pattern = r'([+-]?\s*[\d.]+)\s*\*\s*(\w+)'
         matches = re.findall(pattern, expression)
@@ -219,27 +219,33 @@ class CsFactorEngine:
         if not matches:
             return {}
 
-        # Get all instrument IDs
+        # Collect all instrument IDs in deterministic order
         all_instruments: set[str] = set()
         for _, factor_name in matches:
             if factor_name in factor_values:
                 all_instruments.update(factor_values[factor_name].keys())
 
-        result: dict[str, float] = {}
-        for inst_id in all_instruments:
-            total = 0.0
-            valid = True
-            for weight_str, factor_name in matches:
-                weight = float(weight_str.replace(" ", ""))
-                values = factor_values.get(factor_name, {})
-                value = values.get(inst_id, float('nan'))
-                if np.isnan(value):
-                    valid = False
-                    break
-                total += weight * value
-            result[inst_id] = total if valid else float('nan')
+        if not all_instruments:
+            return {}
 
-        return result
+        instruments = sorted(all_instruments)
+        n = len(instruments)
+        m = len(matches)
+
+        # Build (n, m) factor matrix and (m,) weight vector
+        factor_matrix = np.empty((n, m), dtype=np.float64)
+        weights = np.empty(m, dtype=np.float64)
+
+        for j, (weight_str, factor_name) in enumerate(matches):
+            weights[j] = float(weight_str.replace(" ", ""))
+            vals = factor_values.get(factor_name, {})
+            for i, inst_id in enumerate(instruments):
+                factor_matrix[i, j] = vals.get(inst_id, float('nan'))
+
+        # Single matrix-vector multiply; NaN propagates naturally
+        composite: np.ndarray = factor_matrix @ weights  # shape (n,)
+
+        return dict(zip(instruments, composite.tolist()))
 
     def _eval_function(
         self,

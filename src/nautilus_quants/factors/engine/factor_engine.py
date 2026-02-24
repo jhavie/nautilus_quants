@@ -10,18 +10,21 @@ computes factor values, and publishes results via MessageBus.
 from __future__ import annotations
 
 import time
+from collections import deque as _deque
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from nautilus_quants.factors.base.factor import ExpressionFactor, Factor
 from nautilus_quants.factors.config import FactorConfig, load_factor_config
-from nautilus_quants.factors.engine.data_synchronizer import DataSynchronizer
 from nautilus_quants.factors.engine.dependency_resolver import DependencyResolver
 from nautilus_quants.factors.expression import EvaluationContext, Evaluator, parse_expression
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
-from nautilus_quants.factors.operators.time_series import TIME_SERIES_OPERATORS
-from nautilus_quants.factors.types import FactorInput, FactorValues
+from nautilus_quants.factors.operators.time_series import (
+    TIME_SERIES_OPERATORS,
+    TS_OPERATOR_INSTANCES,
+)
+from nautilus_quants.factors.types import FactorInput
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
@@ -31,13 +34,12 @@ class FactorEngine:
     """
     Core engine for factor computation.
     
-    Manages factor registration, data synchronization, and computation.
+    Manages factor registration and incremental O(1) computation per bar.
     Can be used standalone or integrated with Nautilus as an Actor.
-    
+
     Attributes:
         config: Factor configuration
         factors: Registered factor instances
-        synchronizer: Multi-instrument data synchronizer
     
     Example:
         ```python
@@ -68,25 +70,35 @@ class FactorEngine:
         self.max_history = max_history
         
         # Core components
-        self.synchronizer = DataSynchronizer(max_history=max_history)
         self.resolver = DependencyResolver()
-        
+
         # Factor storage
         self._factors: dict[str, Factor] = {}
         self._variables: dict[str, str] = {}
         self._variable_asts: dict[str, Any] = {}
         self._parameters: dict[str, Any] = {}
-        
+
         # Performance tracking
         self._compute_times: list[float] = []
         self._total_computes: int = 0
         self._warning_threshold_ms: float = 0.5
         self._enable_timing: bool = True
-        
+
         # Build operators dict
         self._operators: dict[str, Any] = {}
         self._operators.update(MATH_OPERATORS)
         self._operators.update(TIME_SERIES_OPERATORS)
+
+        # Incremental operator state: instrument_id -> {call_site_key -> Incremental* instance}
+        self._incremental_states: dict[str, dict[str, Any]] = {}
+        # Extra bar fields (e.g. BinanceBar.quote_volume) to extract as scalars
+        self._extra_fields: list[str] = []
+
+        # Reuse single counter list across bar evaluations (avoids list allocation per bar)
+        self._call_counter: list[int] = [0]
+        # Per-instrument, per-factor cached Evaluator + ctx_vars dict
+        # instrument_id -> factor_name -> (Evaluator, ctx_vars_dict)
+        self._eval_cache: dict[str, dict[str, tuple]] = {}
         
         # Load config if provided
         if config:
@@ -126,7 +138,7 @@ class FactorEngine:
     def register_factor(self, factor: Factor) -> None:
         """
         Register a factor instance.
-        
+
         Args:
             factor: Factor to register
         """
@@ -202,9 +214,7 @@ class FactorEngine:
         """
         if not self._variable_asts:
             return {}
-        
-        from nautilus_quants.factors.expression import EvaluationContext, Evaluator
-        
+
         # Build base variables from input data
         variables: dict[str, Any] = {
             "open": factor_input.history.get("open", np.array([factor_input.open])),
@@ -233,70 +243,186 @@ class FactorEngine:
             cache[var_name] = var_value
         
         return cache
-    
-    def on_bar(self, bar: Bar) -> FactorValues | None:
+
+    def _make_inc_operators(
+        self,
+        inst_states: dict[str, Any],
+        factor_name: str,
+        call_counter: list[int],
+    ) -> dict[str, Any]:
+        """Build operator closures for incremental factor evaluation.
+
+        For each TS operator registered in TS_OPERATOR_INSTANCES, dispatches to
+        one of four closure factories based on arity and incremental availability:
+
+        - Single-data + make_incremental() → O(1) push path
+        - Single-data + no make_incremental() → deque-backed O(window) fallback
+        - Two-data + make_incremental() → O(1) push(x, y) path
+        - Two-data + no make_incremental() → deque-backed O(window) fallback
+
+        call_counter must be reset to 0 before each factor evaluation so that
+        the n-th operator call within a factor always maps to the same key.
+
+        New TS operators gain incremental support automatically by overriding
+        make_incremental() in their operator class; no changes here are needed.
+        """
+
+        def _single_inc(op: Any, name: str) -> Any:
+            def closure(data: Any, window: Any) -> float:
+                call_counter[0] += 1
+                w = int(window)
+                key = f"{factor_name}/{name}_{w}_{call_counter[0]}"
+                if key not in inst_states:
+                    inst_states[key] = op.make_incremental(w)
+                return inst_states[key].push(float(data))
+            return closure
+
+        def _single_deque(batch_fn: Any, name: str) -> Any:
+            def closure(data: Any, window: Any) -> float:
+                call_counter[0] += 1
+                w = int(window)
+                key = f"{factor_name}/{name}_{w}_{call_counter[0]}"
+                if key not in inst_states:
+                    inst_states[key] = _deque(maxlen=w)
+                inst_states[key].append(float(data))
+                if len(inst_states[key]) < w:
+                    return float("nan")
+                return float(batch_fn(np.array(inst_states[key]), w))
+            return closure
+
+        def _two_data_inc(op: Any, name: str) -> Any:
+            def closure(data1: Any, data2: Any, window: Any) -> float:
+                call_counter[0] += 1
+                w = int(window)
+                key = f"{factor_name}/{name}_{w}_{call_counter[0]}"
+                if key not in inst_states:
+                    inst_states[key] = op.make_incremental(w)
+                return inst_states[key].push(float(data1), float(data2))
+            return closure
+
+        def _two_data_deque(batch_fn: Any, name: str) -> Any:
+            def closure(data1: Any, data2: Any, window: Any) -> float:
+                call_counter[0] += 1
+                w = int(window)
+                k1 = f"{factor_name}/{name}_d0_{w}_{call_counter[0]}"
+                k2 = f"{factor_name}/{name}_d1_{w}_{call_counter[0]}"
+                if k1 not in inst_states:
+                    inst_states[k1] = _deque(maxlen=w)
+                    inst_states[k2] = _deque(maxlen=w)
+                inst_states[k1].append(float(data1))
+                inst_states[k2].append(float(data2))
+                if len(inst_states[k1]) < w:
+                    return float("nan")
+                return float(batch_fn(np.array(inst_states[k1]), np.array(inst_states[k2]), w))
+            return closure
+
+        ops: dict[str, Any] = {}
+        for op_name, op_instance in TS_OPERATOR_INSTANCES.items():
+            is_two_data = op_instance.min_args >= 3
+            has_incremental = op_instance.make_incremental(1) is not None
+            if is_two_data:
+                if has_incremental:
+                    ops[op_name] = _two_data_inc(op_instance, op_name)
+                else:
+                    ops[op_name] = _two_data_deque(TIME_SERIES_OPERATORS[op_name], op_name)
+            else:
+                if has_incremental:
+                    ops[op_name] = _single_inc(op_instance, op_name)
+                else:
+                    ops[op_name] = _single_deque(TIME_SERIES_OPERATORS[op_name], op_name)
+        return ops
+
+    def on_bar(self, bar: Bar) -> dict[str, dict[str, float]]:
         """
         Process a bar and compute factor values.
-        
+
         Args:
             bar: The bar to process
-            
+
         Returns:
-            FactorValues if computation succeeded, None otherwise
+            dict of {factor_name: {instrument_id: value}} for all computed factors.
         """
         start_time = time.perf_counter() if self._enable_timing else 0
-        
-        # Update synchronizer
+
         instrument_id = str(bar.bar_type.instrument_id)
-        self.synchronizer.on_bar(bar)
-        
-        # Get instrument data
-        inst_data = self.synchronizer.get_instrument_data(instrument_id)
-        if inst_data is None:
-            return None
-        
-        # Build factor input
-        arrays = inst_data.get_arrays()
-        factor_input = FactorInput(
-            instrument_id=bar.bar_type.instrument_id,
-            timestamp_ns=bar.ts_event,
-            open=float(bar.open),
-            high=float(bar.high),
-            low=float(bar.low),
-            close=float(bar.close),
-            volume=float(bar.volume),
-            history=arrays,
-        )
-        
-        # Compute variable cache once for this (instrument, bar)
-        var_cache = self._compute_variable_cache(factor_input)
-        
-        # Compute all factors
+
+        # Per-instrument incremental state dict (lazily created)
+        inst_states = self._incremental_states.setdefault(instrument_id, {})
+
+        # Reuse counter list to avoid per-bar allocation
+        call_counter = self._call_counter
+        # Per-instrument eval cache (populated lazily on first bar per instrument/factor)
+        inst_evals = self._eval_cache.setdefault(instrument_id, {})
+
+        # ── Compute all factors ────────────────────────────────────────────
         factor_results: dict[str, dict[str, float]] = {}
-        
+
+        # Pre-extract OHLCV + extra_fields once per bar (all factors share)
+        _bar_open   = float(bar.open)
+        _bar_high   = float(bar.high)
+        _bar_low    = float(bar.low)
+        _bar_close  = float(bar.close)
+        _bar_volume = float(bar.volume)
+        _bar_extra  = {ef: float(getattr(bar, ef, 0.0)) for ef in self._extra_fields}
+
         for factor_name, factor in self._factors.items():
             try:
-                value = factor.update(factor_input, var_cache=var_cache)
+                if isinstance(factor, ExpressionFactor):
+                    # ── Incremental O(1) path (cached Evaluator) ───────────
+                    call_counter[0] = 0
+
+                    if factor_name not in inst_evals:
+                        # First bar for this (instrument, factor): build and cache evaluator
+                        inc_ops = self._make_inc_operators(inst_states, factor_name, call_counter)
+                        merged_ops: dict[str, Any] = dict(MATH_OPERATORS)
+                        merged_ops.update(inc_ops)
+                        ctx_vars: dict[str, Any] = {
+                            "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0, "volume": 0.0,
+                        }
+                        for ef in self._extra_fields:
+                            ctx_vars[ef] = 0.0
+                        ctx_vars.update(self._parameters)
+                        context = EvaluationContext(
+                            variables=ctx_vars,
+                            operators=merged_ops,
+                            parameters=self._parameters,
+                        )
+                        evaluator = Evaluator(context)
+                        inst_evals[factor_name] = (evaluator, ctx_vars)
+
+                    evaluator, ctx_vars = inst_evals[factor_name]
+
+                    # Update OHLCV scalars in-place using pre-extracted values
+                    ctx_vars["open"]   = _bar_open
+                    ctx_vars["high"]   = _bar_high
+                    ctx_vars["low"]    = _bar_low
+                    ctx_vars["close"]  = _bar_close
+                    ctx_vars["volume"] = _bar_volume
+                    if _bar_extra:
+                        ctx_vars.update(_bar_extra)
+
+                    # Evaluate engine-level variable expressions in incremental mode
+                    for var_name, var_ast in factor._variable_asts.items():
+                        ctx_vars[var_name] = evaluator.evaluate(var_ast)
+
+                    # Fast path: skip compute() init overhead
+                    value = factor.update_with_evaluator(evaluator)
+                else:
+                    continue  # non-ExpressionFactor not supported in incremental mode
+
                 if factor_name not in factor_results:
                     factor_results[factor_name] = {}
                 factor_results[factor_name][instrument_id] = value
-            except Exception as e:
-                # Log error but continue with other factors
-                factor_results.setdefault(factor_name, {})[instrument_id] = float('nan')
-        
+            except Exception:
+                factor_results.setdefault(factor_name, {})[instrument_id] = float("nan")
+
         # Track timing
         if self._enable_timing:
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             self._compute_times.append(elapsed_ms)
             self._total_computes += 1
-            
-            if elapsed_ms > self._warning_threshold_ms:
-                pass  # Would log warning in production
-        
-        return FactorValues.create(
-            ts_event=bar.ts_event,
-            factors=factor_results,
-        )
+
+        return factor_results
     
     def compute_factors(
         self,
@@ -419,12 +545,14 @@ class FactorEngine:
     
     def set_extra_fields(self, fields: list[str]) -> None:
         """Set extra bar fields to track (e.g. BinanceBar extended fields)."""
-        self.synchronizer.set_extra_fields(fields)
+        self._extra_fields = list(fields)
 
     def reset(self) -> None:
         """Reset engine state."""
-        self.synchronizer.reset()
         for factor in self._factors.values():
             factor.reset()
         self._compute_times.clear()
         self._total_computes = 0
+        self._incremental_states.clear()
+        self._eval_cache.clear()
+        self._call_counter[0] = 0

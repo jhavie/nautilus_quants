@@ -35,7 +35,6 @@ from nautilus_quants.factors.config import (
     load_factor_config,
 )
 from nautilus_quants.factors.engine import (
-    DataSynchronizer,
     DependencyResolver,
     FactorEngine,
     FactorEngineActor,
@@ -63,6 +62,5 @@ __all__ = [
     "FactorEngineActorConfig",
     # Engine (standalone)
     "FactorEngine",
-    "DataSynchronizer",
     "DependencyResolver",
 ]
