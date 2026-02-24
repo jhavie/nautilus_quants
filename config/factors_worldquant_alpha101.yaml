@@ -1,0 +1,29 @@
+# WorldQuant Alpha101 Factor Configuration
+#
+# Alpha101: Body-to-Range Ratio
+#   (close - open) / ((high - low) + 0.001)
+#
+# 解读:
+#   - 收益体（close - open）相对于价格区间（high - low）的比率
+#   - 正值：收盘价高于开盘价（看多信号）
+#   - 负值：收盘价低于开盘价（看空信号）
+#   - +0.001 防止分母为零（如十字星形态）
+
+metadata:
+  name: "worldquant_alpha101"
+  version: "1.0.0"
+  description: "WorldQuant Alpha101: Body-to-range ratio - candle body relative to price range"
+
+factors:
+  alpha_101_raw:
+    expression: "- (close - open) / ((high - low) + 0.001)"
+    description: "Alpha101 raw: 收益体相对价格区间（负值），供 rank() 使用"
+    category: "worldquant"
+  alpha_101:
+    expression: "cs_rank(alpha_101_raw)"
+    description: "Alpha101: 收益体比率的截面百分位排名，正值为看多信号"
+    category: "worldquant"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0
