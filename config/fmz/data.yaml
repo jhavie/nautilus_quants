@@ -183,10 +183,12 @@ transform:
   # Fee configuration for instruments
   maker_fee: "0.0002"    # Default 0.02%
   taker_fee: "0.0002"    # Default 0.04%
-  bar_class: "BinanceBar"  # Write BinanceBar (includes quote_volume) for factor engine
+  margin_init: "0.05"    # Initial margin rate (5%)
+  margin_maint: "0.025"  # Maintenance margin rate (2.5%)
+  bar_class: "Bar"  # Write BinanceBar (includes quote_volume) for factor engine
 
 paths:
-  raw_data: "data/fmz_data/raw"
-  processed_data: "data/fmz_data/processed"
-  catalog: "data/fmz_data/catalog"
+  raw_data: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/raw"
+  processed_data: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/processed"
+  catalog: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/catalog"
   logs: "logs/data_pipeline"

@@ -1,17 +1,17 @@
-# Alpha Factor Analysis Configuration — Mean Convergence Factors
-# Reference: https://mp.weixin.qq.com/s/qq_gVUSgVYA0Siil2SxmtQ
+# Alpha Factor Analysis Configuration
+# Evaluates factor quality using alphalens IC/ICIR analysis
 #
 # Usage:
-#   python -m nautilus_quants.alpha analyze config/alpha_convergence.yaml
+#   python -m nautilus_quants.alpha analyze config/alpha_fmz_4factor.yaml
 
-# Data source (same catalog as existing FMZ analysis)
-catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data_4h/catalog"
-bar_spec: "4h"
+# Data source
+catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-012-fmz-strategy/data/catalog"
+bar_spec: "1h"
 
 # Factor definition
-factor_config_path: "config/factors_convergence.yaml"
+factor_config_path: "config/fmz/factors.yaml"
 
-# Instrument universe (139 coins, same as alpha_fmz_4factor.yaml)
+# Instrument universe
 instrument_ids:
   - "1000LUNCUSDT.BINANCE"
   - "1000SHIBUSDT.BINANCE"
@@ -154,45 +154,44 @@ instrument_ids:
   - "ZILUSDT.BINANCE"
   - "ZRXUSDT.BINANCE"
 
-# Factors to analyze (article factors + composite)
+# Analysis scope (empty = all factors)
 factors:
-  - pcf
-  - vcf
-  - acf
-  - trcf
-  - composite
-  # - composite  # Alias of pvcf, keep disabled to avoid duplicate analysis
+  - volume
+  - momentum_3h
+  - volatility
+  - corr
+  # - composite
 
-# Alphalens parameters
-periods: [1, 3, 6, 12, 18]   # forward returns: 1h, 4h, 8h, 24h, 48h, 72h
+# alphalens parameters
+periods: [1, 4, 8, 24, 48, 72]   # forward returns: 1h, 4h, 8h, 24h
 quantiles: 5
 max_loss: 0.3
 filter_zscore: 20.0
 
-# Charts per factor
+# Charts per factor (all alphalens capabilities)
 charts:
   # Returns analysis
-  - quantile_returns_bar
-  - quantile_returns_violin
-  - cumulative_returns
-  # - cumulative_returns_long_short
-  - quantile_spread
-  # - returns_table
+  - quantile_returns_bar         # Mean returns per quantile (bar chart)
+  - quantile_returns_violin      # Return distribution per quantile (violin + box)
+  - cumulative_returns           # Cumulative returns by quantile
+  # - cumulative_returns_long_short # Long-short portfolio cumulative returns
+  - quantile_spread              # Top-bottom quantile return spread over time
+  # - returns_table                # Alpha/Beta summary table
   # IC analysis
-  - ic_time_series
-  # - ic_histogram
-  # - ic_qq
-  - monthly_ic_heatmap
+  - ic_time_series               # IC over time with moving average
+  # - ic_histogram                 # IC distribution histogram
+  # - ic_qq                        # IC Q-Q plot vs normal distribution
+  - monthly_ic_heatmap           # Monthly IC heatmap (year x month)
   # Turnover analysis
-  - turnover
-  # - turnover_table
-  # - factor_rank_autocorrelation
+  - turnover                     # Top/bottom quantile turnover over time
+  # - turnover_table               # Turnover summary table
+  # - factor_rank_autocorrelation  # Factor rank autocorrelation over time
   # Event study & distribution
-  # - event_study
-  # - events_distribution
-  # - quantile_statistics_table
+  # - event_study                  # Average cumulative return around signals
+  # - events_distribution          # Factor signal distribution over time
+  # - quantile_statistics_table    # Factor value statistics per quantile
 
 # Output
-output_dir: "logs/alpha_convergence"
+output_dir: "logs/alpha_analysis"
 output_format:
   - png

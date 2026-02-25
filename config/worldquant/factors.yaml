@@ -1,0 +1,36 @@
+# WorldQuant Alpha101 Factor Configuration
+#
+# Alpha101: Body-to-Range Ratio
+#   (close - open) / ((high - low) + 0.001)
+#
+# 解读:
+#   - 收益体（close - open）相对于价格区间（high - low）的比率
+#   - 正值：收盘价高于开盘价（看多信号）
+#   - 负值：收盘价低于开盘价（看空信号）
+#   - +0.001 防止分母为零（如十字星形态）
+
+metadata:
+  name: "worldquant_alpha101"
+  version: "1.0.0"
+  description: "WorldQuant Alpha101: Body-to-range ratio - candle body relative to price range"
+variables:
+  alpha_101_raw: "-(close - open) / ((high - low) + 0.001)"
+  # 4h等价：用1h数据合成真实4h K线的body-to-range
+  #   分子: ts_sum(close-open, 4) = 4根1h K线的净涨跌之和 ≈ 4h K线的 close-open
+  #   分母: ts_max(high, 4) - ts_min(low, 4) = 4h内最高-最低 ≈ 4h K线的 high-low
+  body_1h: "close - open"
+  alpha_101_4h_raw: "-ts_sum(body_1h, 4) / (ts_max(high, 4) - ts_min(low, 4) + 0.001)"
+
+factors:
+  alpha_101:
+    expression: "alpha_101_raw"
+    description: "Alpha101: 1h K线收益体比率，正值为看多信号（均值回归，已取负）"
+    category: "worldquant"
+  alpha_101_4h:
+    expression: "alpha_101_4h_raw"
+    description: "Alpha101 4h等价: 用1h数据合成4h K线body-to-range，正值为看多信号（均值回归，已取负）"
+    category: "worldquant"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

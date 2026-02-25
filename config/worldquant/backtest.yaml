@@ -27,7 +27,7 @@ venues:
 
 data:
   # Standard Bar (Nautilus native, for Instrument registration and price data)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data_2023_2025/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "1h"
     instrument_ids:
@@ -171,10 +171,10 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2023-01-01"
-    end_time: "2023-12-31"
+    start_time: "2022-01-01"
+    end_time: "2022-09-14"
   # BinanceBar (provides extra fields like quote_volume to FactorEngineActor)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data_2023_2025/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
     data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
     bar_spec: "1h"
     instrument_ids:
@@ -318,8 +318,8 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2023-01-01"
-    end_time: "2023-12-31"
+    start_time: "2022-01-01"
+    end_time: "2022-09-14"
 
 engine:
   trader_id: "BACKTESTER-WQ-ALPHA101-001"
@@ -328,11 +328,21 @@ engine:
   risk_engine:
     bypass: true
 
+  controller:
+    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
+    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    config:
+      interval: "1h"
+      venue_name: "BINANCE"
+      currency: "USDT"
+      min_equity_ratio: 0.01
+      guarded_strategy_ids: []    # empty = stop all strategies
+
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/factors_worldquant_alpha101.yaml"
+        factor_config_path: "config/fmz/factors.yaml"
         data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
         bar_spec: "1h"
         signal_prefix: "factor"
@@ -490,13 +500,13 @@ engine:
           - "ZENUSDT.BINANCE"
           - "ZILUSDT.BINANCE"
           - "ZRXUSDT.BINANCE"
-        factor_name: "alpha_101"
+        factor_name: "composite_neg"
         delay: 0
         decay: 3
         neutralization: "MARKET"
         truncation: 0
-        rebalance_period: 24
-        capital: 100000.0
+        rebalance_period: 4
+        capital: 10000.0
         enable_long: true
         enable_short: true
 

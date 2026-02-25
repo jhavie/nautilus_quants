@@ -351,7 +351,7 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         Called after neutralize+scale so history contains normalized vectors.
 
         decay=0: return current alpha unchanged.
-        decay=N: weighted average over last N+1 periods.
+        decay=N: weighted average over last N periods.
                  Weights: oldest=1, ..., newest=N (most recent is N).
 
         History stored in chronological order: [oldest, ..., newest].
@@ -361,8 +361,8 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
 
         # Append to history (chronological: oldest first)
         self._alpha_history.append(alpha)
-        # Keep only decay+1 periods
-        if len(self._alpha_history) > self.config.decay + 1:
+        # Keep only decay periods (BRAIN: Decay_linear(x,N) uses exactly N periods)
+        if len(self._alpha_history) > self.config.decay:
             self._alpha_history.pop(0)
 
         n = len(self._alpha_history)

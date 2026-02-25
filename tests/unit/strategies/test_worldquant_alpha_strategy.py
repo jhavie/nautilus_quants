@@ -11,6 +11,7 @@ import math
 
 import pytest
 
+from nautilus_quants.factors.operators.cross_sectional import CsRank
 from nautilus_quants.strategies.worldquant.strategy import (
     WorldQuantAlphaConfig,
     WorldQuantAlphaStrategy,
@@ -304,8 +305,8 @@ class TestApplyDecay:
         strategy = WorldQuantAlphaStrategy(config)
         for _ in range(10):
             strategy._apply_decay({"A": 1.0})
-        # Window should not exceed decay+1 = 4
-        assert len(strategy._alpha_history) <= 4
+        # Window should not exceed decay = 3 (BRAIN: N periods, not N+1)
+        assert len(strategy._alpha_history) <= 3
 
     def test_decay_most_recent_has_highest_weight(self) -> None:
         """More recent values should have higher weight."""
@@ -665,3 +666,246 @@ class TestMetadataRendererIntermediates:
         assert result["current_neutralized"] == -0.1
         assert result["current_scaled"] == 0.02
         assert result["current_decayed"] == 0.04
+
+
+def _make_strategy(
+    neutralization: str = "MARKET",
+    decay: int = 0,
+    truncation: float = 0.0,
+    delay: int = 0,
+) -> WorldQuantAlphaStrategy:
+    """Helper: create a strategy with given pipeline settings."""
+    config = WorldQuantAlphaConfig(
+        instrument_ids=["A.BINANCE", "B.BINANCE", "C.BINANCE"],
+        delay=delay,
+        decay=decay,
+        neutralization=neutralization,
+        truncation=truncation,
+    )
+    return WorldQuantAlphaStrategy(config)
+
+
+class TestBrainDocAlignment:
+    """
+    BRAIN platform documentation alignment tests.
+
+    Based on the 8-stock rank(-returns) example from BRAIN docs
+    (fig_03–fig_06, fig_10, simulation_settings.md).
+
+    Stock ranks: S0=0/7, S1=1/7, ..., S7=7/7.
+    """
+
+    def test_neutralize_8stock_rank_returns_exact_values(self) -> None:
+        """
+        Verify neutralize() matches BRAIN doc F-column exactly.
+
+        Input (D col): rank(-returns) = i/7 for i in 0..7
+        Expected (F col): D - mean(D) = i/7 - 0.5 = (2i-7)/14
+        """
+        strategy = _make_strategy()
+        alpha = {f"s{i}": i / 7 for i in range(8)}
+        result = strategy._neutralize(alpha)
+
+        # Market neutral: sum must equal zero
+        assert abs(sum(result.values())) < 1e-10
+
+        # Exact BRAIN F-column values: (2i - 7) / 14
+        assert result["s0"] == pytest.approx(-7 / 14)   # -0.5000
+        assert result["s7"] == pytest.approx(7 / 14)    # +0.5000
+        assert result["s3"] == pytest.approx(-1 / 14)   # -0.0714
+        assert result["s4"] == pytest.approx(1 / 14)    # +0.0714
+        assert result["s1"] == pytest.approx(-5 / 14)   # -0.3571
+        assert result["s6"] == pytest.approx(5 / 14)    # +0.3571
+
+    def test_scale_abs_sum_matches_brain_doc_16_over_7(self) -> None:
+        """
+        Verify scale() matches BRAIN doc G/H columns exactly.
+
+        BRAIN doc G-col: sum(|neutralized|) = 16/7 ≈ 2.286 (shown as "2.3")
+        BRAIN doc H-col: scaled = neutralized / (16/7) = (2i-7)/32
+        """
+        strategy = _make_strategy()
+        neutralized = {f"s{i}": i / 7 - 0.5 for i in range(8)}
+
+        # Verify the pre-scale abs sum matches the BRAIN doc value exactly
+        abs_before = sum(abs(v) for v in neutralized.values())
+        assert abs_before == pytest.approx(16 / 7)
+
+        result = strategy._scale(neutralized)
+
+        # After scaling, sum(|w|) == 1
+        assert sum(abs(v) for v in result.values()) == pytest.approx(1.0)
+
+        # Exact BRAIN H-column values: (2i - 7) / 32
+        assert result["s0"] == pytest.approx(-7 / 32)   # ≈ −0.2188 (doc "−0.22")
+        assert result["s7"] == pytest.approx(7 / 32)    # ≈ +0.2188 (doc "+0.22")
+        assert result["s3"] == pytest.approx(-1 / 32)   # ≈ −0.0313 (doc "−0.03")
+        assert result["s4"] == pytest.approx(1 / 32)    # ≈ +0.0313 (doc "+0.03")
+        assert result["s2"] == pytest.approx(-3 / 32)   # ≈ −0.0938 (doc "−0.09")
+        assert result["s5"] == pytest.approx(3 / 32)    # ≈ +0.0938 (doc "+0.09")
+
+    def test_apply_decay_steady_state_uses_exactly_n_periods(self) -> None:
+        """
+        Verify decay=2 in steady state retains exactly 2 periods (not 3).
+
+        BRAIN formula: Decay_linear(x,N) uses N periods with weights 1..N.
+        After the 3rd call, oldest entry (v1) must be evicted.
+        """
+        strategy = _make_strategy(decay=2)
+        v1 = {"A": 0.6, "B": 0.4}
+        v2 = {"A": 0.4, "B": 0.6}
+        v3 = {"A": 0.5, "B": 0.5}
+
+        strategy._apply_decay(v1)   # history = [v1]
+        strategy._apply_decay(v2)   # history = [v1, v2] — window full
+        result = strategy._apply_decay(v3)  # v1 evicted → history = [v2, v3]
+
+        # History must contain exactly N=2 periods
+        assert len(strategy._alpha_history) == 2
+
+        # weights=[1,2], total=3; oldest=v2, newest=v3
+        # A: (0.4×1 + 0.5×2) / 3 = 1.4/3
+        # B: (0.6×1 + 0.5×2) / 3 = 1.6/3
+        assert result["A"] == pytest.approx(1.4 / 3)
+        assert result["B"] == pytest.approx(1.6 / 3)
+
+    def test_apply_decay_3_periods_linear_formula(self) -> None:
+        """
+        Verify decay=3 matches BRAIN formula exactly (fig_10 + simulation_settings.md).
+
+        BRAIN: Decay_linear(x,3) = (x_t×3 + x_{t-1}×2 + x_{t-2}×1) / 6
+        """
+        strategy = _make_strategy(decay=3)
+        p1 = {"A": 0.2, "B": 0.5, "C": 0.3}   # t-2, weight=1
+        p2 = {"A": 0.4, "B": 0.3, "C": 0.3}   # t-1, weight=2
+        p3 = {"A": 0.6, "B": 0.2, "C": 0.2}   # t,   weight=3
+
+        strategy._apply_decay(p1)
+        strategy._apply_decay(p2)
+        result = strategy._apply_decay(p3)
+
+        # A: (0.2×1 + 0.4×2 + 0.6×3) / 6 = (0.2 + 0.8 + 1.8) / 6 = 2.8/6
+        # B: (0.5×1 + 0.3×2 + 0.2×3) / 6 = (0.5 + 0.6 + 0.6) / 6 = 1.7/6
+        # C: (0.3×1 + 0.3×2 + 0.2×3) / 6 = (0.3 + 0.6 + 0.6) / 6 = 1.5/6
+        assert result["A"] == pytest.approx(2.8 / 6)
+        assert result["B"] == pytest.approx(1.7 / 6)
+        assert result["C"] == pytest.approx(1.5 / 6)
+
+        # Sum conservation: each input sums to 1.0
+        assert sum(result.values()) == pytest.approx(1.0)
+
+    def test_full_pipeline_8stock_brain_example(self) -> None:
+        """
+        End-to-end: neutralize → scale → decay=0 → verify BRAIN doc H-column.
+
+        Input: rank(-returns) for 8 stocks = i/7
+        Expected output: (2i-7)/32 (BRAIN H-column exact fractions)
+        """
+        strategy = _make_strategy(neutralization="MARKET", decay=0, truncation=0.0)
+        alpha = {f"s{i}": i / 7 for i in range(8)}
+
+        result = strategy._process_alpha(alpha)
+
+        # Portfolio constraints
+        assert sum(abs(v) for v in result.values()) == pytest.approx(1.0)
+        assert abs(sum(result.values())) < 1e-10
+
+        # Exact BRAIN H-column values
+        assert result["s0"] == pytest.approx(-7 / 32)   # doc "−0.22"
+        assert result["s7"] == pytest.approx(7 / 32)    # doc "+0.22"
+        assert result["s3"] == pytest.approx(-1 / 32)   # doc "−0.03"
+        assert result["s4"] == pytest.approx(1 / 32)    # doc "+0.03"
+
+    def test_capital_allocation_20m_brain_example(self) -> None:
+        """
+        Verify $20M capital allocation matches BRAIN documentation.
+
+        BRAIN doc: positions = weight × $20M
+        Exact fractions: (2i-7)/32 × $20M = (2i-7) × $625,000
+        Min position: ±$625,000 (doc "±0.6M")
+        Max position: ±$4,375,000 (doc "±4.4M")
+        """
+        CAPITAL = 20_000_000
+
+        strategy = _make_strategy(neutralization="MARKET", decay=0, truncation=0.0)
+        alpha = {f"s{i}": i / 7 for i in range(8)}
+        weights = strategy._process_alpha(alpha)
+
+        positions = {k: v * CAPITAL for k, v in weights.items()}
+
+        # Exact position values: (2i-7) × $625,000
+        assert positions["s0"] == pytest.approx(-7 * 625_000)   # −$4,375,000 (doc "−4.4M")
+        assert positions["s7"] == pytest.approx(7 * 625_000)    # +$4,375,000 (doc "+4.4M")
+        assert positions["s3"] == pytest.approx(-1 * 625_000)   # −$625,000 (doc "−0.6M")
+        assert positions["s4"] == pytest.approx(1 * 625_000)    # +$625,000 (doc "+0.6M")
+
+        # Long/short totals each equal $10M (dollar-neutral)
+        long_total = sum(v for v in positions.values() if v > 0)
+        short_total = sum(v for v in positions.values() if v < 0)
+        assert long_total == pytest.approx(10_000_000)
+        assert short_total == pytest.approx(-10_000_000)
+
+
+class TestBrainRawReturnsToPositions:
+    """
+    E2E 测试：原始收益率 → CsRank（因子引擎 CS 层）→ 策略 pipeline → 资本分配。
+
+    假设收益率数据：8 只股票，等差 [+7%, +5%, ..., −7%]
+    设计目的：rank(-returns) 精确还原 BRAIN 文档 fig_03 D列 [0/7, ..., 7/7]。
+
+    均值回归逻辑：
+      - s0（最佳 +7%）：做空 → −$4,375,000
+      - s7（最差 −7%）：做多 → +$4,375,000
+      - 最小头寸：±$625,000（文档"±0.6M"）
+    """
+
+    # 假设收益率：等差列，确保产生均匀排名
+    RETURNS = {f"s{i}": 0.07 - 0.02 * i for i in range(8)}
+    # s0=+0.07, s1=+0.05, s2=+0.03, s3=+0.01
+    # s4=−0.01, s5=−0.03, s6=−0.05, s7=−0.07
+
+    def test_rank_neg_returns_matches_brain_doc_d_column(self) -> None:
+        """验证 CsRank 直接调用：rank(-returns) 产生 BRAIN 文档 D列精确值 [0/7, ..., 7/7]"""
+        neg_returns = {k: -v for k, v in self.RETURNS.items()}
+        rank_result = CsRank().compute(neg_returns)
+
+        for i in range(8):
+            assert rank_result[f"s{i}"] == pytest.approx(i / 7)
+
+    def test_full_chain_raw_returns_to_625k_positions(self) -> None:
+        """完整链路：原始收益率 → rank(-returns) → pipeline → $20M 头寸
+        逐列验证 BRAIN 文档 fig_03：
+          D列: rank(-returns) = [0/7, ..., 7/7]
+          H列: 缩放后权重     = (2i-7)/32
+          头寸: × $20M        = ±k × $625,000
+        """
+        CAPITAL = 20_000_000
+
+        # Step1: rank(-returns) via CsRank（因子引擎 CS 层）
+        neg_returns = {k: -v for k, v in self.RETURNS.items()}
+        rank_values = CsRank().compute(neg_returns)
+
+        # 验证 D列
+        for i in range(8):
+            assert rank_values[f"s{i}"] == pytest.approx(i / 7)
+
+        # Step2-4: 策略 pipeline（neutralize → scale → positions）
+        strategy = _make_strategy(neutralization="MARKET", decay=0, truncation=0.0)
+        weights = strategy._process_alpha(rank_values)
+        positions = {k: v * CAPITAL for k, v in weights.items()}
+
+        # 验证 H列（权重精确分数）
+        assert weights["s0"] == pytest.approx(-7 / 32)
+        assert weights["s7"] == pytest.approx(+7 / 32)
+
+        # 验证头寸（与文档四舍五入标注对应）
+        assert positions["s0"] == pytest.approx(-7 * 625_000)   # 文档 "−4.4M"（做空赢家）
+        assert positions["s7"] == pytest.approx(+7 * 625_000)   # 文档 "+4.4M"（做多输家）
+        assert positions["s3"] == pytest.approx(-1 * 625_000)   # 文档 "−0.6M"
+        assert positions["s4"] == pytest.approx(+1 * 625_000)   # 文档 "+0.6M" ← 最小头寸
+
+        # 多空平衡（均值回归策略）
+        long_total = sum(v for v in positions.values() if v > 0)
+        short_total = sum(v for v in positions.values() if v < 0)
+        assert long_total == pytest.approx(10_000_000)
+        assert short_total == pytest.approx(-10_000_000)
