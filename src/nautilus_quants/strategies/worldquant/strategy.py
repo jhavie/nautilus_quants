@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import Bar, DataType
 from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.identifiers import InstrumentId, PositionId
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
@@ -124,6 +124,11 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         self._long_positions: set[str] = set()
         self._short_positions: set[str] = set()
 
+        # Named PositionId tracking for delta-based resize (HEDGE mode)
+        self._long_position_ids: dict[str, PositionId] = {}
+        self._short_position_ids: dict[str, PositionId] = {}
+        self._position_seq: int = 0  # global counter, ensures each pid is unique
+
         # BRAIN pipeline state
         self._prev_alpha: dict[str, float] | None = None   # delay buffer
         self._alpha_history: list[dict[str, float]] = []    # decay window
@@ -218,6 +223,8 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         Each FactorValues message contains the full cross-sectional alpha
         vector for all instruments at the current timestamp.
         """
+        if self._bar_count <= 500 and self._bar_count % 139 == 0:
+            self.log.info(f"on_data called: type={type(data).__name__}, is_FV={isinstance(data, FactorValues)}")
         if not isinstance(data, FactorValues):
             return
         self._handle_factor_values(data)
@@ -473,11 +480,13 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             if inst_id not in new_longs:
                 self._close_position(inst_id, "EXIT_LONG")
                 self._long_positions.discard(inst_id)
+                self._long_position_ids.pop(inst_id, None)
 
         for inst_id in list(self._short_positions):
             if inst_id not in new_shorts:
                 self._close_position(inst_id, "EXIT_SHORT")
                 self._short_positions.discard(inst_id)
+                self._short_position_ids.pop(inst_id, None)
 
         # Open/resize long positions
         for inst_id in new_longs:
@@ -487,10 +496,13 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             if inst_id in self._short_positions:
                 self._close_position(inst_id, "FLIP_TO_LONG")
                 self._short_positions.discard(inst_id)
+                self._short_position_ids.pop(inst_id, None)
             is_new_long = inst_id not in self._long_positions
-            if self._open_position(inst_id, OrderSide.BUY, target_value):
-                self._long_positions.add(inst_id)
-                if is_new_long:
+            if is_new_long:
+                position_id = self._make_position_id(inst_id, OrderSide.BUY)
+                if self._open_position(inst_id, OrderSide.BUY, target_value, position_id=position_id):
+                    self._long_positions.add(inst_id)
+                    self._long_position_ids[inst_id] = position_id
                     self._metadata_provider.record_open(
                         instrument_id=inst_id,
                         side="LONG",
@@ -501,6 +513,9 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
                         decayed=self._last_decayed.get(inst_id),
                         ts_event=self._current_ts_event,
                     )
+            else:
+                # Existing LONG: submit only the delta quantity
+                self._adjust_position(inst_id, OrderSide.BUY, target_value)
 
         # Open/resize short positions
         for inst_id in new_shorts:
@@ -510,10 +525,13 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             if inst_id in self._long_positions:
                 self._close_position(inst_id, "FLIP_TO_SHORT")
                 self._long_positions.discard(inst_id)
+                self._long_position_ids.pop(inst_id, None)
             is_new_short = inst_id not in self._short_positions
-            if self._open_position(inst_id, OrderSide.SELL, target_value):
-                self._short_positions.add(inst_id)
-                if is_new_short:
+            if is_new_short:
+                position_id = self._make_position_id(inst_id, OrderSide.SELL)
+                if self._open_position(inst_id, OrderSide.SELL, target_value, position_id=position_id):
+                    self._short_positions.add(inst_id)
+                    self._short_position_ids[inst_id] = position_id
                     self._metadata_provider.record_open(
                         instrument_id=inst_id,
                         side="SHORT",
@@ -524,6 +542,9 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
                         decayed=self._last_decayed.get(inst_id),
                         ts_event=self._current_ts_event,
                     )
+            else:
+                # Existing SHORT: submit only the delta quantity
+                self._adjust_position(inst_id, OrderSide.SELL, target_value)
 
         if self._rebalance_count <= 5 or self._rebalance_count % 30 == 0:
             self.log.info(
@@ -531,13 +552,127 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
                 f"long={len(self._long_positions)}, short={len(self._short_positions)}"
             )
 
-    def _open_position(
+    def _make_position_id(self, instrument_id_str: str, side: OrderSide) -> PositionId:
+        """Create a globally unique PositionId for HEDGE mode tracking.
+
+        Uses a monotonically increasing sequence counter so every open event
+        (including re-entries after reduce_only closes the position) gets a
+        fresh PositionId that never collides with closed positions in the cache.
+        """
+        self._position_seq += 1
+        suffix = "LONG" if side == OrderSide.BUY else "SHORT"
+        return PositionId(f"{instrument_id_str}-{suffix}-{self._position_seq}")
+
+    def _get_current_qty(self, instrument_id_str: str, side: OrderSide) -> Decimal:
+        """Return the current open quantity for the named position (0 if none)."""
+        pid = (
+            self._long_position_ids.get(instrument_id_str)
+            if side == OrderSide.BUY
+            else self._short_position_ids.get(instrument_id_str)
+        )
+        if pid is None:
+            return Decimal(0)
+        pos = self.cache.position(pid)
+        if pos is None or pos.is_closed:
+            return Decimal(0)
+        return Decimal(str(pos.quantity))
+
+    def _adjust_position(
         self,
         instrument_id_str: str,
         side: OrderSide,
         target_value: float,
     ) -> bool:
-        """Open a position with target dollar value."""
+        """
+        Submit only the delta order needed to reach target_value for an existing position.
+
+        Increase exposure → add order in the same direction.
+        Decrease exposure → reduce_only order in the opposite direction.
+        """
+        instrument_id = InstrumentId.from_str(instrument_id_str)
+        instrument = self._instruments.get(instrument_id)
+        if instrument is None:
+            return False
+
+        price = self._current_prices.get(instrument_id_str)
+        if price is None or price <= 0:
+            return False
+
+        target_qty = Decimal(str(target_value / price))
+
+        # Resolve current position — refresh pid if the stored position was closed
+        # (e.g. a previous reduce_only order brought qty to exactly 0).
+        pid_store = (
+            self._long_position_ids if side == OrderSide.BUY else self._short_position_ids
+        )
+        pid = pid_store.get(instrument_id_str)
+        pos = self.cache.position(pid) if pid else None
+        if pos is None or pos.is_closed:
+            # Position silently closed; create a fresh pid so the new open order
+            # does not target a closed position (which would trigger the Nautilus warning).
+            self.log.warning(
+                f"Position {pid} for {instrument_id_str} ({side.name}) found closed; "
+                "resetting to fresh position ID."
+            )
+            pid = self._make_position_id(instrument_id_str, side)
+            pid_store[instrument_id_str] = pid
+            current_qty = Decimal(0)
+        else:
+            current_qty = Decimal(str(pos.quantity))
+
+        delta_qty = target_qty - current_qty
+
+        # Skip if delta is negligible relative to target
+        tolerance = Decimal("0.01") * max(target_qty, Decimal("0.001"))
+        if abs(delta_qty) < tolerance:
+            self.log.debug(
+                f"ADJUST {side.name} {instrument_id_str}: delta={delta_qty:.6f} within tolerance, skip"
+            )
+            return True
+
+        try:
+            qty = instrument.make_qty(abs(delta_qty))
+        except ValueError:
+            return False
+
+        if delta_qty > 0:
+            # Increase position in the same direction
+            order_side = side
+            order = self.order_factory.market(
+                instrument_id=instrument_id,
+                order_side=order_side,
+                quantity=qty,
+            )
+            self.submit_order(order, position_id=pid)
+            self.log.debug(
+                f"RESIZE+ {side.name} {instrument_id_str}: "
+                f"current={current_qty}, target={target_qty:.6f}, delta=+{abs(delta_qty):.6f}"
+            )
+        else:
+            # Reduce position with reduce_only to prevent accidental reversal
+            order_side = OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+            order = self.order_factory.market(
+                instrument_id=instrument_id,
+                order_side=order_side,
+                quantity=qty,
+                reduce_only=True,
+            )
+            self.submit_order(order, position_id=pid)
+            self.log.debug(
+                f"RESIZE- {side.name} {instrument_id_str}: "
+                f"current={current_qty}, target={target_qty:.6f}, delta=-{abs(delta_qty):.6f}"
+            )
+
+        return True
+
+    def _open_position(
+        self,
+        instrument_id_str: str,
+        side: OrderSide,
+        target_value: float,
+        position_id: PositionId | None = None,
+    ) -> bool:
+        """Open a new position with target dollar value, bound to a named PositionId."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
         instrument = self._instruments.get(instrument_id)
 
@@ -560,7 +695,7 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             order_side=side,
             quantity=qty,
         )
-        self.submit_order(order)
+        self.submit_order(order, position_id=position_id)
         self.log.debug(
             f"OPEN {side.name} {instrument_id_str}: qty={qty}, value={target_value:.2f}"
         )
@@ -581,3 +716,5 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             self._close_position(inst_id, reason)
         self._long_positions.clear()
         self._short_positions.clear()
+        self._long_position_ids.clear()
+        self._short_position_ids.clear()

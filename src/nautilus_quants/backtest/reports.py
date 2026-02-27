@@ -9,6 +9,7 @@ import pandas as pd
 from nautilus_quants.backtest.exceptions import BacktestReportError
 from nautilus_quants.backtest.protocols import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
+    POSITION_MARKET_VALUES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
     BaseMetadataRenderer,
     MetadataRenderer,
@@ -51,9 +52,69 @@ class ReportGenerator:
         return self._build_equity_from_actor_snapshots()
 
     @cached_property
+    def _market_values_index(self) -> dict[str, pd.Series]:
+        """Lazy-cached per-instrument market value series from EquitySnapshotActor.
+
+        Returns:
+            Dict mapping inst_id to pd.Series of market values indexed by datetime.
+            Empty dict if cache data not available (backward-compatible).
+        """
+        import pickle
+
+        try:
+            data = self.engine.cache.get(POSITION_MARKET_VALUES_CACHE_KEY)
+        except Exception:
+            return {}
+
+        if not data:
+            return {}
+
+        try:
+            points: list[tuple[int, dict[str, float]]] = pickle.loads(data)
+        except Exception:
+            return {}
+
+        if not points:
+            return {}
+
+        # Transpose: list[(ts_ns, {inst_id: value})] → dict{inst_id: Series}
+        by_inst: dict[str, list[tuple[pd.Timestamp, float]]] = {}
+        for ts_ns, values in points:
+            ts = pd.Timestamp(ts_ns, unit="ns", tz="UTC")
+            for inst_id, val in values.items():
+                by_inst.setdefault(inst_id, []).append((ts, val))
+
+        index: dict[str, pd.Series] = {}
+        for inst_id, pairs in by_inst.items():
+            timestamps = [t for t, _ in pairs]
+            vals = [v for _, v in pairs]
+            index[inst_id] = pd.Series(vals, index=pd.DatetimeIndex(timestamps)).sort_index()
+
+        return index
+
+    @cached_property
     def _realized_equity(self) -> pd.Series:
         """Lazy-cached realized equity from engine account data."""
         return self._get_realized_equity_series()
+
+    def _get_market_value(self, inst_id: str, ts: pd.Timestamp) -> float | None:
+        """Get the market value for an instrument at a given timestamp.
+
+        Uses asof() (forward-fill with most recent snapshot) from the cached
+        per-instrument market value series built by EquitySnapshotActor.
+
+        Args:
+            inst_id: Instrument identifier string
+            ts: Timestamp to query
+
+        Returns:
+            Market value float, or None if no data available.
+        """
+        series = self._market_values_index.get(inst_id)
+        if series is None or series.empty:
+            return None
+        val = series.asof(ts)
+        return float(val) if pd.notna(val) else None
 
     def _get_closed_positions(self) -> list["Position"]:
         """Get all closed positions from the engine.
@@ -739,7 +800,6 @@ class ReportGenerator:
                 if inst_id not in render_cache:
                     meta = metadata_by_inst.get(inst_id)
                     position_info = {
-                        "value": rec["value"],
                         "side": rec["side"],
                         "ts_opened": rec["ts_opened"].isoformat(),
                     }
@@ -749,13 +809,20 @@ class ReportGenerator:
                         metadata=meta,
                         timestamp_ns=int(ts.value),
                     )
-                positions[symbol] = render_cache[inst_id]
+
+                # Use current market value (quantity × last price); fall back to 0.0
+                market_value = self._get_market_value(inst_id, ts) or 0.0
+
+                # Shallow-copy to avoid mutating the render cache
+                rendered = dict(render_cache[inst_id])
+                rendered["value"] = market_value
+                positions[symbol] = rendered
 
                 if rec["side"] == "LONG":
-                    long_total_value += rec["value"]
+                    long_total_value += market_value
                     long_count += 1
                 else:
-                    short_total_value += rec["value"]
+                    short_total_value += market_value
                     short_count += 1
 
             timeline_data.append({

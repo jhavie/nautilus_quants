@@ -234,8 +234,9 @@ class TestAliases:
         values = {"a": 1.0, "b": 2.0, "c": 3.0}
         result = rank(values)
 
-        assert result["a"] == pytest.approx(0.0)
-        assert result["b"] == pytest.approx(0.5)
+        # popbo-aligned: rank(method='min', pct=True) → [1/n, 1]
+        assert result["a"] == pytest.approx(1 / 3)
+        assert result["b"] == pytest.approx(2 / 3)
         assert result["c"] == pytest.approx(1.0)
 
     def test_zscore_alias(self):

@@ -1,10 +1,15 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-FactorEngineActor - Nautilus Actor wrapper for FactorEngine.
+FactorEngineActor - Nautilus Actor wrapper for PanelFactorEngine.
 
-This module provides a Nautilus-native Actor that wraps the FactorEngine,
+This module provides a Nautilus-native Actor that wraps the PanelFactorEngine,
 enabling seamless integration with the Nautilus trading system.
+
+The Panel architecture evaluates all factor expressions (including nested
+CS/TS operators like ``correlation(rank(open), rank(volume), 10)``) correctly
+via pd.DataFrame[T x N] intermediates. This replaces the previous two-phase
+FactorEngine + CsFactorEngine approach.
 
 Constitution Compliance:
     - Extends Nautilus Actor base class (Principle I)
@@ -14,16 +19,13 @@ Constitution Compliance:
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
 
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.factors.config import load_factor_config
-from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
-from nautilus_quants.factors.engine.factor_engine import FactorEngine
+from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
 from nautilus_quants.factors.types import FactorValues
 
 
@@ -46,6 +48,25 @@ def _detect_extra_bar_fields(bar: Bar) -> list[str]:
         return []
 
     return sorted(k for k in bar.__dict__ if not k.startswith("_"))
+
+
+def _extract_bar_data(bar: Bar) -> dict[str, float]:
+    """Extract OHLCV data (and extra BinanceBar fields) from a bar into a plain dict."""
+    data = {
+        "open": float(bar.open),
+        "high": float(bar.high),
+        "low": float(bar.low),
+        "close": float(bar.close),
+        "volume": float(bar.volume),
+    }
+    # BinanceBar stores extra fields (quote_volume, count, etc.) in __dict__
+    for k, v in getattr(bar, "__dict__", {}).items():
+        if not k.startswith("_") and k not in data:
+            try:
+                data[k] = float(v)
+            except (TypeError, ValueError):
+                pass
+    return data
 
 
 class FactorEngineActorConfig(ActorConfig, frozen=True):
@@ -90,10 +111,10 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
     """
     Nautilus Actor that computes factors and publishes results.
 
-    This actor wraps the FactorEngine and integrates it with the Nautilus
+    This actor wraps the PanelFactorEngine and integrates it with the Nautilus
     trading system, providing:
     - Direct bar subscription (no aggregation - BinanceBar fields preserved)
-    - Two-phase factor computation (time-series then cross-sectional)
+    - Panel-based factor computation (CS + TS evaluated together)
     - CustomData publishing for factor values
     - Performance logging via Nautilus Logger
 
@@ -130,13 +151,12 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         super().__init__(config)
 
         self._config: FactorEngineActorConfig = config
-        self._engine: FactorEngine | None = None
-        self._cs_engine: CsFactorEngine | None = None
+        self._engine: PanelFactorEngine | None = None
 
-        # Synchronization state for cross-sectional factors
-        self._ts_factor_values: dict[int, dict[str, dict[str, float]]] = defaultdict(
-            lambda: defaultdict(dict)
-        )
+        # Timestamp synchronization:
+        # Bars arrive instrument-by-instrument.  We accumulate bars for the
+        # current timestamp and flush the *previous* timestamp once a new one
+        # starts (guaranteeing all instruments have reported).
         self._last_processed_ts: int = 0
         self._extra_fields_detected: bool = False
 
@@ -144,39 +164,36 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         """
         Actions to perform on actor start.
 
-        Initializes the FactorEngine and subscribes directly to bar types.
+        Initializes the PanelFactorEngine and subscribes directly to bar types.
         Always uses direct subscription (no aggregation) to preserve
         BinanceBar extra fields like quote_volume and count.
         """
-        self.log.info("Starting FactorEngineActor...")
+        self.log.info("Starting FactorEngineActor (Panel architecture)...")
 
-        # Initialize FactorEngine
+        # Load factor config
         factor_config = None
         if self._config.factor_config_path:
             try:
                 factor_config = load_factor_config(self._config.factor_config_path)
-                self.log.info(f"Loaded factor config: {factor_config.name} v{factor_config.version}")
+                self.log.info(
+                    f"Loaded factor config: {factor_config.name} v{factor_config.version}"
+                )
             except Exception as e:
                 self.log.error(f"Failed to load factor config: {e}")
                 return
 
-        self._engine = FactorEngine(
+        # Initialize PanelFactorEngine (replaces FactorEngine + CsFactorEngine)
+        self._engine = PanelFactorEngine(
             config=factor_config,
             max_history=self._config.max_history,
         )
 
-        # Initialize cross-sectional factor engine
-        self._cs_engine = CsFactorEngine(config=factor_config)
-
-        ts_factors = self._cs_engine.ts_factor_names
-        cs_factors = self._cs_engine.cs_factor_names
-        self.log.info(f"Time-series factors: {ts_factors}")
-        self.log.info(f"Cross-sectional factors: {cs_factors}")
-
-        self.log.info(f"Registered {len(self._engine.factor_names)} factors: {self._engine.factor_names}")
+        self.log.info(
+            f"Registered {len(self._engine.factor_names)} factors: "
+            f"{self._engine.factor_names}"
+        )
 
         # Get bar types from injected config (required)
-        # bar_types is injected by CLI from data config, filtered by data_cls + bar_spec
         if not self._config.bar_types:
             self.log.error(
                 "bar_types not configured. Ensure backtest is run via CLI which injects "
@@ -187,7 +204,6 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self.log.info(f"Using {len(self._config.bar_types)} bar types from config")
 
         # Subscribe directly to all injected bar types (no aggregation)
-        # This preserves BinanceBar extra fields (quote_volume, count, etc.)
         self._subscribe_bar_types(self._config.bar_types)
 
         self.log.info("FactorEngineActor started successfully")
@@ -212,9 +228,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         """
         Handle incoming bar data.
 
-        Implements two-phase factor computation:
-        1. Compute time-series factors for this bar
-        2. When timestamp changes, process previous batch
+        Accumulates bar data in the panel buffer.  When the timestamp
+        advances, flushes and evaluates all factors for the previous
+        timestamp (ensuring all instruments have reported).
 
         Parameters
         ----------
@@ -225,15 +241,16 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if instrument_id is None:
             return
 
-        if self._engine is None or self._cs_engine is None:
+        if self._engine is None:
             return
 
         # Auto-detect extra bar fields on first BinanceBar
-        # Only trigger detection for BinanceBar instances to avoid
-        # standard Bar falsely marking detection as complete.
         if not self._extra_fields_detected:
             try:
-                from nautilus_trader.adapters.binance.common.types import BinanceBar as _BinanceBar
+                from nautilus_trader.adapters.binance.common.types import (
+                    BinanceBar as _BinanceBar,
+                )
+
                 if isinstance(bar, _BinanceBar):
                     self._extra_fields_detected = True
                     extra = _detect_extra_bar_fields(bar)
@@ -245,57 +262,42 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         ts = bar.ts_event
 
-        # When timestamp changes, process the previous batch
+        # When timestamp advances, flush + compute the previous timestamp
         if self._last_processed_ts > 0 and ts > self._last_processed_ts:
-            self._process_complete_batch(self._last_processed_ts)
-            # Cleanup old timestamps
-            old_ts = [t for t in self._ts_factor_values if t < ts]
-            for t in old_ts:
-                del self._ts_factor_values[t]
+            self._flush_and_publish(self._last_processed_ts)
 
-        # Compute time-series factors for this bar
-        result = self._engine.on_bar(bar)
-
-        if result:
-            # Store time-series factor values
-            for factor_name, factor_values in result.items():
-                for inst_id, value in factor_values.items():
-                    self._ts_factor_values[ts][factor_name][inst_id] = value
+        # Accumulate bar into panel buffer
+        bar_data = _extract_bar_data(bar)
+        self._engine.on_bar(instrument_id, bar_data, ts)
 
         self._last_processed_ts = ts
 
-    def _process_complete_batch(self, ts: int) -> None:
-        """
-        Process a complete batch when all instruments have data.
-
-        Computes cross-sectional factors and publishes combined results.
-        """
-        if self._cs_engine is None:
+    def _flush_and_publish(self, ts: int) -> None:
+        """Flush a timestamp, compute all factors, and publish results."""
+        if self._engine is None:
             return
 
-        ts_values = dict(self._ts_factor_values[ts])
-
-        # Compute cross-sectional factors
-        cs_values = self._cs_engine.compute(ts_values)
-
-        # Combine all factor values
-        all_values = dict(ts_values)
-        all_values.update(cs_values)
+        results = self._engine.flush_and_compute(ts)
 
         # Create and publish FactorValues
         factor_values = FactorValues.create(
             ts_event=ts,
-            factors=all_values,
+            factors=results,
         )
 
         if self._config.publish_signals:
             self.publish_data(data_type=DataType(FactorValues), data=factor_values)
+            if self._engine._total_computes <= 3:
+                n_factors = sum(1 for v in results.values() if v)
+                self.log.info(
+                    f"Published FactorValues: ts={ts}, "
+                    f"{n_factors}/{len(results)} non-empty factors"
+                )
 
     def on_reset(self) -> None:
         """Reset the actor state."""
         if self._engine:
             self._engine.reset()
-        self._ts_factor_values.clear()
         self._last_processed_ts = 0
         self.log.info("FactorEngineActor reset")
 
@@ -304,8 +306,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
     # -------------------------------------------------------------------------
 
     @property
-    def engine(self) -> FactorEngine | None:
-        """Get the underlying FactorEngine instance."""
+    def engine(self) -> PanelFactorEngine | None:
+        """Get the underlying PanelFactorEngine instance."""
         return self._engine
 
     @property
@@ -320,7 +322,6 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         name: str,
         expression: str,
         description: str = "",
-        warmup_period: int = 0,
     ) -> None:
         """
         Register an expression-based factor.
@@ -333,8 +334,6 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             Alpha101-style expression.
         description : str, optional
             Factor description.
-        warmup_period : int, optional
-            Warmup period before valid output.
         """
         if self._engine is None:
             self.log.warning("Cannot register factor: engine not initialized")
@@ -344,7 +343,6 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             name=name,
             expression=expression,
             description=description,
-            warmup_period=warmup_period,
         )
         self.log.info(f"Registered factor: {name}")
 

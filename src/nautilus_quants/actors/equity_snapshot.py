@@ -22,7 +22,7 @@ from nautilus_trader.config import ActorConfig
 from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.model.objects import Currency
 
-from nautilus_quants.backtest.protocols import EQUITY_SNAPSHOTS_CACHE_KEY
+from nautilus_quants.backtest.protocols import EQUITY_SNAPSHOTS_CACHE_KEY, POSITION_MARKET_VALUES_CACHE_KEY
 from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
 from nautilus_quants.backtest.utils.equity import compute_mtm_equity
 
@@ -56,6 +56,7 @@ class EquitySnapshotActor(Actor):
     def __init__(self, config: EquitySnapshotActorConfig) -> None:
         super().__init__(config)
         self._equity_points: list[tuple[int, float]] = []
+        self._position_values_points: list[tuple[int, dict[str, float]]] = []
         self._venue = Venue(config.venue_name)
         self._currency = Currency.from_str(config.currency)
 
@@ -80,6 +81,14 @@ class EquitySnapshotActor(Actor):
         ts_event = event.ts_event if hasattr(event, "ts_event") else 0
         self._equity_points.append((ts_event, equity))
 
+        # Collect per-instrument net market exposure (quantity × last price)
+        position_values: dict[str, float] = {}
+        for pos in self.cache.positions_open():
+            exposure = self.portfolio.net_exposure(pos.instrument_id)
+            if exposure is not None:
+                position_values[str(pos.instrument_id)] = exposure.as_double()
+        self._position_values_points.append((ts_event, position_values))
+
     def on_stop(self) -> None:
         """Collect final snapshot and persist captured points to cache."""
         # Collect a final equity point at actor stop time.
@@ -98,6 +107,16 @@ class EquitySnapshotActor(Actor):
             )
         else:
             self.log.warning("EquitySnapshotActor: no equity points captured")
+
+        if self._position_values_points:
+            self.cache.add(
+                POSITION_MARKET_VALUES_CACHE_KEY,
+                pickle.dumps(self._position_values_points),
+            )
+            self.log.info(
+                f"EquitySnapshotActor: {len(self._position_values_points)} position "
+                f"market value snapshots saved to cache"
+            )
 
     def _compute_equity(self) -> float | None:
         """Compute current MTM equity.

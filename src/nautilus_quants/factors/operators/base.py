@@ -146,6 +146,25 @@ class TimeSeriesOperator(Operator):
             lambda x: self.compute(x.values, window, **kwargs), raw=False,
         )
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """Compute over a panel DataFrame[T x N] (rows=timestamps, cols=instruments).
+
+        Default: apply ``compute_vectorized`` to each column independently.
+        Subclasses SHOULD override with DataFrame-native rolling operations
+        (e.g., ``data.rolling(window).mean()``) for better performance.
+        """
+        data2 = kwargs.get("data2")
+        if data2 is not None:
+            return pd.DataFrame(
+                {col: self.compute_vectorized(data[col], window, data2=data2[col])
+                 for col in data.columns},
+                index=data.index,
+            )
+        return pd.DataFrame(
+            {col: self.compute_vectorized(data[col], window) for col in data.columns},
+            index=data.index,
+        )
+
 
 class CrossSectionalOperator(Operator):
     """
@@ -188,6 +207,14 @@ class CrossSectionalOperator(Operator):
             return pd.Series(result, index=row.index)
         return df.apply(_apply_row, axis=1)
 
+    def compute_panel(self, data: pd.DataFrame, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        """Compute over a panel DataFrame[T x N] (rows=timestamps, cols=instruments).
+
+        Cross-sectional operators already operate row-wise, so this simply
+        delegates to ``compute_vectorized`` which does the same.
+        """
+        return self.compute_vectorized(data, *args, **kwargs)
+
 
 class MathOperator(Operator):
     """
@@ -211,6 +238,11 @@ class MathOperator(Operator):
             Computed result
         """
         pass
+
+    def compute_panel(self, *args: Any, **kwargs: Any) -> Any:
+        """Compute over panel data. Math operators are element-wise and
+        already work on DataFrames via numpy broadcasting."""
+        return self.compute(*args, **kwargs)
 
 
 # Operator Registry

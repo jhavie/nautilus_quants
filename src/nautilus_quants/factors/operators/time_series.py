@@ -52,6 +52,9 @@ class TsMean(TimeSeriesOperator):
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
         return data.rolling(int(window)).mean()
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        return data.rolling(int(window)).mean()
+
 
 @register_operator
 class TsSum(TimeSeriesOperator):
@@ -68,6 +71,9 @@ class TsSum(TimeSeriesOperator):
         return float(np.sum(data[-window:]))
 
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).sum()
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
         return data.rolling(int(window)).sum()
 
 
@@ -92,6 +98,9 @@ class TsStd(TimeSeriesOperator):
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
         return data.rolling(int(window)).std(ddof=1)
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        return data.rolling(int(window)).std(ddof=1)
+
 
 @register_operator
 class TsMin(TimeSeriesOperator):
@@ -108,6 +117,9 @@ class TsMin(TimeSeriesOperator):
         return float(np.min(data[-window:]))
 
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window)).min()
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
         return data.rolling(int(window)).min()
 
 
@@ -128,86 +140,110 @@ class TsMax(TimeSeriesOperator):
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
         return data.rolling(int(window)).max()
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        return data.rolling(int(window)).max()
+
 
 @register_operator
 class TsRank(TimeSeriesOperator):
-    """Rolling rank (percentile rank of current value in window)."""
-    
+    """Rolling rank — popbo/academic semantics.
+
+    compute(): returns average rank normalized to [1/d, 1] (incremental engine).
+    compute_panel(): returns scipy.rankdata(method='min')[-1], raw rank in [1, d].
+
+    This aligns with popbo/alphas101.py:
+        def rolling_rank(na):
+            return rankdata(na, method='min')[-1]
+    """
+
     name = "ts_rank"
     min_args = 2
     max_args = 2
-    
+
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
-        """
-        Compute time-series rank.
-        
-        Returns the percentile rank of the current value within
-        the lookback window (0.0 to 1.0).
-        """
+        """Return average rank of last value in window, normalized to [1/d, 1]."""
         if len(data) < window:
             return float('nan')
-        
+
         window_data = data[-window:]
         current = window_data[-1]
-        
-        # Count values less than current
-        rank = np.sum(window_data < current)
-        # Normalize to [0, 1]
-        return float(rank / (window - 1)) if window > 1 else 0.5
+
+        # Average rank: (count_less + (count_equal + 1) / 2) / window
+        less = np.sum(window_data < current)
+        equal = np.sum(window_data == current)
+        avg_rank = less + (equal + 1) / 2
+        return float(avg_rank / window)
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """popbo semantics: scipy.rankdata(method='min')[-1], returns [1, d]."""
+        from scipy.stats import rankdata
+
+        w = int(window)
+
+        def _rank_last(arr: np.ndarray) -> float:
+            return float(rankdata(arr, method="min")[-1])
+
+        return data.rolling(w, min_periods=w).apply(_rank_last, raw=True)
 
 
 @register_operator
 class TsArgmax(TimeSeriesOperator):
-    """Index of maximum value in window (WorldQuant semantics: 1 = oldest, window = most recent)."""
-    
+    """Index of maximum value in window — popbo/academic semantics.
+
+    Returns np.argmax + 1 (1-indexed from oldest):
+    - 1 = oldest day in window
+    - window = most recent day (today)
+
+    Aligns with popbo: df.rolling(window).apply(np.argmax) + 1
+    """
+
     name = "ts_argmax"
     min_args = 2
     max_args = 2
-    
+
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
-        """
-        Compute position of maximum value (WorldQuant semantics).
-        
-        Returns position in window where maximum occurred:
-        - 1 = oldest day in window
-        - window = most recent day (today)
-        
-        This follows WorldQuant Alpha101 convention:
-        ts_argmax(close, 31) == 31 means today is the maximum.
-        """
+        """Compute position of maximum value (1-indexed from oldest)."""
         if len(data) < window:
             return float('nan')
-        
+
         window_data = data[-window:]
         idx = np.argmax(window_data)
         return float(idx + 1)  # 1-indexed, 1 = oldest, window = newest
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """popbo semantics: np.argmax + 1 (1-indexed from oldest)."""
+        w = int(window)
+        return data.rolling(w, min_periods=w).apply(lambda x: np.argmax(x) + 1, raw=True)
+
 
 @register_operator
 class TsArgmin(TimeSeriesOperator):
-    """Index of minimum value in window (WorldQuant semantics: 1 = oldest, window = most recent)."""
-    
+    """Index of minimum value in window — popbo/academic semantics.
+
+    Returns np.argmin + 1 (1-indexed from oldest):
+    - 1 = oldest day in window
+    - window = most recent day (today)
+
+    Aligns with popbo: df.rolling(window).apply(np.argmin) + 1
+    """
+
     name = "ts_argmin"
     min_args = 2
     max_args = 2
-    
+
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
-        """
-        Compute position of minimum value (WorldQuant semantics).
-        
-        Returns position in window where minimum occurred:
-        - 1 = oldest day in window
-        - window = most recent day (today)
-        
-        This follows WorldQuant Alpha101 convention:
-        ts_argmin(close, 31) == 31 means today is the minimum.
-        """
+        """Compute position of minimum value (1-indexed from oldest)."""
         if len(data) < window:
             return float('nan')
-        
+
         window_data = data[-window:]
         idx = np.argmin(window_data)
         return float(idx + 1)  # 1-indexed, 1 = oldest, window = newest
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """popbo semantics: np.argmin + 1 (1-indexed from oldest)."""
+        w = int(window)
+        return data.rolling(w, min_periods=w).apply(lambda x: np.argmin(x) + 1, raw=True)
 
 
 @register_operator
@@ -234,6 +270,9 @@ class Delta(TimeSeriesOperator):
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
         return data.diff(int(window))
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        return data.diff(int(window))
+
 
 @register_operator
 class Delay(TimeSeriesOperator):
@@ -257,6 +296,9 @@ class Delay(TimeSeriesOperator):
         return IncrementalDelay(window)
 
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.shift(int(window))
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
         return data.shift(int(window))
 
 
@@ -308,6 +350,18 @@ class Correlation(TimeSeriesOperator):
             return pd.Series(np.nan, index=data.index)
         return data.rolling(int(window)).corr(data2)
 
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        data2 = kwargs.get("data2")
+        if data2 is None:
+            return pd.DataFrame(np.nan, index=data.index, columns=data.columns)
+        w = int(window)
+        result = pd.DataFrame(
+            {col: data[col].rolling(w).corr(data2[col]) for col in data.columns},
+            index=data.index,
+        )
+        # Align with popbo: fillna(0) then replace inf with 0
+        return result.fillna(0).replace([np.inf, -np.inf], 0)
+
 
 @register_operator
 class Covariance(TimeSeriesOperator):
@@ -344,6 +398,176 @@ class Covariance(TimeSeriesOperator):
         if data2 is None:
             return pd.Series(np.nan, index=data.index)
         return data.rolling(int(window)).cov(data2, ddof=1)
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        data2 = kwargs.get("data2")
+        if data2 is None:
+            return pd.DataFrame(np.nan, index=data.index, columns=data.columns)
+        w = int(window)
+        return pd.DataFrame(
+            {col: data[col].rolling(w).cov(data2[col], ddof=1) for col in data.columns},
+            index=data.index,
+        )
+
+
+@register_operator
+class DecayLinear(TimeSeriesOperator):
+    """Linear weighted moving average (LWMA).
+
+    Weights are [1, 2, ..., d] normalized to sum to 1.
+    Most recent value has highest weight.
+    """
+
+    name = "decay_linear"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        """Compute linearly weighted moving average (popbo-aligned form)."""
+        if isinstance(data, (int, float)):
+            return float('nan')
+        if len(data) < window:
+            return float('nan')
+        w = int(window)
+        weights = np.array(range(1, w + 1), dtype=float)
+        sum_weights = float(np.sum(weights))
+        return float(np.sum(weights * data[-w:]) / sum_weights)
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        """Vectorized LWMA computation (popbo-aligned form)."""
+        w = int(window)
+        weights = np.array(range(1, w + 1), dtype=float)
+        sum_weights = float(np.sum(weights))
+        return data.rolling(w).apply(lambda x: np.sum(weights * x) / sum_weights, raw=True)
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """popbo-aligned: exact same computation form as popbo's decay_linear.
+
+        popbo uses: np.sum(weights * x) / sum_weights  (un-normalized weights)
+        NOT: np.dot(x, pre_normalized_weights)
+        The difference in evaluation order causes floating-point divergence
+        in deeply nested rank(decay_linear(...)) expressions.
+        """
+        w = int(window)
+        weights = np.array(range(1, w + 1), dtype=float)
+        sum_weights = float(np.sum(weights))
+        return data.rolling(w).apply(lambda x: np.sum(weights * x) / sum_weights, raw=True)
+
+
+@register_operator
+class TsProduct(TimeSeriesOperator):
+    """Rolling product over window."""
+
+    name = "ts_product"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        """Compute rolling product."""
+        if isinstance(data, (int, float)):
+            return float('nan')
+        if len(data) < window:
+            return float('nan')
+        return float(np.prod(data[-int(window):]))
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        """Vectorized rolling product."""
+        return data.rolling(int(window)).apply(np.prod, raw=True)
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        return data.rolling(int(window)).apply(np.prod, raw=True)
+
+
+# ---------------------------------------------------------------------------
+# WorldQuant BRAIN operators (wq_ prefix) — BRAIN platform semantics
+# ---------------------------------------------------------------------------
+
+
+@register_operator
+class WqTsRank(TimeSeriesOperator):
+    """WorldQuant BRAIN ts_rank: (scipy_rank - 1) / (d - 1), value range [0, 1].
+
+    Example: wq_ts_rank([200, 0, 100], d=3) → 0.5 (100 is the median value)
+    BRAIN docs: ts_rank returns 0 for smallest, 1 for largest.
+    """
+
+    name = "wq_ts_rank"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < window:
+            return float("nan")
+        from scipy.stats import rankdata
+
+        arr = data[-window:]
+        raw = float(rankdata(arr)[-1])
+        return (raw - 1) / (window - 1) if window > 1 else 0.5
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        from scipy.stats import rankdata
+
+        w = int(window)
+
+        def _brain_rank(arr: np.ndarray) -> float:
+            raw = float(rankdata(arr)[-1])
+            return (raw - 1) / (len(arr) - 1) if len(arr) > 1 else 0.5
+
+        return data.rolling(w, min_periods=w).apply(_brain_rank, raw=True)
+
+
+@register_operator
+class WqTsArgmax(TimeSeriesOperator):
+    """WorldQuant BRAIN ts_argmax: 0-indexed from today. Today=0, yesterday=1.
+
+    Example: wq_ts_argmax([4,9,5,8,2,6], d=6) → 4 (max=9 was 4 days ago)
+    Note: BRAIN input order is [today, yesterday, ...] but pandas data is
+    [oldest, ..., today], so we compute: d - 1 - np.argmax(arr).
+    """
+
+    name = "wq_ts_argmax"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < window:
+            return float("nan")
+        arr = data[-window:]
+        return float(len(arr) - 1 - np.argmax(arr))
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        w = int(window)
+
+        def _brain_argmax(arr: np.ndarray) -> float:
+            return float(len(arr) - 1 - np.argmax(arr))
+
+        return data.rolling(w, min_periods=w).apply(_brain_argmax, raw=True)
+
+
+@register_operator
+class WqTsArgmin(TimeSeriesOperator):
+    """WorldQuant BRAIN ts_argmin: 0-indexed from today. Today=0, yesterday=1.
+
+    Example: wq_ts_argmin([4,9,5,8,2,6], d=6) → 1 (min=2 was 1 day ago)
+    """
+
+    name = "wq_ts_argmin"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < window:
+            return float("nan")
+        arr = data[-window:]
+        return float(len(arr) - 1 - np.argmin(arr))
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        w = int(window)
+
+        def _brain_argmin(arr: np.ndarray) -> float:
+            return float(len(arr) - 1 - np.argmin(arr))
+
+        return data.rolling(w, min_periods=w).apply(_brain_argmin, raw=True)
 
 
 # ---------------------------------------------------------------------------
@@ -594,6 +818,31 @@ def covariance(data1: np.ndarray, data2: np.ndarray, window: int) -> float:
     return Covariance().compute(data1, int(window), data2=data2)  # type: ignore
 
 
+def decay_linear(data: np.ndarray, window: int) -> float:
+    """Wrapper for DecayLinear operator."""
+    return DecayLinear().compute(data, int(window))  # type: ignore
+
+
+def ts_product(data: np.ndarray, window: int) -> float:
+    """Wrapper for TsProduct operator."""
+    return TsProduct().compute(data, int(window))  # type: ignore
+
+
+def wq_ts_rank(data: np.ndarray, window: int) -> float:
+    """Wrapper for WqTsRank operator (BRAIN semantics)."""
+    return WqTsRank().compute(data, int(window))  # type: ignore
+
+
+def wq_ts_argmax(data: np.ndarray, window: int) -> float:
+    """Wrapper for WqTsArgmax operator (BRAIN semantics)."""
+    return WqTsArgmax().compute(data, int(window))  # type: ignore
+
+
+def wq_ts_argmin(data: np.ndarray, window: int) -> float:
+    """Wrapper for WqTsArgmin operator (BRAIN semantics)."""
+    return WqTsArgmin().compute(data, int(window))  # type: ignore
+
+
 # Export all function wrappers
 TIME_SERIES_OPERATORS = {
     "ts_mean": ts_mean,
@@ -608,6 +857,24 @@ TIME_SERIES_OPERATORS = {
     "delay": delay,
     "correlation": correlation,
     "covariance": covariance,
+    "decay_linear": decay_linear,
+    "ts_product": ts_product,
+    # Aliases (direct references, no wrapper functions)
+    "stddev": ts_std,
+    "sma": ts_mean,
+    "ts_delta": delta,
+    "ts_delay": delay,
+    "ts_corr": correlation,
+    "ts_covariance": covariance,
+    "ts_std_dev": ts_std,
+    "ts_decay_linear": decay_linear,
+    "product": ts_product,
+    "ts_arg_max": ts_argmax,
+    "ts_arg_min": ts_argmin,
+    # WorldQuant BRAIN operators (wq_ prefix)
+    "wq_ts_rank": wq_ts_rank,
+    "wq_ts_argmax": wq_ts_argmax,
+    "wq_ts_argmin": wq_ts_argmin,
 }
 
 # Instance registry for vectorized evaluator (lookup by operator name)
@@ -624,4 +891,22 @@ TS_OPERATOR_INSTANCES: dict[str, TimeSeriesOperator] = {
     "delay": Delay(),
     "correlation": Correlation(),
     "covariance": Covariance(),
+    "decay_linear": DecayLinear(),
+    "ts_product": TsProduct(),
+    # Aliases pointing to canonical operator instances
+    "stddev": TsStd(),
+    "sma": TsMean(),
+    "ts_delta": Delta(),
+    "ts_delay": Delay(),
+    "ts_corr": Correlation(),
+    "ts_covariance": Covariance(),
+    "ts_std_dev": TsStd(),
+    "ts_decay_linear": DecayLinear(),
+    "product": TsProduct(),
+    "ts_arg_max": TsArgmax(),
+    "ts_arg_min": TsArgmin(),
+    # WorldQuant BRAIN operators (wq_ prefix)
+    "wq_ts_rank": WqTsRank(),
+    "wq_ts_argmax": WqTsArgmax(),
+    "wq_ts_argmin": WqTsArgmin(),
 }

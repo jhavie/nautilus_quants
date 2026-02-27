@@ -330,7 +330,7 @@ engine:
         data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
         bar_spec: "1h"
         signal_prefix: "factor"
-        max_history: 0
+        max_history: 100
         publish_signals: true
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"

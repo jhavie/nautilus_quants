@@ -30,68 +30,44 @@ class CsRank(CrossSectionalOperator):
     max_args = 1
     
     def compute(
-        self, 
+        self,
         values: dict[str, float],
         **kwargs: Any,
     ) -> dict[str, float]:
         """
         Compute percentile ranks across instruments.
-        
+
+        Popbo-aligned: rank(method='min', pct=True), values in [1/n, 1].
+        Formula: (count_strictly_less + 1) / n
+
         Args:
             values: Dict of {instrument_id: value}
-            
+
         Returns:
-            Dict of {instrument_id: rank} where rank is in [0, 1]
+            Dict of {instrument_id: rank} where rank is in [1/n, 1]
         """
         if not values:
             return {}
-        
-        # Filter out NaN values
+
         valid_items = [(k, v) for k, v in values.items() if not np.isnan(v)]
         if not valid_items:
             return {k: float('nan') for k in values}
-        
-        # Sort by value
-        sorted_items = sorted(valid_items, key=lambda x: x[1])
-        n = len(sorted_items)
-        
-        # Assign ranks (0 to 1)
+
+        n = len(valid_items)
         result: dict[str, float] = {}
-        for i, (instrument_id, _) in enumerate(sorted_items):
-            result[instrument_id] = i / (n - 1) if n > 1 else 0.5
-        
-        # Set NaN for instruments with NaN input
         for k, v in values.items():
             if np.isnan(v):
                 result[k] = float('nan')
+            else:
+                count_less = sum(1 for _, val in valid_items if val < v)
+                result[k] = float((count_less + 1) / n)
 
         return result
 
     def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
-        # Match scalar behavior exactly, including tie handling:
-        # ties are ordered by original column order (stable sort).
-        values = df.to_numpy(dtype=float, copy=False)
-        valid_mask = ~np.isnan(values)
-        counts = valid_mask.sum(axis=1)
-
-        # Stable argsort preserves column-order tie-breaking used by scalar path.
-        order = np.argsort(values, axis=1, kind="stable")
-
-        n_rows, n_cols = values.shape
-        pos = np.broadcast_to(np.arange(n_cols, dtype=float), (n_rows, n_cols))
-        denom = np.where(counts > 1, counts - 1, 1)[:, None]
-        rank_sorted = pos / denom
-        rank_sorted = np.where(pos < counts[:, None], rank_sorted, np.nan)
-
-        out = np.full((n_rows, n_cols), np.nan, dtype=float)
-        row_idx = np.arange(n_rows)[:, None]
-        out[row_idx, order] = rank_sorted
-
-        single_mask = counts == 1
-        if single_mask.any():
-            out[single_mask] = np.where(valid_mask[single_mask], 0.5, np.nan)
-
-        return pd.DataFrame(out, index=df.index, columns=df.columns)
+        # Popbo-aligned: df.rank(axis=1, method='min', pct=True)
+        # Values in [1/n, 1] where n = count of non-NaN per row.
+        return df.rank(axis=1, method="min", pct=True)
 
 
 @register_operator
@@ -751,7 +727,11 @@ class CsRankAlias(CrossSectionalOperator):
 
 @register_operator
 class CsScaleAlias(CrossSectionalOperator):
-    """Alias for cs_scale with WorldQuant-compatible name."""
+    """Popbo-aligned scale: df.mul(k).div(np.abs(df).sum()).
+
+    sum() defaults to axis=0 → per-instrument normalization across time.
+    This matches popbo/alphas and 5/7 reference implementations.
+    """
 
     name = "scale"
     min_args = 1
@@ -765,11 +745,14 @@ class CsScaleAlias(CrossSectionalOperator):
         shortscale: float = 1.0,
         **kwargs: Any,
     ) -> dict[str, float]:
-        # WorldQuant scale has more parameters, but basic behavior is same
+        # Scalar context: fall back to CS scale (one timestamp).
         return CsScale().compute(values)
 
     def compute_vectorized(self, df: pd.DataFrame, **kwargs: Any) -> pd.DataFrame:
-        return CsScale().compute_vectorized(df)
+        # Popbo-aligned: df.mul(k).div(np.abs(df).sum())
+        # .sum() defaults to axis=0 → each column sums independently.
+        total = np.abs(df).sum()  # Series[N], one value per instrument
+        return df.div(total.replace(0, np.nan))
 
 
 @register_operator

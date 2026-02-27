@@ -18,6 +18,9 @@ from nautilus_quants.factors.operators.time_series import (
     TsRank,
     TsStd,
     TsSum,
+    WqTsArgmax,
+    WqTsArgmin,
+    WqTsRank,
     delay,
     delta,
     ts_argmax,
@@ -28,6 +31,9 @@ from nautilus_quants.factors.operators.time_series import (
     ts_rank,
     ts_std,
     ts_sum,
+    wq_ts_argmax,
+    wq_ts_argmin,
+    wq_ts_rank,
 )
 
 
@@ -133,15 +139,16 @@ class TestTsRank:
         """Test rank when current value is lowest."""
         data = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
         result = ts_rank(data, 5)
-        assert result == pytest.approx(0.0)  # lowest = rank 0.0
+        # avg_rank = (0 less + (1 equal + 1)/2) / 5 = 1/5 = 0.2
+        assert result == pytest.approx(0.2)
 
     def test_middle_rank(self):
         """Test rank when current value is in middle."""
         data = np.array([1.0, 5.0, 2.0, 4.0, 3.0])
         result = ts_rank(data, 5)
-        # 3.0 is greater than 1.0 and 2.0 (2 values)
-        # rank = 2 / 4 = 0.5
-        assert result == pytest.approx(0.5)
+        # 3.0: 2 values less (1.0, 2.0), 1 equal
+        # avg_rank = (2 + (1+1)/2) / 5 = 3/5 = 0.6
+        assert result == pytest.approx(0.6)
 
 
 class TestTsArgmaxArgmin:
@@ -265,3 +272,86 @@ class TestOperatorClasses:
         data = np.array([1.0, 2.0, 3.0])
         result = op.compute(data, 3)
         assert result == pytest.approx(2.0)
+
+    def test_wq_operator_names(self):
+        """Test wq_ operator names are set correctly."""
+        assert WqTsRank.name == "wq_ts_rank"
+        assert WqTsArgmax.name == "wq_ts_argmax"
+        assert WqTsArgmin.name == "wq_ts_argmin"
+
+
+class TestWqTsRank:
+    """Tests for wq_ts_rank operator (BRAIN semantics, [0, 1])."""
+
+    def test_highest_value(self):
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        result = wq_ts_rank(data, 5)
+        assert result == pytest.approx(1.0)
+
+    def test_lowest_value(self):
+        data = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
+        result = wq_ts_rank(data, 5)
+        assert result == pytest.approx(0.0)
+
+    def test_median_value(self):
+        data = np.array([200.0, 0.0, 100.0])
+        result = wq_ts_rank(data, 3)
+        assert result == pytest.approx(0.5)
+
+    def test_window_one(self):
+        data = np.array([42.0])
+        result = wq_ts_rank(data, 1)
+        assert result == pytest.approx(0.5)
+
+    def test_insufficient_data(self):
+        data = np.array([1.0])
+        result = wq_ts_rank(data, 5)
+        assert math.isnan(result)
+
+
+class TestWqTsArgmax:
+    """Tests for wq_ts_argmax operator (BRAIN semantics, 0-indexed from today)."""
+
+    def test_max_today(self):
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        result = wq_ts_argmax(data, 5)
+        assert result == pytest.approx(0.0)
+
+    def test_max_oldest(self):
+        data = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
+        result = wq_ts_argmax(data, 5)
+        assert result == pytest.approx(4.0)
+
+    def test_max_middle(self):
+        data = np.array([4.0, 9.0, 5.0, 8.0, 2.0, 6.0])
+        result = wq_ts_argmax(data, 6)
+        assert result == pytest.approx(4.0)  # max=9, index 1, offset=6-1-1=4
+
+    def test_insufficient_data(self):
+        data = np.array([1.0])
+        result = wq_ts_argmax(data, 5)
+        assert math.isnan(result)
+
+
+class TestWqTsArgmin:
+    """Tests for wq_ts_argmin operator (BRAIN semantics, 0-indexed from today)."""
+
+    def test_min_today(self):
+        data = np.array([5.0, 4.0, 3.0, 2.0, 1.0])
+        result = wq_ts_argmin(data, 5)
+        assert result == pytest.approx(0.0)
+
+    def test_min_oldest(self):
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        result = wq_ts_argmin(data, 5)
+        assert result == pytest.approx(4.0)
+
+    def test_min_middle(self):
+        data = np.array([4.0, 9.0, 5.0, 8.0, 2.0, 6.0])
+        result = wq_ts_argmin(data, 6)
+        assert result == pytest.approx(1.0)  # min=2, index 4, offset=6-1-4=1
+
+    def test_insufficient_data(self):
+        data = np.array([1.0])
+        result = wq_ts_argmin(data, 5)
+        assert math.isnan(result)

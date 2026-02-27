@@ -84,7 +84,7 @@ class FactorEngine:
         self._warning_threshold_ms: float = 0.5
         self._enable_timing: bool = True
 
-        # Build operators dict
+        # Build operators dict (math → time-series → CS stubs)
         self._operators: dict[str, Any] = {}
         self._operators.update(MATH_OPERATORS)
         self._operators.update(TIME_SERIES_OPERATORS)
@@ -99,7 +99,7 @@ class FactorEngine:
         # Per-instrument, per-factor cached Evaluator + ctx_vars dict
         # instrument_id -> factor_name -> (Evaluator, ctx_vars_dict)
         self._eval_cache: dict[str, dict[str, tuple]] = {}
-        
+
         # Load config if provided
         if config:
             self._apply_config(config)

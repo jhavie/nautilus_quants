@@ -26,6 +26,17 @@ from nautilus_quants.factors.expression.ast import (
     VariableNode,
 )
 
+# Operators that take two data series: op(x, y, window).
+# Derived at import time from TS_OPERATOR_INSTANCES so new operators
+# registered via the registry are automatically included.
+def _build_two_data_ops() -> frozenset[str]:
+    from nautilus_quants.factors.operators.time_series import TS_OPERATOR_INSTANCES
+    return frozenset(
+        name for name, op in TS_OPERATOR_INSTANCES.items() if op.min_args >= 3
+    )
+
+_TWO_DATA_OPS: frozenset[str] = _build_two_data_ops()
+
 
 class EvaluationError(Exception):
     """Raised when expression evaluation fails."""
@@ -381,7 +392,8 @@ class VectorizedEvaluator(ASTVisitor):
             args = [self.evaluate(arg) for arg in node.arguments]
             data = args[0]
             extra_kwargs: dict[str, Any] = {}
-            if func_name in ("correlation", "covariance") and len(args) > 2:
+            # Two-data operators: correlation, covariance and their BRAIN aliases
+            if func_name in _TWO_DATA_OPS and len(args) > 2:
                 # correlation(x, y, window) -> data=x, window=window, data2=y
                 extra_kwargs["data2"] = args[1]
                 window = int(args[2])
