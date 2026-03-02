@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import time
+from collections import defaultdict
 from typing import Any
 
 import numpy as np
@@ -86,6 +87,13 @@ class PanelFactorEngine:
         self._total_computes: int = 0
         self._enable_timing: bool = True
         self._warning_threshold_ms: float = 0.5
+
+        # Detailed profiling (per-phase breakdown)
+        self._enable_profiling: bool = False
+        self._phase_times: defaultdict[str, list[float]] = defaultdict(list)
+
+        # Cached evaluator (reused across flushes to avoid re-creation overhead)
+        self._evaluator: PanelEvaluator | None = None
 
         if config:
             self._apply_config(config)
@@ -179,24 +187,37 @@ class PanelFactorEngine:
             ``{factor_name: {instrument_id: value}}``.
             Instruments with NaN values are excluded.
         """
-        start_time = time.perf_counter() if self._enable_timing else 0
+        profiling = self._enable_profiling
+        pc = time.perf_counter
 
+        t0 = pc()
+
+        # Phase: flush
         self._buffer.flush_timestamp(ts)
+        t1 = pc()
+
+        # Phase: to_panel
         panel_fields: dict[str, pd.DataFrame | float] = self._buffer.to_panel()  # type: ignore[assignment]
+        t2 = pc()
 
         # Inject config parameters so they're accessible as variables
         for p_name, p_val in self._parameters.items():
             panel_fields[p_name] = p_val
 
-        evaluator = PanelEvaluator(
-            panel_fields=panel_fields,
-            ts_ops=self._ts_ops,
-            cs_ops=self._cs_ops,
-            math_ops=self._math_ops,
-            parameters=self._parameters,
-        )
+        # Reuse evaluator — only update the fields reference
+        if self._evaluator is None:
+            self._evaluator = PanelEvaluator(
+                panel_fields=panel_fields,
+                ts_ops=self._ts_ops,
+                cs_ops=self._cs_ops,
+                math_ops=self._math_ops,
+                parameters=self._parameters,
+            )
+        else:
+            self._evaluator._fields = panel_fields
+        evaluator = self._evaluator
 
-        # Evaluate variables first (in registration order)
+        # Phase: variables
         for var_name in self._variable_order:
             var_ast = self._variables[var_name]
             try:
@@ -204,8 +225,9 @@ class PanelFactorEngine:
                 panel_fields[var_name] = var_result
             except Exception:
                 pass  # Variable evaluation failure — skip silently
+        t3 = pc()
 
-        # Evaluate each factor
+        # Phase: factors
         results: dict[str, dict[str, float]] = {}
         instruments = self._buffer.instruments
 
@@ -215,26 +237,23 @@ class PanelFactorEngine:
                 # Inject result into panel_fields so subsequent factors can
                 # reference it (e.g. momentum_3h_norm references momentum_3h).
                 # fillna(0): prevents NaN propagation in composite formulas.
-                # When a factor has NaN (e.g. alpha039's ts_mean(returns, 250)
-                # needs 250 bars but only 180 available), the NaN would
-                # propagate through: alpha039→alpha039_norm→composite, making
-                # the entire composite NaN.  Treating NaN as 0 (neutral) in
-                # the injected panel is safe because:
-                # - CS operators (normalize, rank) handle constant-0 gracefully
-                # - The composite sum remains valid for other contributing factors
                 if isinstance(result_df, pd.DataFrame):
-                    panel_fields[name] = result_df.fillna(0)
+                    result_df.fillna(0, inplace=True)
+                    panel_fields[name] = result_df
+                    # Extract last row via numpy — avoid Series creation
+                    vals = result_df.values[-1]  # numpy array view, no copy
+                    mask = ~np.isnan(vals)
+                    if mask.any():
+                        cols = result_df.columns
+                        results[name] = {
+                            cols[i]: float(vals[i])
+                            for i in range(len(vals))
+                            if mask[i]
+                        }
+                    else:
+                        results[name] = {}
                 elif isinstance(result_df, (int, float)):
                     panel_fields[name] = result_df
-                if isinstance(result_df, pd.DataFrame) and not result_df.empty:
-                    last_row = result_df.iloc[-1]
-                    results[name] = {
-                        inst: float(v)
-                        for inst, v in last_row.items()
-                        if not np.isnan(v)
-                    }
-                elif isinstance(result_df, (int, float)):
-                    # Scalar result → broadcast to all instruments
                     val = float(result_df)
                     if not np.isnan(val):
                         results[name] = {inst: val for inst in instruments}
@@ -244,12 +263,21 @@ class PanelFactorEngine:
                     results[name] = {}
             except Exception:
                 results[name] = {}
+        t4 = pc()
 
         # Track timing
         if self._enable_timing:
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            elapsed_ms = (t4 - t0) * 1000
             self._compute_times.append(elapsed_ms)
             self._total_computes += 1
+
+        # Track detailed profiling
+        if profiling:
+            self._phase_times["flush"].append((t1 - t0) * 1000)
+            self._phase_times["to_panel"].append((t2 - t1) * 1000)
+            self._phase_times["variables"].append((t3 - t2) * 1000)
+            self._phase_times["factors"].append((t4 - t3) * 1000)
+            self._phase_times["total"].append((t4 - t0) * 1000)
 
         return results
 
@@ -279,6 +307,15 @@ class PanelFactorEngine:
             extra_fields=tuple(fields),
         )
 
+    @property
+    def enable_profiling(self) -> bool:
+        """Whether detailed per-phase profiling is enabled."""
+        return self._enable_profiling
+
+    @enable_profiling.setter
+    def enable_profiling(self, value: bool) -> None:
+        self._enable_profiling = value
+
     def get_performance_stats(self) -> dict[str, float]:
         """Return performance statistics."""
         if not self._compute_times:
@@ -295,6 +332,32 @@ class PanelFactorEngine:
             "p95_ms": float(np.percentile(self._compute_times, 95)),
             "total_computes": self._total_computes,
         }
+
+    def get_profiling_stats(self) -> dict[str, dict[str, float]]:
+        """Return detailed per-phase profiling statistics.
+
+        Requires ``enable_profiling = True`` before running.
+
+        Returns
+        -------
+        dict[str, dict[str, float]]
+            ``{phase_name: {"mean_ms": ..., "max_ms": ..., "p95_ms": ..., "pct": ...}}``.
+        """
+        if not self._phase_times:
+            return {}
+
+        total_mean = float(np.mean(self._phase_times["total"])) if self._phase_times["total"] else 1.0
+        stats: dict[str, dict[str, float]] = {}
+        for phase, times in self._phase_times.items():
+            arr = np.array(times)
+            mean = float(arr.mean())
+            stats[phase] = {
+                "mean_ms": mean,
+                "max_ms": float(arr.max()),
+                "p95_ms": float(np.percentile(arr, 95)),
+                "pct": mean / total_mean * 100 if total_mean > 0 else 0.0,
+            }
+        return stats
 
     def reset(self) -> None:
         """Reset all engine state."""
