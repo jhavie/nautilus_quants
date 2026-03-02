@@ -132,6 +132,9 @@ factors:
     expression: "0.20 * alpha044_norm + 0.15 * alpha033_norm + 0.15 * alpha017_norm + 0.12 * alpha026_norm + 0.12 * alpha055_norm + 0.10 * alpha002_norm + 0.10 * alpha039_norm + 0.06 * alpha003_norm"
     description: "8-factor composite: alpha044(0.20) + alpha033(0.15) + alpha017(0.15) + alpha026(0.12) + alpha055(0.12) + alpha002(0.10) + alpha039(0.10) + alpha003(0.06)"
 
+  composite_neg:
+    expression: "-0.20 * alpha044_norm - 0.15 * alpha033_norm - 0.15 * alpha017_norm - 0.12 * alpha026_norm - 0.12 * alpha055_norm - 0.10 * alpha002_norm - 0.10 * alpha039_norm - 0.06 * alpha003_norm"
+    description: "8-factor composite: alpha044(0.20) + alpha033(0.15) + alpha017(0.15) + alpha026(0.12) + alpha055(0.12) + alpha002(0.10) + alpha039(0.10) + alpha003(0.06)"
 performance:
   enable_timing: true
   warning_threshold_ms: 1.0
