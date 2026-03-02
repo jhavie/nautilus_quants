@@ -287,12 +287,6 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         if self._config.publish_signals:
             self.publish_data(data_type=DataType(FactorValues), data=factor_values)
-            if self._engine._total_computes <= 3:
-                n_factors = sum(1 for v in results.values() if v)
-                self.log.info(
-                    f"Published FactorValues: ts={ts}, "
-                    f"{n_factors}/{len(results)} non-empty factors"
-                )
 
     def on_reset(self) -> None:
         """Reset the actor state."""

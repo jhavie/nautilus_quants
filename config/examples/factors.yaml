@@ -1,143 +1,274 @@
-# Factor Framework Configuration
-# This file defines factors using Alpha101-style expressions
+# Alpha101 Factor Configuration — 45 Crypto-Friendly Factors
+#
+# Filtered from the original 101 alphas with the following criteria:
+#   ❌ No VWAP dependency
+#   ❌ No IndNeutralize (no industry classification in crypto)
+#   ❌ No market cap (cap)
+#   ❌ No machine-optimized magic numbers (2.21, 0.728317, etc.)
+#   ❌ No scale-dependent constants (close - 1)
+#
+# Expressions sourced from: src/nautilus_quants/factors/builtin/alpha101.py
+# Verified against popbo reference: tests/unit/factors/test_alpha101_vs_popbo.py
 
 metadata:
-  name: "nautilus_quants_factors"
-  version: "1.0"
-  description: "Factor definitions for quantitative trading"
+  name: "alpha101_45_crypto"
+  version: "1.0.0"
+  description: "45 Alpha101 factors suitable for crypto market-neutral strategies"
 
-# Global parameters (can be referenced in expressions)
-parameters:
-  # Time-series lookback periods
-  short_period: 5
-  medium_period: 20
-  long_period: 60
-  
-  # Cross-sectional parameters
-  adv_period: 20  # Average daily volume period
-  
-  # Breakout parameters
-  breakout_period: 30
-  sma_period: 200
-
-# Reusable variable definitions
 variables:
-  # Basic price derivatives
+  # Simple return: (close_t - close_{t-1}) / close_{t-1}
   returns: "delta(close, 1) / delay(close, 1)"
-  log_returns: "log(close / delay(close, 1))"
-  
-  # Volume metrics (use quote_volume for USDT-denominated turnover when available)
-  adv20: "ts_mean(quote_volume, adv_period)"
-  volume_ratio: "quote_volume / adv20"
-  
-  # SMA for trend filter
-  sma: "ts_mean(close, sma_period)"
-  
-  # ============================================
-  # Breakout Signal Components
-  # ============================================
-  
-  # Price breakout conditions (WorldQuant ts_argmax semantics)
-  # ts_argmax returns: 1 = oldest, window = newest (today)
-  # So ts_argmax(close, 31) == 31 means today is the max of last 31 bars
-  price_new_high: "ts_argmax(close, breakout_period + 1) == breakout_period + 1"
-  price_new_low: "ts_argmin(close, breakout_period + 1) == breakout_period + 1"
-  
-  # Volume breakout condition (use quote_volume for USDT-denominated turnover)
-  volume_breakout: "ts_argmax(quote_volume, breakout_period + 1) == breakout_period + 1"
-  
-  # Trend filter conditions
-  above_sma: "close > sma"
-  below_sma: "close < sma"
-  
-  # Combined signals
-  long_signal: "price_new_high * volume_breakout * above_sma"
-  short_signal: "price_new_low * volume_breakout * below_sma"
 
-# Factor definitions
 factors:
-  # ============================================
-  # Breakout Factor (Validation Target)
-  # ============================================
-  
-  alpha_breakout:
-    # 使用 WorldQuant ts_argmax/ts_argmin 语义实现双向突破检测:
-    #
-    # 做多条件 (返回 +1):
-    #   - price_new_high: 今天的 close 严格大于过去 30 天
-    #   - volume_breakout: 今天的 volume 严格大于过去 30 天
-    #   - above_sma: 收盘价在均线之上
-    #
-    # 做空条件 (返回 -1):
-    #   - price_new_low: 今天的 close 严格小于过去 30 天
-    #   - volume_breakout: 今天的 volume 严格大于过去 30 天 (放量)
-    #   - below_sma: 收盘价在均线之下
-    #
-    # 表达式逻辑: long_signal - short_signal
-    expression: "long_signal - short_signal"
-    description: "量价突破信号: +1=做多(创新高), -1=做空(创新低), 0=无信号"
-    category: "breakout"
+  # ==========================================================================
+  # Category: Volatility (4 factors)
+  # ==========================================================================
 
-  # ============================================
-  # Alpha101-Style Factors (Commented Out)
-  # Uncomment to enable specific factors
-  # ============================================
-  
-  # alpha001:
-  #   expression: "-1 * ts_rank(ts_argmax(close, 30), 5)"
-  #   description: "Rank of argmax position"
-  #   category: "momentum"
-  
-  # alpha002:
-  #   expression: "-1 * ts_rank(delta(close, 2), 6)"
-  #   description: "Ranked price change"
-  #   category: "momentum"
-  
-  # alpha003:
-  #   expression: "-1 * ts_rank(ts_rank(low, 9), 7)"
-  #   description: "Double rank of low"
-  #   category: "reversion"
-  
-  # alpha004:
-  #   expression: "ts_rank(volume, 20)"
-  #   description: "Volume rank"
-  #   category: "volume"
-  
-  # alpha005:
-  #   expression: "ts_rank(close - ts_mean(close, 10), 5)"
-  #   description: "Mean deviation rank"
-  #   category: "momentum"
-  
-  # alpha006:
-  #   expression: "-1 * delta(close, 3)"
-  #   description: "Negative 3-day change"
-  #   category: "reversion"
-  
-  # alpha007:
-  #   expression: "ts_rank(abs(delta(close, 7)), 20)"
-  #   description: "Volatility rank"
-  #   category: "volatility"
-  
-  # alpha008:
-  #   expression: "ts_mean(returns, 5)"
-  #   description: "5-day average returns"
-  #   category: "momentum"
-  
-  # alpha009:
-  #   expression: "delta(close, 1)"
-  #   description: "1-day price change"
-  #   category: "momentum"
-  
-  # alpha010:
-  #   expression: "ts_rank(delta(close, 1), 6)"
-  #   description: "Ranked daily change"
-  #   category: "momentum"
+  alpha001:
+    expression: "rank(ts_argmax(signed_power(if_else(returns < 0, stddev(returns, 20), close), 2), 5)) - 0.5"
+    description: "Alpha#1: Conditional signed power rank — down-vol regime detection"
+    category: "volatility"
 
-# Performance settings
+  alpha018:
+    expression: "-1 * rank(stddev(abs(close - open), 5) + (close - open) + correlation(close, open, 10))"
+    description: "Alpha#18: Intraday volatility + trend + open-close correlation"
+    category: "volatility"
+
+  alpha034:
+    expression: "rank(2 - rank(stddev(returns, 2) / stddev(returns, 5)) - rank(delta(close, 1)))"
+    description: "Alpha#34: Volatility compression + price reversal"
+    category: "volatility"
+
+  alpha040:
+    expression: "-1 * rank(stddev(high, 10)) * correlation(high, volume, 10)"
+    description: "Alpha#40: High-price volatility × price-volume correlation"
+    category: "volatility"
+
+  # ==========================================================================
+  # Category: Momentum / Reversal (14 factors)
+  # ==========================================================================
+
+  alpha008:
+    expression: "-1 * rank(ts_sum(open, 5) * ts_sum(returns, 5) - delay(ts_sum(open, 5) * ts_sum(returns, 5), 10))"
+    description: "Alpha#8: Short vs medium-term open-returns momentum change"
+    category: "momentum"
+
+  alpha009:
+    expression: "if_else(ts_min(delta(close, 1), 5) > 0, delta(close, 1), if_else(ts_max(delta(close, 1), 5) < 0, delta(close, 1), -1 * delta(close, 1)))"
+    description: "Alpha#9: Adaptive momentum/reversal — trend continuation vs mean-reversion"
+    category: "momentum"
+
+  alpha010:
+    expression: "rank(if_else(ts_min(delta(close, 1), 4) > 0, delta(close, 1), if_else(ts_max(delta(close, 1), 4) < 0, delta(close, 1), -1 * delta(close, 1))))"
+    description: "Alpha#10: Cross-sectional ranked adaptive momentum/reversal"
+    category: "momentum"
+
+  alpha019:
+    expression: "-1 * sign((close - delay(close, 7)) + delta(close, 7)) * (1 + rank(1 + ts_sum(returns, 250)))"
+    description: "Alpha#19: 7-day change sign × long-term cumulative returns"
+    category: "momentum"
+
+  alpha020:
+    expression: "-1 * rank(open - delay(high, 1)) * rank(open - delay(close, 1)) * rank(open - delay(low, 1))"
+    description: "Alpha#20: Gap analysis — open vs prior HLC triple rank"
+    category: "momentum"
+
+  alpha033:
+    expression: "rank(-1 + open / close)"
+    description: "Alpha#33: Open/close ratio rank"
+    category: "momentum"
+
+  alpha037:
+    expression: "rank(correlation(delay(open - close, 1), close, 200)) + rank(open - close)"
+    description: "Alpha#37: Long-term open-close correlation + intraday return"
+    category: "momentum"
+
+  alpha038:
+    expression: "-1 * rank(ts_rank(open, 10)) * rank(close / open)"
+    description: "Alpha#38: Trend rank × intraday strength"
+    category: "momentum"
+
+  alpha046:
+    expression: "if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close, 10) - close) / 10 > 0.25, -1, if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close, 10) - close) / 10 < 0, 1, -1 * delta(close, 1)))"
+    description: "Alpha#46: Price acceleration regime — trend vs reversal"
+    category: "momentum"
+
+  alpha049:
+    expression: "if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close, 10) - close) / 10 < -0.1, 1, -1 * delta(close, 1))"
+    description: "Alpha#49: Acceleration decline signal"
+    category: "momentum"
+
+  alpha051:
+    expression: "if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close, 10) - close) / 10 < -0.05, 1, -1 * delta(close, 1))"
+    description: "Alpha#51: Acceleration decline signal (tight threshold)"
+    category: "momentum"
+
+  alpha052:
+    expression: "-1 * delta(ts_min(low, 5), 5) * rank((ts_sum(returns, 240) - ts_sum(returns, 20)) / 220) * ts_rank(volume, 5)"
+    description: "Alpha#52: Low change × long-term momentum × volume rank"
+    category: "momentum"
+
+  alpha053:
+    expression: "-1 * delta(((close - low) - (high - close)) / replace_zero(close - low, 0.0001), 9)"
+    description: "Alpha#53: Williams %R change rate"
+    category: "momentum"
+
+  alpha101:
+    expression: "(close - open) / ((high - low) + 0.001)"
+    description: "Alpha#101: K-line body-to-range ratio"
+    category: "momentum"
+
+  # ==========================================================================
+  # Category: Reversion (5 factors)
+  # ==========================================================================
+
+  alpha004:
+    expression: "-1 * ts_rank(rank(low), 9)"
+    description: "Alpha#4: Time-series rank of cross-sectional rank of low"
+    category: "reversion"
+
+  alpha021:
+    expression: "if_else(ts_mean(close, 8) + stddev(close, 8) < ts_mean(close, 2), -1, if_else(ts_mean(close, 2) < ts_mean(close, 8) - stddev(close, 8), 1, if_else(volume / ts_mean(volume, 20) >= 1, 1, -1)))"
+    description: "Alpha#21: Bollinger band breakout + volume regime"
+    category: "reversion"
+
+  alpha023:
+    expression: "if_else(ts_mean(high, 20) < high, -1 * delta(high, 2), 0)"
+    description: "Alpha#23: High breakout reversal"
+    category: "reversion"
+
+  alpha024:
+    expression: "if_else(delta(ts_mean(close, 100), 100) / delay(close, 100) <= 0.05, -1 * (close - ts_min(close, 100)), -1 * delta(close, 3))"
+    description: "Alpha#24: 100-period trend regime switching"
+    category: "reversion"
+
+  alpha054:
+    expression: "-1 * (low - close) * power(open, 5) / (replace_zero(low - high, -0.0001) * power(close, 5))"
+    description: "Alpha#54: Nonlinear candlestick pattern"
+    category: "reversion"
+
+  # ==========================================================================
+  # Category: Volume / Price-Volume (18 factors)
+  # ==========================================================================
+
+  alpha002:
+    expression: "-1 * correlation(rank(delta(log(volume), 2)), rank((close - open) / open), 6)"
+    description: "Alpha#2: Volume change rate vs intraday return correlation"
+    category: "volume"
+
+  alpha003:
+    expression: "-1 * correlation(rank(open), rank(volume), 10)"
+    description: "Alpha#3: Open-volume rank correlation"
+    category: "volume"
+
+  alpha006:
+    expression: "-1 * correlation(open, volume, 10)"
+    description: "Alpha#6: Open-volume correlation (simplest price-volume factor)"
+    category: "volume"
+
+  alpha012:
+    expression: "sign(delta(volume, 1)) * -1 * delta(close, 1)"
+    description: "Alpha#12: Volume-price divergence reversal"
+    category: "volume"
+
+  alpha013:
+    expression: "-1 * rank(covariance(rank(close), rank(volume), 5))"
+    description: "Alpha#13: Close-volume rank covariance"
+    category: "volume"
+
+  alpha014:
+    expression: "-1 * rank(delta(returns, 3)) * correlation(open, volume, 10)"
+    description: "Alpha#14: Returns delta rank × open-volume correlation"
+    category: "volume"
+
+  alpha015:
+    expression: "-1 * ts_sum(rank(correlation(rank(high), rank(volume), 3)), 3)"
+    description: "Alpha#15: High-volume rank correlation cumulative"
+    category: "volume"
+
+  alpha016:
+    expression: "-1 * rank(covariance(rank(high), rank(volume), 5))"
+    description: "Alpha#16: High-volume rank covariance"
+    category: "volume"
+
+  alpha022:
+    expression: "-1 * delta(correlation(high, volume, 5), 5) * rank(stddev(close, 20))"
+    description: "Alpha#22: High-volume correlation change × volatility rank"
+    category: "volume"
+
+  alpha026:
+    expression: "-1 * ts_max(correlation(ts_rank(volume, 5), ts_rank(high, 5), 5), 3)"
+    description: "Alpha#26: Max volume-high time-series rank correlation"
+    category: "volume"
+
+  alpha028:
+    expression: "scale(correlation(ts_mean(volume, 20), low, 5) + (high + low) / 2 - close)"
+    description: "Alpha#28: Volume-low correlation + midprice deviation (scaled)"
+    category: "volume"
+
+  alpha044:
+    expression: "-1 * correlation(high, rank(volume), 5)"
+    description: "Alpha#44: High-price vs volume rank correlation"
+    category: "volume"
+
+  alpha045:
+    expression: "-1 * rank(ts_mean(delay(close, 5), 20)) * correlation(close, volume, 2) * rank(correlation(ts_sum(close, 5), ts_sum(close, 20), 2))"
+    description: "Alpha#45: Delayed close MA × double correlation"
+    category: "volume"
+
+  alpha055:
+    expression: "-1 * correlation(rank((close - ts_min(low, 12)) / replace_zero(ts_max(high, 12) - ts_min(low, 12), 0.0001)), rank(volume), 6)"
+    description: "Alpha#55: Stochastic oscillator vs volume rank correlation"
+    category: "volume"
+
+  alpha060:
+    expression: "0 - (2 * scale(rank(((close - low) - (high - close)) / replace_zero(high - low, 0.0001) * volume)) - scale(rank(ts_argmax(close, 10))))"
+    description: "Alpha#60: Williams distribution × volume − top detection"
+    category: "volume"
+
+  alpha030:
+    expression: "(1 - rank(sign(close - delay(close, 1)) + sign(delay(close, 1) - delay(close, 2)) + sign(delay(close, 2) - delay(close, 3)))) * ts_sum(volume, 5) / ts_sum(volume, 20)"
+    description: "Alpha#30: Direction consistency × volume ratio"
+    category: "volume"
+
+  alpha035:
+    expression: "ts_rank(volume, 32) * (1 - ts_rank(close + high - low, 16)) * (1 - ts_rank(returns, 32))"
+    description: "Alpha#35: Volume × range × return three-dimensional factor"
+    category: "volume"
+
+  alpha043:
+    expression: "ts_rank(volume / ts_mean(volume, 20), 20) * ts_rank(-1 * delta(close, 7), 8)"
+    description: "Alpha#43: Relative volume rank × reversal rank"
+    category: "volume"
+
+  # ==========================================================================
+  # Category: Liquidity / Flow (2 factors)
+  # ==========================================================================
+
+  alpha007:
+    expression: "if_else(ts_mean(volume, 20) < volume, -1 * ts_rank(abs(delta(close, 7)), 60) * sign(delta(close, 7)), -1)"
+    description: "Alpha#7: Volume breakout conditional momentum"
+    category: "liquidity"
+
+  alpha017:
+    expression: "-1 * rank(ts_rank(close, 10)) * rank(delta(delta(close, 1), 1)) * rank(ts_rank(volume / ts_mean(volume, 20), 5))"
+    description: "Alpha#17: Trend × acceleration × relative volume triple product"
+    category: "liquidity"
+
+  # ==========================================================================
+  # Category: Composite / Multi-signal (2 factors)
+  # ==========================================================================
+
+  alpha031:
+    expression: "rank(rank(rank(decay_linear(-1 * rank(rank(delta(close, 10))), 10)))) + rank(-1 * delta(close, 3)) + sign(scale(correlation(ts_mean(volume, 20), low, 12)))"
+    description: "Alpha#31: Multi-rank decay + delta + volume correlation"
+    category: "composite"
+
+  alpha039:
+    expression: "-1 * rank(delta(close, 7) * (1 - rank(decay_linear(volume / ts_mean(volume, 20), 9)))) * (1 + rank(ts_mean(returns, 250)))"
+    description: "Alpha#39: Momentum × volume flow decay × long-term reversal"
+    category: "composite"
+
 performance:
-  # Maximum computation time per bar (milliseconds)
-  max_compute_time_ms: 1.0
-  # Enable performance logging
   enable_timing: true
-  # Warning threshold (milliseconds)
-  warning_threshold_ms: 0.5
+  warning_threshold_ms: 1.0

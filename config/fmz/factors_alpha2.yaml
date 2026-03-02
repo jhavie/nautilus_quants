@@ -1,0 +1,42 @@
+# Alpha101 6-Factor Composite Strategy Configuration
+# Based on alpha analysis scoring results
+#
+# Composite formula:
+#   0.25 * alpha035 + 0.20 * alpha026 + 0.20 * (-1 * alpha101) + 0.15 * alpha006 + 0.10 * alpha012 + 0.10 * alpha049
+#
+# Factor sources (from config/examples/factors.yaml):
+#   - alpha035: Volume × range × return three-dimensional factor (volume, weight 0.25)
+#   - alpha026: Max volume-high time-series rank correlation (volume, weight 0.20)
+#   - alpha101: K-line body-to-range ratio — inverted (momentum, weight 0.20)
+#   - alpha006: Open-volume correlation (volume, weight 0.15)
+#   - alpha012: Volume-price divergence reversal (volume, weight 0.10)
+#   - alpha049: Acceleration decline signal (momentum, weight 0.10)
+#
+# Normalization: quantile(0.2, 0.8) clip + z-score (same as FMZ 4-factor)
+#
+# Composite weights sum to 1.0
+
+metadata:
+  name: alpha101_6factor
+  version: "1.0"
+  description: "Alpha101 6-factor composite based on IC/ICIR alpha analysis scoring"
+
+variables:
+  returns: "delta(close, 1) / delay(close, 1)"
+
+factors:
+  # ========== 原始因子 (Phase 1: Time-Series) ==========
+
+  alpha044:
+    expression: "correlation(high, rank(volume), 6)"
+    description: "Alpha#44: High-price vs volume rank correlation"
+    category: "volume"
+  # ========== 6 因子合成 ==========
+  # 0.25 * alpha035 + 0.20 * alpha026 + 0.20 * (-1 * alpha101) + 0.15 * alpha006 + 0.10 * alpha012 + 0.10 * alpha049
+  # composite:
+  #   expression: "0.25 * alpha035_norm + 0.20 * alpha026_norm + 0.20 * (-1 * alpha101_norm) + 0.15 * alpha006_norm + 0.10 * alpha012_norm + 0.10 * alpha049_norm"
+  #   description: "6-factor composite: alpha035(0.25) + alpha026(0.20) + -alpha101(0.20) + alpha006(0.15) + alpha012(0.10) + alpha049(0.10)"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

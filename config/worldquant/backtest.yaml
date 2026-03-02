@@ -24,14 +24,14 @@ venues:
     account_type: "MARGIN"
     base_currency: "USDT"
     starting_balances:
-      - "10000 USDT"
+      - "100000 USDT"
     default_leverage: 1
 
 data:
   # Standard Bar (Nautilus native, for Instrument registration and price data)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
-    bar_spec: "1h"
+    bar_spec: "4h"
     instrument_ids:
       - "1000LUNCUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
@@ -157,7 +157,6 @@ data:
       - "TLMUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
-      - "UNFIUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
       - "WAVESUSDT.BINANCE"
@@ -173,11 +172,11 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-01-14"
+    end_time: "2023-12-31"
   # BinanceBar (provides extra fields like quote_volume to FactorEngineActor)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
-    bar_spec: "1h"
+    bar_spec: "4h"
     instrument_ids:
       - "1000LUNCUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
@@ -303,7 +302,6 @@ data:
       - "TLMUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
-      - "UNFIUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
       - "WAVESUSDT.BINANCE"
@@ -319,7 +317,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-01-14"
+    end_time: "2023-12-31"
 
 engine:
   trader_id: "BACKTESTER-WQ-VWAP4H-001"
@@ -342,11 +340,11 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/fmz/factors.yaml"
+        factor_config_path: "config/fmz/factors_alpha2.yaml"
         data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
-        bar_spec: "1h"
+        bar_spec: "4h"
         signal_prefix: "factor"
-        max_history: 10
+        max_history: 200
         publish_signals: true
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
@@ -484,7 +482,6 @@ engine:
           - "TLMUSDT.BINANCE"
           - "TRBUSDT.BINANCE"
           - "TRXUSDT.BINANCE"
-          - "UNFIUSDT.BINANCE"
           - "UNIUSDT.BINANCE"
           - "VETUSDT.BINANCE"
           - "WAVESUSDT.BINANCE"
@@ -499,23 +496,23 @@ engine:
           - "ZENUSDT.BINANCE"
           - "ZILUSDT.BINANCE"
           - "ZRXUSDT.BINANCE"
-        factor_name: "composite_neg"
+        factor_name: "alpha044"
         delay: 0
-        decay: 3
+        decay: 6
         neutralization: "MARKET"
         truncation: 0
-        rebalance_period: 4
-        capital: 10000.0
+        rebalance_period: 12
+        capital: 100000.0
         enable_long: true
         enable_short: true
 
 report:
-  output_dir: "logs/worldquant_vwap_4h"
+  output_dir: "logs/worldquant_new_alpha"
   formats:
-    # - csv
+    - csv
     - html
   tearsheet:
-    enabled: true
+    enabled: false
     title: "WorldQuant VWAP 4h Backtest"
     theme: "nautilus"
     height: 1500

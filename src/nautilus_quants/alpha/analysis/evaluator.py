@@ -1,13 +1,12 @@
 """Factor evaluator - core alpha analysis logic.
 
-Computes factor values using FactorEngine + CsFactorEngine,
+Computes factor values using PanelEvaluator (unified TS+CS evaluation),
 then evaluates factor quality via alphalens-reloaded.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -15,9 +14,8 @@ import pandas as pd
 
 from nautilus_quants.alpha.data_loader import CatalogDataLoader
 from nautilus_quants.factors.config import FactorConfig
-from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
-from nautilus_quants.factors.engine.factor_engine import FactorEngine
-from nautilus_quants.factors.expression import VectorizedEvaluator, parse_expression
+from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+from nautilus_quants.factors.expression import parse_expression
 from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
 from nautilus_quants.factors.operators.time_series import TS_OPERATOR_INSTANCES
@@ -33,15 +31,14 @@ logger = logging.getLogger(__name__)
 class FactorEvaluator:
     """Evaluate factor quality using alphalens.
 
-    Uses the two-phase computation architecture:
-    - Phase 1: FactorEngine computes time-series factors per bar
-    - Phase 2: CsFactorEngine computes cross-sectional factors across instruments
+    Uses PanelEvaluator for unified TS+CS factor computation over
+    panel DataFrames (timestamps × instruments).  All factor expressions
+    — including nested rank(ts_argmax(…)) — are evaluated in a single
+    recursive AST pass.
     """
 
     def __init__(self, factor_config: FactorConfig) -> None:
         self._factor_config = factor_config
-        self._ts_engine = FactorEngine(config=factor_config)
-        self._cs_engine = CsFactorEngine(config=factor_config)
 
     def evaluate(
         self,
@@ -63,13 +60,12 @@ class FactorEvaluator:
         self,
         bars_by_instrument: dict[str, list[Bar]],
     ) -> tuple[dict[str, pd.Series], pd.DataFrame]:
-        """Vectorized two-phase factor computation.
+        """Unified panel-based factor computation via PanelEvaluator.
 
-        1. Convert bars to DataFrames per instrument
-        2. Compute TS factors via VectorizedEvaluator (full Series, no Python loop)
-        3. Build factor panels: {factor_name: DataFrame(timestamps x instruments)}
-        4. Compute CS factors via CS operator compute_vectorized()
-        5. Convert to alphalens MultiIndex format
+        1. Convert bars to per-instrument DataFrames
+        2. Build OHLCV panel DataFrames (timestamps × instruments)
+        3. Evaluate ALL expressions (variables + factors) via PanelEvaluator
+        4. Convert to alphalens MultiIndex format
         """
         if not bars_by_instrument:
             return {}, pd.DataFrame()
@@ -90,75 +86,72 @@ class FactorEvaluator:
             {inst_id: df["close"] for inst_id, df in ohlcv_dfs.items()}
         )
 
-        # --- Step 2: Compute TS factors via VectorizedEvaluator ---
-        # Build variable expressions from config
-        variable_exprs = dict(config.variables)
-        ts_factor_names = self._cs_engine.ts_factor_names
-        ts_factor_defs = {
-            f.name: f for f in config.factors if f.name in ts_factor_names
-        }
-
-        # Collect per-instrument factor series, then build panels via concat
-        # to avoid DataFrame fragmentation from column-by-column insertion.
-        factor_series_by_name: dict[str, dict[str, pd.Series]] = {}
-
-        for inst_id in instruments:
-            if inst_id not in ohlcv_dfs:
-                continue
-            df = ohlcv_dfs[inst_id]
-            # Base variables
-            variables: dict[str, pd.Series] = {
-                "open": df["open"],
-                "high": df["high"],
-                "low": df["low"],
-                "close": df["close"],
-                "volume": df["volume"],
+        # --- Step 2: Build OHLCV panel DataFrames ---
+        fields = ("open", "high", "low", "close", "volume")
+        panel_fields: dict[str, pd.DataFrame | float] = {}
+        for field in fields:
+            series_dict = {
+                inst_id: df[field]
+                for inst_id, df in ohlcv_dfs.items()
             }
+            panel_fields[field] = pd.concat(series_dict, axis=1)
 
-            evaluator = VectorizedEvaluator(
-                variables=variables,
-                ts_operators=TS_OPERATOR_INSTANCES,
-                math_operators=MATH_OPERATORS,
-                parameters=dict(config.parameters),
-            )
+        # Inject config parameters
+        for p_name, p_val in config.parameters.items():
+            panel_fields[p_name] = p_val
 
-            # Evaluate variable expressions (e.g., returns = close / delay(close, 1) - 1)
-            for var_name, var_expr in variable_exprs.items():
+        # --- Step 3: Evaluate via PanelEvaluator ---
+        evaluator = PanelEvaluator(
+            panel_fields=panel_fields,
+            ts_ops=dict(TS_OPERATOR_INSTANCES),
+            cs_ops=dict(CS_OPERATOR_INSTANCES),
+            math_ops=dict(MATH_OPERATORS),
+            parameters=dict(config.parameters),
+        )
+
+        # Evaluate variables first (in config order)
+        for var_name, var_expr in config.variables.items():
+            try:
                 ast = parse_expression(var_expr)
-                variables[var_name] = evaluator.evaluate(ast)
-
-            # Evaluate TS factors
-            for fname, fdef in ts_factor_defs.items():
-                ast = parse_expression(fdef.expression)
-                series_result = evaluator.evaluate(ast)
-                if isinstance(series_result, (int, float)):
-                    series_result = pd.Series(series_result, index=df.index)
-                if fname not in factor_series_by_name:
-                    factor_series_by_name[fname] = {}
-                factor_series_by_name[fname][inst_id] = series_result
-
-        # Build factor panels in one shot via pd.concat (handles index alignment)
-        factor_panels: dict[str, pd.DataFrame] = {}
-        for fname, series_dict in factor_series_by_name.items():
-            factor_panels[fname] = pd.concat(series_dict, axis=1)
-
-        # --- Step 3: Compute CS factors (vectorized over whole DataFrame) ---
-        cs_factor_defs = [
-            f for f in config.factors if f.name in self._cs_engine.cs_factor_names
-        ]
-
-        for cs_def in cs_factor_defs:
-            result_df = self._evaluate_cs_expression_vectorized(
-                cs_def.expression, factor_panels,
-            )
-            if result_df is not None:
-                factor_panels[cs_def.name] = result_df
-            else:
+                result = evaluator.evaluate(ast)
+                panel_fields[var_name] = result
+            except Exception:
                 logger.warning(
-                    "CS factor '%s' expression '%s' evaluated to None "
-                    "— check factor dependencies",
-                    cs_def.name,
-                    cs_def.expression,
+                    "Variable '%s' expression '%s' failed to evaluate",
+                    var_name, var_expr,
+                )
+
+        # Evaluate ALL factors (no TS/CS split needed)
+        factor_panels: dict[str, pd.DataFrame] = {}
+        for factor_def in config.factors:
+            try:
+                ast = parse_expression(factor_def.expression)
+                result = evaluator.evaluate(ast)
+                if isinstance(result, pd.DataFrame):
+                    # Inject into panel_fields for downstream factor references
+                    panel_fields[factor_def.name] = result
+                    factor_panels[factor_def.name] = result
+                elif isinstance(result, (int, float)):
+                    # Scalar → broadcast to all instruments
+                    ref_panel = panel_fields.get("close")
+                    if isinstance(ref_panel, pd.DataFrame):
+                        broadcast_df = pd.DataFrame(
+                            float(result),
+                            index=ref_panel.index,
+                            columns=ref_panel.columns,
+                        )
+                        panel_fields[factor_def.name] = broadcast_df
+                        factor_panels[factor_def.name] = broadcast_df
+                else:
+                    logger.warning(
+                        "Factor '%s' expression '%s' evaluated to %s",
+                        factor_def.name, factor_def.expression,
+                        type(result).__name__,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Factor '%s' expression '%s' failed: %s",
+                    factor_def.name, factor_def.expression, e,
                 )
 
         # --- Step 4: Convert to alphalens format ---
@@ -170,150 +163,6 @@ class FactorEvaluator:
                 factor_series[fname] = stacked.astype(float)
 
         return factor_series, pricing
-
-    def _evaluate_cs_expression_vectorized(
-        self,
-        expression: str,
-        factor_panels: dict[str, pd.DataFrame],
-    ) -> pd.DataFrame | None:
-        """Evaluate a cross-sectional expression using vectorized CS operators."""
-        expression = expression.strip()
-
-        # Handle weighted sum (e.g., "0.6 * a + 0.4 * b")
-        if self._is_cs_weighted_sum(expression):
-            result = self._eval_cs_weighted_sum_vec(expression, factor_panels)
-            if result is not None:
-                return result
-            # Fallback: weighted-sum heuristic matched but parsing failed
-            # (e.g., "-1 * normalize(x, true, 0)"), try function path.
-
-        # Handle function call
-        if "(" in expression:
-            return self._eval_cs_function_vec(expression, factor_panels)
-
-        # Simple variable reference
-        return factor_panels.get(expression)
-
-    def _is_cs_weighted_sum(self, expr: str) -> bool:
-        """Check if expression is a weighted sum of factor names."""
-        depth = 0
-        i = 0
-        while i < len(expr):
-            char = expr[i]
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-            elif char in "+-" and depth == 0 and i > 0:
-                # Skip scientific notation (e.g., 1e-3)
-                if expr[i - 1] in "eE" and i >= 2 and expr[i - 2].isdigit():
-                    i += 1
-                    continue
-                return True
-            i += 1
-        return False
-
-    def _eval_cs_weighted_sum_vec(
-        self,
-        expression: str,
-        factor_panels: dict[str, pd.DataFrame],
-    ) -> pd.DataFrame | None:
-        pattern = r'([+-]?\s*[\d.]+(?:[eE][+-]?\d+)?)\s*\*\s*(\w+)'
-        matches = re.findall(pattern, expression)
-        if not matches:
-            return None
-
-        result: pd.DataFrame | None = None
-        for weight_str, factor_name in matches:
-            weight = float(weight_str.replace(" ", ""))
-            panel = factor_panels.get(factor_name)
-            if panel is None:
-                return None
-            term = panel * weight
-            result = term if result is None else result + term
-        return result
-
-    def _eval_cs_function_vec(
-        self,
-        expression: str,
-        factor_panels: dict[str, pd.DataFrame],
-    ) -> pd.DataFrame | None:
-        match = re.match(r'(\w+)\s*\((.*)\)', expression, re.DOTALL)
-        if not match:
-            return None
-
-        func_name = match.group(1)
-        args_str = match.group(2)
-
-        op_instance = CS_OPERATOR_INSTANCES.get(func_name)
-        if op_instance is None:
-            op_instance = CS_OPERATOR_INSTANCES.get(f"cs_{func_name}")
-        if op_instance is None:
-            return None
-
-        args = self._parse_cs_args_vec(args_str, factor_panels)
-        if not args or not isinstance(args[0], pd.DataFrame):
-            return None
-
-        kwargs: dict[str, Any] = {}
-        # Pass extra args as keyword arguments based on operator type
-        if len(args) > 1:
-            # Map positional args to operator-specific kwargs
-            sig_map: dict[str, list[str]] = {
-                "normalize": ["use_std", "limit"],
-                "winsorize": ["std_mult"],
-                "scale_down": ["constant"],
-                "clip_quantile": ["lower", "upper"],
-                "quantile": ["driver", "sigma"],
-            }
-            param_names = sig_map.get(func_name, [])
-            for i, pname in enumerate(param_names):
-                if i + 1 < len(args):
-                    kwargs[pname] = args[i + 1]
-
-        return op_instance.compute_vectorized(args[0], **kwargs)
-
-    def _parse_cs_args_vec(
-        self,
-        args_str: str,
-        factor_panels: dict[str, pd.DataFrame],
-    ) -> list[Any]:
-        args: list[Any] = []
-        depth = 0
-        current = ""
-        for char in args_str:
-            if char == "(":
-                depth += 1
-                current += char
-            elif char == ")":
-                depth -= 1
-                current += char
-            elif char == "," and depth == 0:
-                args.append(self._parse_single_cs_arg_vec(current.strip(), factor_panels))
-                current = ""
-            else:
-                current += char
-        if current.strip():
-            args.append(self._parse_single_cs_arg_vec(current.strip(), factor_panels))
-        return args
-
-    def _parse_single_cs_arg_vec(
-        self,
-        arg: str,
-        factor_panels: dict[str, pd.DataFrame],
-    ) -> Any:
-        if arg.lower() == "true":
-            return True
-        if arg.lower() == "false":
-            return False
-        try:
-            val = float(arg)
-            return int(val) if val == int(val) and "." not in arg and "e" not in arg.lower() else val
-        except ValueError:
-            pass
-        if "(" in arg:
-            return self._eval_cs_function_vec(arg, factor_panels)
-        return factor_panels.get(arg)
 
     def compute_forward_returns(
         self,

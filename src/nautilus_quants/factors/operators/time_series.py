@@ -359,8 +359,8 @@ class Correlation(TimeSeriesOperator):
             {col: data[col].rolling(w).corr(data2[col]) for col in data.columns},
             index=data.index,
         )
-        # Align with popbo: fillna(0) then replace inf with 0
-        return result.fillna(0).replace([np.inf, -np.inf], 0)
+        # Replace inf with NaN; preserve NaN for insufficient data / constant series
+        return result.replace([np.inf, -np.inf], np.nan)
 
 
 @register_operator

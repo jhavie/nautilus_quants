@@ -1,0 +1,235 @@
+# Alpha101 45 Crypto-Friendly Factors — Alpha Analysis Configuration
+#
+# Evaluates 45 Alpha101 factors (no vwap, no IndNeutralize, no cap, no magic numbers)
+# using alphalens IC/ICIR analysis on 4h crypto data.
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/examples/alpha_101_45.yaml
+#
+# Factor definitions: config/examples/factors.yaml
+
+# Data source (4-year 4h catalog)
+catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+# Factor definition
+factor_config_path: "config/examples/factors.yaml"
+
+# Instrument universe (139 coins, same as alpha_convergence.yaml)
+instrument_ids:
+  - "1000LUNCUSDT.BINANCE"
+  - "1000SHIBUSDT.BINANCE"
+  - "1000XECUSDT.BINANCE"
+  - "1INCHUSDT.BINANCE"
+  - "AAVEUSDT.BINANCE"
+  - "ADAUSDT.BINANCE"
+  - "ALGOUSDT.BINANCE"
+  - "ALICEUSDT.BINANCE"
+  - "ALPHAUSDT.BINANCE"
+  - "ANKRUSDT.BINANCE"
+  - "ANTUSDT.BINANCE"
+  - "APEUSDT.BINANCE"
+  - "API3USDT.BINANCE"
+  - "ARPAUSDT.BINANCE"
+  - "ARUSDT.BINANCE"
+  - "ATAUSDT.BINANCE"
+  - "ATOMUSDT.BINANCE"
+  - "AUDIOUSDT.BINANCE"
+  - "AVAXUSDT.BINANCE"
+  - "AXSUSDT.BINANCE"
+  - "BAKEUSDT.BINANCE"
+  - "BALUSDT.BINANCE"
+  - "BANDUSDT.BINANCE"
+  - "BATUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+  - "BELUSDT.BINANCE"
+  - "BLZUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "BTCDOMUSDT.BINANCE"
+  - "BTCUSDT.BINANCE"
+  - "C98USDT.BINANCE"
+  - "CELOUSDT.BINANCE"
+  - "CELRUSDT.BINANCE"
+  - "CHRUSDT.BINANCE"
+  - "CHZUSDT.BINANCE"
+  - "COMPUSDT.BINANCE"
+  - "COTIUSDT.BINANCE"
+  - "CRVUSDT.BINANCE"
+  - "CTKUSDT.BINANCE"
+  - "CTSIUSDT.BINANCE"
+  - "CVCUSDT.BINANCE"
+  - "CVXUSDT.BINANCE"
+  - "DARUSDT.BINANCE"
+  - "DASHUSDT.BINANCE"
+  - "DEFIUSDT.BINANCE"
+  - "DENTUSDT.BINANCE"
+  - "DGBUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "DUSKUSDT.BINANCE"
+  - "DYDXUSDT.BINANCE"
+  - "EGLDUSDT.BINANCE"
+  - "ENJUSDT.BINANCE"
+  - "ENSUSDT.BINANCE"
+  - "ETCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "FILUSDT.BINANCE"
+  - "FLMUSDT.BINANCE"
+  - "FLOWUSDT.BINANCE"
+  - "FTMUSDT.BINANCE"
+  - "GALAUSDT.BINANCE"
+  - "GALUSDT.BINANCE"
+  - "GMTUSDT.BINANCE"
+  - "GRTUSDT.BINANCE"
+  - "GTCUSDT.BINANCE"
+  - "HBARUSDT.BINANCE"
+  - "HOTUSDT.BINANCE"
+  - "ICPUSDT.BINANCE"
+  - "ICXUSDT.BINANCE"
+  - "IMXUSDT.BINANCE"
+  - "INJUSDT.BINANCE"
+  - "IOSTUSDT.BINANCE"
+  - "IOTAUSDT.BINANCE"
+  - "IOTXUSDT.BINANCE"
+  - "JASMYUSDT.BINANCE"
+  - "KAVAUSDT.BINANCE"
+  - "KLAYUSDT.BINANCE"
+  - "KSMUSDT.BINANCE"
+  - "LDOUSDT.BINANCE"
+  - "LINAUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "LITUSDT.BINANCE"
+  - "LPTUSDT.BINANCE"
+  - "LRCUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "LUNA2USDT.BINANCE"
+  - "MANAUSDT.BINANCE"
+  - "MASKUSDT.BINANCE"
+  - "MATICUSDT.BINANCE"
+  - "MKRUSDT.BINANCE"
+  - "MTLUSDT.BINANCE"
+  - "NEARUSDT.BINANCE"
+  - "NEOUSDT.BINANCE"
+  - "NKNUSDT.BINANCE"
+  - "OCEANUSDT.BINANCE"
+  - "OGNUSDT.BINANCE"
+  - "OMGUSDT.BINANCE"
+  - "ONEUSDT.BINANCE"
+  - "ONTUSDT.BINANCE"
+  - "OPUSDT.BINANCE"
+  - "PEOPLEUSDT.BINANCE"
+  - "QTUMUSDT.BINANCE"
+  - "REEFUSDT.BINANCE"
+  - "RENUSDT.BINANCE"
+  - "RLCUSDT.BINANCE"
+  - "ROSEUSDT.BINANCE"
+  - "RSRUSDT.BINANCE"
+  - "RUNEUSDT.BINANCE"
+  - "RVNUSDT.BINANCE"
+  - "SANDUSDT.BINANCE"
+  - "SCUSDT.BINANCE"
+  - "SFPUSDT.BINANCE"
+  - "SKLUSDT.BINANCE"
+  - "SNXUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "SPELLUSDT.BINANCE"
+  - "STGUSDT.BINANCE"
+  - "STMXUSDT.BINANCE"
+  - "STORJUSDT.BINANCE"
+  - "SUSHIUSDT.BINANCE"
+  - "SXPUSDT.BINANCE"
+  - "THETAUSDT.BINANCE"
+  - "TLMUSDT.BINANCE"
+  - "TRBUSDT.BINANCE"
+  - "TRXUSDT.BINANCE"
+  - "UNFIUSDT.BINANCE"
+  - "UNIUSDT.BINANCE"
+  - "VETUSDT.BINANCE"
+  - "WAVESUSDT.BINANCE"
+  - "WOOUSDT.BINANCE"
+  - "XEMUSDT.BINANCE"
+  - "XLMUSDT.BINANCE"
+  - "XMRUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "XTZUSDT.BINANCE"
+  - "YFIUSDT.BINANCE"
+  - "ZECUSDT.BINANCE"
+  - "ZENUSDT.BINANCE"
+  - "ZILUSDT.BINANCE"
+  - "ZRXUSDT.BINANCE"
+
+# Factors to analyze (all 45 Alpha101 factors)
+# Leave empty to analyze all factors, or list specific ones:
+factors:
+  # Volatility (4)
+  - alpha001
+  - alpha018
+  - alpha034
+  - alpha040
+  # Momentum/Reversal (14)
+  - alpha008
+  - alpha009
+  - alpha010
+  - alpha019
+  - alpha020
+  - alpha033
+  - alpha037
+  - alpha038
+  - alpha046
+  - alpha049
+  - alpha051
+  - alpha052
+  - alpha053
+  - alpha101
+  # Reversion (5)
+  - alpha004
+  - alpha021
+  - alpha023
+  - alpha024
+  - alpha054
+  # Volume/Price-Volume (18)
+  - alpha002
+  - alpha003
+  - alpha006
+  - alpha012
+  - alpha013
+  - alpha014
+  - alpha015
+  - alpha016
+  - alpha022
+  - alpha026
+  - alpha028
+  - alpha044
+  - alpha045
+  - alpha055
+  - alpha060
+  - alpha030
+  - alpha035
+  - alpha043
+  # Liquidity (2)
+  - alpha007
+  - alpha017
+  # Composite (2)
+  - alpha031
+  - alpha039
+
+# Alphalens parameters (4h bars: period 1=4h, 3=12h, 6=24h, 12=48h, 18=72h)
+periods: [1, 3, 6, 12, 18]
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+# Charts per factor
+charts:
+  - quantile_returns_bar
+  - quantile_returns_violin
+  - cumulative_returns
+  - quantile_spread
+  - ic_time_series
+  - monthly_ic_heatmap
+  - turnover
+
+# Output
+output_dir: "logs/alpha_101_45factors"
+output_format:
+  - png

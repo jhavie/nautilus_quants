@@ -26,9 +26,9 @@ venues:
 
 data:
   # Standard Bar (Nautilus native, for Instrument registration and price data)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
-    bar_spec: "1h"
+    bar_spec: "4h"
     instrument_ids:
       - "1000LUNCUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
@@ -155,7 +155,7 @@ data:
       - "TLMUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
-      - "UNFIUSDT.BINANCE"
+      # - "UNFIUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
       - "WAVESUSDT.BINANCE"
@@ -171,11 +171,11 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-09-14"
+    end_time: "2023-12-31"
   # BinanceBar (provides extra fields like quote_volume to FactorEngineActor)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_1h/catalog"
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
-    bar_spec: "1h"
+    bar_spec: "4h"
     instrument_ids:
       - "1000LUNCUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
@@ -302,7 +302,7 @@ data:
       - "TLMUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
-      - "UNFIUSDT.BINANCE"
+      # - "UNFIUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
       - "WAVESUSDT.BINANCE"
@@ -318,7 +318,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-09-14"
+    end_time: "2023-12-31"
 
 engine:
   trader_id: "BACKTESTER-FMZ-4F-001"
@@ -331,8 +331,8 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/fmz/factors.yaml"
-        interval: "1h"  # Use source bars directly (1h EXTERNAL) - no aggregation needed
+        factor_config_path: "config/fmz/factors_alpha2.yaml"
+        interval: "4h"  # Use source bars directly (1h EXTERNAL) - no aggregation needed
         signal_prefix: "factor"
         max_history: 200
         publish_signals: true
@@ -459,7 +459,7 @@ engine:
           - "TOMOUSDT.BINANCE"
           - "TRBUSDT.BINANCE"
           - "TRXUSDT.BINANCE"
-          - "UNFIUSDT.BINANCE"
+          # - "UNFIUSDT.BINANCE"
           - "UNIUSDT.BINANCE"
           - "VETUSDT.BINANCE"
           - "WAVESUSDT.BINANCE"
@@ -477,10 +477,10 @@ engine:
         n_short: 40
         position_value: 300
         rebalance_period: 4
-        composite_factor: "composite"
+        composite_factor: "alpha044"
 
 report:
-  output_dir: "logs/fmz_4factor_backtest"
+  output_dir: "logs/fmz_alpha44_quote_volume_4period_backtest"
   formats:
     - csv
     - html

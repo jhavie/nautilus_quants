@@ -223,8 +223,6 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         Each FactorValues message contains the full cross-sectional alpha
         vector for all instruments at the current timestamp.
         """
-        if self._bar_count <= 500 and self._bar_count % 139 == 0:
-            self.log.info(f"on_data called: type={type(data).__name__}, is_FV={isinstance(data, FactorValues)}")
         if not isinstance(data, FactorValues):
             return
         self._handle_factor_values(data)
