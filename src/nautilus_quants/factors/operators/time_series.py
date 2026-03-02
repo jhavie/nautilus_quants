@@ -348,7 +348,8 @@ class Correlation(TimeSeriesOperator):
     ) -> pd.Series:
         if data2 is None:
             return pd.Series(np.nan, index=data.index)
-        return data.rolling(int(window)).corr(data2)
+        # Popbo-aligned: fillna(0) treats undefined correlation (constant series) as uncorrelated
+        return data.rolling(int(window)).corr(data2).fillna(0).replace([np.inf, -np.inf], 0)
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
         data2 = kwargs.get("data2")
@@ -359,8 +360,12 @@ class Correlation(TimeSeriesOperator):
             {col: data[col].rolling(w).corr(data2[col]) for col in data.columns},
             index=data.index,
         )
-        # Replace inf with NaN; preserve NaN for insufficient data / constant series
-        return result.replace([np.inf, -np.inf], np.nan)
+        # Popbo-aligned: fillna(0) treats undefined correlation
+        # (constant series within window → std=0 → NaN/inf) as uncorrelated (0).
+        # This is critical for rank-based alphas where CS rank is often constant
+        # within small rolling windows (e.g., correlation(high, rank(volume), 5)
+        # with stable volume rankings among few instruments).
+        return result.fillna(0).replace([np.inf, -np.inf], 0)
 
 
 @register_operator

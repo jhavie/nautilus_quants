@@ -279,6 +279,17 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         results = self._engine.flush_and_compute(ts)
 
+        # Diagnostic: log per-factor non-empty instrument count (first 5 + every 50th)
+        compute_count = self._engine.get_performance_stats().get("total_computes", 0)
+        if compute_count <= 5 or compute_count % 50 == 0:
+            diag_parts = []
+            for fname, fvals in results.items():
+                diag_parts.append(f"{fname}={len(fvals)}")
+            self.log.info(
+                f"Factor compute #{compute_count} "
+                f"[{', '.join(diag_parts)}]"
+            )
+
         # Create and publish FactorValues
         factor_values = FactorValues.create(
             ts_event=ts,

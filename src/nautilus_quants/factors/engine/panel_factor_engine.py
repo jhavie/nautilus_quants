@@ -214,7 +214,17 @@ class PanelFactorEngine:
                 result_df = evaluator.evaluate(ast)
                 # Inject result into panel_fields so subsequent factors can
                 # reference it (e.g. momentum_3h_norm references momentum_3h).
-                if isinstance(result_df, (pd.DataFrame, int, float)):
+                # fillna(0): prevents NaN propagation in composite formulas.
+                # When a factor has NaN (e.g. alpha039's ts_mean(returns, 250)
+                # needs 250 bars but only 180 available), the NaN would
+                # propagate through: alpha039→alpha039_norm→composite, making
+                # the entire composite NaN.  Treating NaN as 0 (neutral) in
+                # the injected panel is safe because:
+                # - CS operators (normalize, rank) handle constant-0 gracefully
+                # - The composite sum remains valid for other contributing factors
+                if isinstance(result_df, pd.DataFrame):
+                    panel_fields[name] = result_df.fillna(0)
+                elif isinstance(result_df, (int, float)):
                     panel_fields[name] = result_df
                 if isinstance(result_df, pd.DataFrame) and not result_df.empty:
                     last_row = result_df.iloc[-1]
