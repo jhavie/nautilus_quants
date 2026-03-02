@@ -695,7 +695,7 @@ class TestFullPipelineExtraFields:
             pytest.skip("nautilus_trader pyo3 CustomData not available")
 
     def test_pipeline_multi_instrument(self):
-        """BTCUSDT + ETHUSDT with different quote_volume -> each correct."""
+        """BTCUSDT + ETHUSDT with different quote_volume -> each correct via FactorValues."""
         engine = make_engine_with_extra_fields(["quote_volume"])
         engine.register_expression_factor(
             name="avg_qv",
@@ -704,6 +704,8 @@ class TestFullPipelineExtraFields:
         )
 
         # Feed interleaved bars for two instruments
+        btc_result = None
+        eth_result = None
         for i in range(5):
             btc_bar = MockBinanceBar(
                 "BTCUSDT", 50000, 51000, 49000, 50000, 100, i * 2,
@@ -713,24 +715,16 @@ class TestFullPipelineExtraFields:
                 "ETHUSDT", 3000, 3100, 2900, 3000, 50, i * 2 + 1,
                 quote_volume=100.0 * (i + 1), count=5,
             )
-            engine.on_bar(btc_bar)
-            result_eth = engine.on_bar(eth_bar)
+            btc_result = engine.on_bar(btc_bar)
+            eth_result = engine.on_bar(eth_bar)
 
         # BTC last 3 qv: 3000, 4000, 5000 -> mean = 4000
-        btc_data = engine.synchronizer.get_instrument_data("BTCUSDT")
-        assert btc_data is not None
-        btc_arrays = btc_data.get_arrays()
-        assert "quote_volume" in btc_arrays
-        btc_last3 = btc_arrays["quote_volume"][-3:]
-        assert np.mean(btc_last3) == pytest.approx(4000.0)
+        assert btc_result is not None
+        assert btc_result.get("avg_qv", "BTCUSDT") == pytest.approx(4000.0)
 
         # ETH last 3 qv: 300, 400, 500 -> mean = 400
-        eth_data = engine.synchronizer.get_instrument_data("ETHUSDT")
-        assert eth_data is not None
-        eth_arrays = eth_data.get_arrays()
-        assert "quote_volume" in eth_arrays
-        eth_last3 = eth_arrays["quote_volume"][-3:]
-        assert np.mean(eth_last3) == pytest.approx(400.0)
+        assert eth_result is not None
+        assert eth_result.get("avg_qv", "ETHUSDT") == pytest.approx(400.0)
 
     def test_pipeline_reset_preserves_config(self):
         """engine.reset() clears data but extra_fields still effective."""

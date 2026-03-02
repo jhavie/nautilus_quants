@@ -17,6 +17,7 @@ import numpy as np
 
 from nautilus_quants.factors.base.factor import ExpressionFactor, Factor
 from nautilus_quants.factors.config import FactorConfig, load_factor_config
+from nautilus_quants.factors.factor_values import FactorValues
 from nautilus_quants.factors.engine.dependency_resolver import DependencyResolver
 from nautilus_quants.factors.expression import EvaluationContext, Evaluator, parse_expression
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
@@ -332,7 +333,7 @@ class FactorEngine:
                     ops[op_name] = _single_deque(TIME_SERIES_OPERATORS[op_name], op_name)
         return ops
 
-    def on_bar(self, bar: Bar) -> dict[str, dict[str, float]]:
+    def on_bar(self, bar: Bar) -> FactorValues:
         """
         Process a bar and compute factor values.
 
@@ -340,7 +341,7 @@ class FactorEngine:
             bar: The bar to process
 
         Returns:
-            dict of {factor_name: {instrument_id: value}} for all computed factors.
+            FactorValues wrapping {factor_name: {instrument_id: value}}.
         """
         start_time = time.perf_counter() if self._enable_timing else 0
 
@@ -422,7 +423,7 @@ class FactorEngine:
             self._compute_times.append(elapsed_ms)
             self._total_computes += 1
 
-        return factor_results
+        return FactorValues.create(ts_event=bar.ts_event, factors=factor_results)
     
     def compute_factors(
         self,

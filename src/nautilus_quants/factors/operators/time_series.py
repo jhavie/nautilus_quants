@@ -370,12 +370,15 @@ class Correlation(TimeSeriesOperator):
         
         x = data[-window:]
         y = data2[-window:]
-        
-        # Handle constant arrays
+
+        # Handle constant arrays — popbo-aligned: undefined correlation = 0.0
         if np.std(x) == 0 or np.std(y) == 0:
-            return float('nan')
-        
-        return float(np.corrcoef(x, y)[0, 1])
+            return 0.0
+
+        result = float(np.corrcoef(x, y)[0, 1])
+        if np.isnan(result) or np.isinf(result):
+            return 0.0
+        return result
 
     def make_incremental(self, window: int) -> "IncrementalCorr":
         """Return O(1) incremental Pearson correlation state."""

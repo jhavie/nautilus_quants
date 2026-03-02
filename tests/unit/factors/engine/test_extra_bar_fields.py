@@ -149,8 +149,7 @@ class TestFactorEngineExtraFields:
 
         # Last 3 qv values: 300, 400, 500 → mean = 400
         assert result is not None
-        assert "avg_qv" in result
-        assert result["avg_qv"]["BTCUSDT"] == pytest.approx(400.0)
+        assert result.get("avg_qv", "BTCUSDT") == pytest.approx(400.0)
 
     def test_extra_fields_in_variable_cache(self):
         """Extra fields should be available in variable cache for variables."""
@@ -170,7 +169,7 @@ class TestFactorEngineExtraFields:
 
         assert result is not None
         # quote_volume / volume = 1000 / 200 = 5.0
-        assert result["qv_ratio_factor"]["BTCUSDT"] == pytest.approx(5.0)
+        assert result.get("qv_ratio_factor", "BTCUSDT") == pytest.approx(5.0)
 
     def test_standard_bar_without_extra_fields(self):
         """Engine without extra fields should work normally."""
@@ -185,7 +184,7 @@ class TestFactorEngineExtraFields:
         result = engine.on_bar(bar)
 
         assert result is not None
-        assert result["simple"]["BTCUSDT"] == pytest.approx(50500.0)
+        assert result.get("simple", "BTCUSDT") == pytest.approx(50500.0)
 
     def test_evaluate_expression_with_extra_fields(self):
         """evaluate_expression should work with extra field data."""

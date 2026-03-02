@@ -100,7 +100,9 @@ class TestTsOperatorVectorizedConsistency:
             arr2 = data2.iloc[: i + 1].values
             scalar = op.compute(arr1, self.window, data2=arr2)
             if np.isnan(scalar):
-                assert np.isnan(vec.iloc[i])
+                # compute_vectorized uses .fillna(0) (popbo-aligned),
+                # so insufficient-window NaN becomes 0.0
+                assert np.isnan(vec.iloc[i]) or vec.iloc[i] == pytest.approx(0.0)
             else:
                 assert vec.iloc[i] == pytest.approx(scalar, abs=1e-8)
 

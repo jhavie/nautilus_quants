@@ -35,8 +35,7 @@ class TestFactorEvaluator:
     def test_init(self):
         mock_factor_config = MagicMock()
         evaluator = FactorEvaluator(mock_factor_config)
-        assert evaluator._ts_engine is not None
-        assert evaluator._cs_engine is not None
+        assert evaluator._factor_config is not None
 
     def test_evaluate_returns_tuple(self):
         """Test evaluate returns (factor_series_dict, pricing_df)."""
@@ -142,64 +141,46 @@ class TestFactorEvaluator:
         assert "ic" in result
 
 
-class TestCsExpressionParser:
-    """Test CS expression vectorized evaluation (Issues 5, H4)."""
+class TestPanelEvaluatorIntegration:
+    """Test that PanelEvaluator (which replaced CS expression methods) works correctly."""
 
-    @pytest.fixture()
-    def evaluator(self):
-        mock_config = MagicMock()
-        return FactorEvaluator(mock_config)
+    def test_weighted_sum_via_panel_evaluator(self):
+        """PanelEvaluator evaluates weighted-sum expressions correctly."""
+        from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+        from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 
-    @pytest.fixture()
-    def panels(self) -> dict[str, pd.DataFrame]:
         idx = pd.date_range("2024-01-01", periods=5, freq="h")
-        return {
+        panel = {
             "x": pd.DataFrame({"A": [1, 2, 3, 4, 5], "B": [5, 4, 3, 2, 1]}, index=idx, dtype=float),
             "y": pd.DataFrame({"A": [10, 20, 30, 40, 50], "B": [50, 40, 30, 20, 10]}, index=idx, dtype=float),
         }
-
-    def test_simple_weighted_sum(self, evaluator, panels):
-        result = evaluator._evaluate_cs_expression_vectorized("0.6 * x + 0.4 * y", panels)
-        expected = panels["x"] * 0.6 + panels["y"] * 0.4
+        evaluator = PanelEvaluator(
+            panel_fields=panel,
+            ts_ops=TS_OPERATOR_INSTANCES,
+            cs_ops=CS_OPERATOR_INSTANCES,
+            math_ops=MATH_OPERATORS,
+        )
+        result = evaluator.evaluate(parse_expression("0.6 * x + 0.4 * y"))
+        expected = panel["x"] * 0.6 + panel["y"] * 0.4
         pd.testing.assert_frame_equal(result, expected)
 
-    def test_negative_leading_weighted_sum(self, evaluator, panels):
-        result = evaluator._evaluate_cs_expression_vectorized("- 0.5 * x - 0.5 * y", panels)
-        expected = panels["x"] * (-0.5) + panels["y"] * (-0.5)
-        pd.testing.assert_frame_equal(result, expected)
+    def test_simple_variable_reference(self):
+        """PanelEvaluator resolves simple variable references."""
+        from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+        from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 
-    def test_scientific_notation_weights(self, evaluator, panels):
-        result = evaluator._evaluate_cs_expression_vectorized("1e-3 * x + 2e-3 * y", panels)
-        expected = panels["x"] * 1e-3 + panels["y"] * 2e-3
-        pd.testing.assert_frame_equal(result, expected)
-
-    def test_simple_variable_reference(self, evaluator, panels):
-        result = evaluator._evaluate_cs_expression_vectorized("x", panels)
-        pd.testing.assert_frame_equal(result, panels["x"])
-
-    def test_missing_factor_returns_none_with_warning(self, evaluator, panels, caplog):
-        import logging
-        with caplog.at_level(logging.WARNING):
-            result = evaluator._evaluate_cs_expression_vectorized("0.5 * x + 0.5 * z", panels)
-        assert result is None
-
-    def test_weighted_sum_fallback_to_function(self, evaluator, panels):
-        """When weighted-sum parse fails, should fallback to function path."""
-        # "-1 * normalize(...)" looks like weighted sum but 'normalize' is not a panel key
-        # Should fall through to function path (which may also return None here,
-        # but the fallback mechanism itself should work without error)
-        result = evaluator._evaluate_cs_expression_vectorized("-1 * nonexistent_func(x)", panels)
-        # Neither weighted-sum nor function parse succeeds → None
-        assert result is None
-
-    def test_is_cs_weighted_sum_ignores_scientific_notation(self, evaluator):
-        assert evaluator._is_cs_weighted_sum("1e-3 * x") is False  # no binary +/- at depth 0
-        assert evaluator._is_cs_weighted_sum("1e-3 * x + 2e-3 * y") is True
-        assert evaluator._is_cs_weighted_sum("normalize(x, true, 0)") is False
-
-    def test_is_cs_weighted_sum_leading_minus_not_binary(self, evaluator):
-        # Leading '-' at i=0 should not be treated as binary operator
-        assert evaluator._is_cs_weighted_sum("-x") is False
+        idx = pd.date_range("2024-01-01", periods=5, freq="h")
+        panel = {
+            "x": pd.DataFrame({"A": [1, 2, 3, 4, 5], "B": [5, 4, 3, 2, 1]}, index=idx, dtype=float),
+        }
+        evaluator = PanelEvaluator(
+            panel_fields=panel,
+            ts_ops=TS_OPERATOR_INSTANCES,
+            cs_ops=CS_OPERATOR_INSTANCES,
+            math_ops=MATH_OPERATORS,
+        )
+        result = evaluator.evaluate(parse_expression("x"))
+        pd.testing.assert_frame_equal(result, panel["x"])
 
 
 class TestVectorizedEvaluator:
@@ -281,41 +262,3 @@ class TestVectorizedEvaluator:
         pd.testing.assert_series_equal(result, expected, check_names=False)
 
 
-class TestParseSingleCsArgVec:
-    """Test numeric parsing in _parse_single_cs_arg_vec."""
-
-    @pytest.fixture()
-    def evaluator(self):
-        mock_config = MagicMock()
-        return FactorEvaluator(mock_config)
-
-    def test_integer_string(self, evaluator):
-        result = evaluator._parse_single_cs_arg_vec("42", {})
-        assert result == 42
-        assert isinstance(result, int)
-
-    def test_float_string(self, evaluator):
-        result = evaluator._parse_single_cs_arg_vec("3.14", {})
-        assert result == pytest.approx(3.14)
-        assert isinstance(result, float)
-
-    def test_scientific_notation(self, evaluator):
-        result = evaluator._parse_single_cs_arg_vec("1e5", {})
-        assert result == pytest.approx(1e5)
-        assert isinstance(result, float)
-
-    def test_scientific_notation_negative_exp(self, evaluator):
-        result = evaluator._parse_single_cs_arg_vec("2.5e-3", {})
-        assert result == pytest.approx(0.0025)
-        assert isinstance(result, float)
-
-    def test_bool_true(self, evaluator):
-        assert evaluator._parse_single_cs_arg_vec("true", {}) is True
-
-    def test_bool_false(self, evaluator):
-        assert evaluator._parse_single_cs_arg_vec("false", {}) is False
-
-    def test_variable_lookup(self, evaluator):
-        panel = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
-        result = evaluator._parse_single_cs_arg_vec("my_factor", {"my_factor": panel})
-        pd.testing.assert_frame_equal(result, panel)

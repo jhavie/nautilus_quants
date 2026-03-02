@@ -163,7 +163,7 @@ class TestEngineConsistency:
             # Accumulate TS results: merge into latest snapshot
             if ts != prev_ts:
                 last_inc_ts_values = {}
-            for fname, inst_vals in ts_result.items():
+            for fname, inst_vals in ts_result.factors.items():
                 if fname not in last_inc_ts_values:
                     last_inc_ts_values[fname] = {}
                 last_inc_ts_values[fname].update(inst_vals)
@@ -391,7 +391,7 @@ class TestEngineConsistencyMultiTimestamp:
                     ts_event=ts,
                 )
                 ts_result = inc_engine.on_bar(mock_bar)
-                for fname, inst_vals in ts_result.items():
+                for fname, inst_vals in ts_result.factors.items():
                     if fname not in inc_ts_values:
                         inc_ts_values[fname] = {}
                     inc_ts_values[fname].update(inst_vals)

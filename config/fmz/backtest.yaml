@@ -331,7 +331,7 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/fmz/factors_alpha2.yaml"
+        factor_config_path: "config/fmz/factors_alpha3.yaml"
         interval: "4h"  # Use source bars directly (1h EXTERNAL) - no aggregation needed
         signal_prefix: "factor"
         max_history: 200
@@ -477,7 +477,7 @@ engine:
         n_short: 40
         position_value: 300
         rebalance_period: 4
-        composite_factor: "composite"
+        composite_factor: "alpha044"
 
 report:
   output_dir: "logs/performance"
