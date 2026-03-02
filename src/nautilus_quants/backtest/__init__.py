@@ -1,7 +1,7 @@
 """Backtest module - Configuration-driven backtesting with nautilus_trader.
 
 For Actor-decoupled backtesting, use Nautilus native BacktestRunConfig directly.
-See: config/backtest_factor.yaml for example usage.
+See: config/factor/backtest.yaml for example usage.
 """
 
 from nautilus_quants.backtest.config import (

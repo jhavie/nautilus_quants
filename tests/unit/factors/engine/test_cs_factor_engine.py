@@ -248,7 +248,7 @@ class TestCsFactorEngineCompute:
         result = engine.compute(ts_values)
 
         assert result["composite"]["X"] == pytest.approx(8.0)
-        assert math.isnan(result["composite"]["Y"])  # NaN propagates
+        assert "Y" not in result["composite"]  # NaN inputs are filtered, instrument absent
         assert result["composite"]["Z"] == pytest.approx(18.0)
 
     def test_compute_dependency_order(self):

@@ -1,7 +1,7 @@
 """CLI entry point for alpha module.
 
 Usage:
-    python -m nautilus_quants.alpha analyze config/alpha_fmz_4factor.yaml
+    python -m nautilus_quants.alpha analyze config/fmz/alpha.yaml
 """
 
 from __future__ import annotations

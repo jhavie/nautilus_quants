@@ -4,7 +4,7 @@ This module contains project-specific configuration classes that extend
 Nautilus Trader's native configuration system.
 
 For Actor-decoupled backtesting, use Nautilus native BacktestRunConfig directly.
-See: config/backtest_factor.yaml for example usage.
+See: config/factor/backtest.yaml for example usage.
 
 Retained Classes (project-specific, no Nautilus equivalent):
     - TearsheetConfig: Report visualization settings

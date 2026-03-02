@@ -1,7 +1,7 @@
 """CLI entry point for backtest module.
 
 For Actor-decoupled backtesting, use Nautilus native BacktestRunConfig directly.
-See: config/backtest_factor.yaml for example usage.
+See: config/factor/backtest.yaml for example usage.
 """
 
 import sys

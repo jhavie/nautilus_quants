@@ -50,7 +50,7 @@ EXIT_NETWORK_ERROR = 21
     "-c",
     "config_path",
     type=click.Path(exists=False),
-    default="config/data.yaml",
+    default="config/examples/data.yaml",
     help="Configuration file path",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose output")

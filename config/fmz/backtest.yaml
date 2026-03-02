@@ -1,17 +1,19 @@
-# FMZ Multi-Factor Strategy Backtest Configuration
-# https://www.fmz.com/digest-topic/9647
+# FMZ 4-Factor Strategy Backtest Configuration
+# Exact replication of fmz_4factor_detailed.py
 #
-# Time range: 2023-01-01 ~ 2025-12-31 (out-of-sample validation)
-# Initial capital: 10000 USDT
-# Number of positions: 40 long + 40 short
-# Per-symbol allocation: 300 USDT
-# Rebalance interval: 8 hours (matches notebook cell 31b)
-# Fee rate: 0.02% (matches original FMZ article)
+# 125 Symbols (from NAUTILUS_SYMBOLS in fmz_4factor_detailed.py)
+# 时间范围: 2022-01-01 ~ 2022-02-01
+# 初始资金: 10000 USDT
+# 持仓数量: 多空各40个
+# 单品种仓位: 300 USDT
+# 调仓周期: 8小时
+# 手续费: 0.02%
 #
-# Three-factor blend (cell 31b):
-#   - 24h Momentum: 0.6
-#   - Volume: 0.2
-#   - Price-Volume Corr: 0.2
+# 4 因子合成 (from fmz_4factor_detailed.py):
+#   - Volume: 0.6
+#   - Momentum_3h: 0.4
+#   - Volatility: 0.3
+#   - Corr: 0.4
 
 venues:
   - name: "BINANCE"
@@ -23,9 +25,10 @@ venues:
     default_leverage: 1
 
 data:
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
+  # Standard Bar (Nautilus native, for Instrument registration and price data)
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
-    bar_spec: "1h"
+    bar_spec: "4h"
     instrument_ids:
       - "1000LUNCUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
@@ -55,7 +58,7 @@ data:
       - "BELUSDT.BINANCE"
       - "BLZUSDT.BINANCE"
       - "BNBUSDT.BINANCE"
-      - "BTCDOMUSDT.BINANCE"
+      # - "BTCDOMUSDT.BINANCE"
       - "BTCUSDT.BINANCE"
       - "C98USDT.BINANCE"
       - "CELOUSDT.BINANCE"
@@ -152,7 +155,7 @@ data:
       - "TLMUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
-      - "UNFIUSDT.BINANCE"
+      # - "UNFIUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
       - "WAVESUSDT.BINANCE"
@@ -168,10 +171,11 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-09-14"
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/fmz_data/catalog"
+    end_time: "2022-12-31"
+  # BinanceBar (provides extra fields like quote_volume to FactorEngineActor)
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
-    bar_spec: "1h"
+    bar_spec: "4h"
     instrument_ids:
       - "1000LUNCUSDT.BINANCE"
       - "1000SHIBUSDT.BINANCE"
@@ -201,7 +205,7 @@ data:
       - "BELUSDT.BINANCE"
       - "BLZUSDT.BINANCE"
       - "BNBUSDT.BINANCE"
-      - "BTCDOMUSDT.BINANCE"
+      # - "BTCDOMUSDT.BINANCE"
       - "BTCUSDT.BINANCE"
       - "C98USDT.BINANCE"
       - "CELOUSDT.BINANCE"
@@ -298,7 +302,7 @@ data:
       - "TLMUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
-      - "UNFIUSDT.BINANCE"
+      # - "UNFIUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
       - "WAVESUSDT.BINANCE"
@@ -314,9 +318,10 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-09-14"
+    end_time: "2022-12-31"
+
 engine:
-  trader_id: "BACKTESTER-FMZ-001"
+  trader_id: "BACKTESTER-FMZ-4F-001"
   logging:
     log_level: "INFO"
   risk_engine:
@@ -326,11 +331,10 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/factors_fmz_4factor.yaml"
-        data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
-        bar_spec: "1h"
+        factor_config_path: "config/fmz/factors_alpha3.yaml"
+        interval: "4h"  # Use source bars directly (1h EXTERNAL) - no aggregation needed
         signal_prefix: "factor"
-        max_history: 0
+        max_history: 200
         publish_signals: true
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
@@ -343,7 +347,7 @@ engine:
       config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
       config:
         instrument_ids:
-          - "1000LUNCUSDT.BINANCE"
+          # 125 Symbols - same as data section
           - "1000SHIBUSDT.BINANCE"
           - "1000XECUSDT.BINANCE"
           - "1INCHUSDT.BINANCE"
@@ -354,8 +358,6 @@ engine:
           - "ALPHAUSDT.BINANCE"
           - "ANKRUSDT.BINANCE"
           - "ANTUSDT.BINANCE"
-          - "APEUSDT.BINANCE"
-          - "API3USDT.BINANCE"
           - "ARPAUSDT.BINANCE"
           - "ARUSDT.BINANCE"
           - "ATAUSDT.BINANCE"
@@ -371,8 +373,9 @@ engine:
           - "BELUSDT.BINANCE"
           - "BLZUSDT.BINANCE"
           - "BNBUSDT.BINANCE"
-          - "BTCDOMUSDT.BINANCE"
+          # - "BTCDOMUSDT.BINANCE"
           - "BTCUSDT.BINANCE"
+          - "BTSUSDT.BINANCE"
           - "C98USDT.BINANCE"
           - "CELOUSDT.BINANCE"
           - "CELRUSDT.BINANCE"
@@ -381,11 +384,7 @@ engine:
           - "COMPUSDT.BINANCE"
           - "COTIUSDT.BINANCE"
           - "CRVUSDT.BINANCE"
-          - "CTKUSDT.BINANCE"
           - "CTSIUSDT.BINANCE"
-          - "CVCUSDT.BINANCE"
-          - "CVXUSDT.BINANCE"
-          - "DARUSDT.BINANCE"
           - "DASHUSDT.BINANCE"
           - "DEFIUSDT.BINANCE"
           - "DENTUSDT.BINANCE"
@@ -397,38 +396,31 @@ engine:
           - "EGLDUSDT.BINANCE"
           - "ENJUSDT.BINANCE"
           - "ENSUSDT.BINANCE"
+          - "EOSUSDT.BINANCE"
           - "ETCUSDT.BINANCE"
           - "ETHUSDT.BINANCE"
           - "FILUSDT.BINANCE"
           - "FLMUSDT.BINANCE"
-          - "FLOWUSDT.BINANCE"
           - "FTMUSDT.BINANCE"
           - "GALAUSDT.BINANCE"
-          - "GALUSDT.BINANCE"
-          - "GMTUSDT.BINANCE"
           - "GRTUSDT.BINANCE"
           - "GTCUSDT.BINANCE"
           - "HBARUSDT.BINANCE"
+          - "HNTUSDT.BINANCE"
           - "HOTUSDT.BINANCE"
-          - "ICPUSDT.BINANCE"
           - "ICXUSDT.BINANCE"
-          - "IMXUSDT.BINANCE"
-          - "INJUSDT.BINANCE"
           - "IOSTUSDT.BINANCE"
           - "IOTAUSDT.BINANCE"
           - "IOTXUSDT.BINANCE"
-          - "JASMYUSDT.BINANCE"
           - "KAVAUSDT.BINANCE"
           - "KLAYUSDT.BINANCE"
+          - "KNCUSDT.BINANCE"
           - "KSMUSDT.BINANCE"
-          - "LDOUSDT.BINANCE"
           - "LINAUSDT.BINANCE"
           - "LINKUSDT.BINANCE"
-          - "LITUSDT.BINANCE"
           - "LPTUSDT.BINANCE"
           - "LRCUSDT.BINANCE"
           - "LTCUSDT.BINANCE"
-          - "LUNA2USDT.BINANCE"
           - "MANAUSDT.BINANCE"
           - "MASKUSDT.BINANCE"
           - "MATICUSDT.BINANCE"
@@ -442,9 +434,9 @@ engine:
           - "OMGUSDT.BINANCE"
           - "ONEUSDT.BINANCE"
           - "ONTUSDT.BINANCE"
-          - "OPUSDT.BINANCE"
           - "PEOPLEUSDT.BINANCE"
           - "QTUMUSDT.BINANCE"
+          - "RAYUSDT.BINANCE"
           - "REEFUSDT.BINANCE"
           - "RENUSDT.BINANCE"
           - "RLCUSDT.BINANCE"
@@ -458,21 +450,19 @@ engine:
           - "SKLUSDT.BINANCE"
           - "SNXUSDT.BINANCE"
           - "SOLUSDT.BINANCE"
-          - "SPELLUSDT.BINANCE"
-          - "STGUSDT.BINANCE"
+          - "SRMUSDT.BINANCE"
           - "STMXUSDT.BINANCE"
           - "STORJUSDT.BINANCE"
           - "SUSHIUSDT.BINANCE"
           - "SXPUSDT.BINANCE"
           - "THETAUSDT.BINANCE"
-          - "TLMUSDT.BINANCE"
+          - "TOMOUSDT.BINANCE"
           - "TRBUSDT.BINANCE"
           - "TRXUSDT.BINANCE"
-          - "UNFIUSDT.BINANCE"
+          # - "UNFIUSDT.BINANCE"
           - "UNIUSDT.BINANCE"
           - "VETUSDT.BINANCE"
           - "WAVESUSDT.BINANCE"
-          - "WOOUSDT.BINANCE"
           - "XEMUSDT.BINANCE"
           - "XLMUSDT.BINANCE"
           - "XMRUSDT.BINANCE"
@@ -487,16 +477,16 @@ engine:
         n_short: 40
         position_value: 300
         rebalance_period: 4
-        composite_factor: "composite"
+        composite_factor: "alpha044"
 
 report:
-  output_dir: "logs/fmz_backtest"
+  output_dir: "logs/performance"
   formats:
     - csv
     - html
   tearsheet:
     enabled: true
-    title: "FMZ Multi-Factor Strategy Backtest (2022-2025)"
+    title: "FMZ 4-Factor Strategy Backtest (2022-01 to 2022-09)"
     theme: "nautilus"
     height: 1500
     charts:
@@ -510,14 +500,13 @@ report:
       - yearly_returns
   quantstats:
     enabled: true
-    title: "FMZ Strategy QuantStats Analysis"
+    title: "FMZ 4-Factor QuantStats Analysis"
     output_format:
       - html
       - png
   position_viz:
-    enabled: false
-    title: "FMZ Strategy Position Timeline"
+    enabled: true
+    title: "FMZ 4-Factor Position Timeline"
     output_subdir: "echarts"
     chart_height: 500
     interval: "8h"
-    metadata_renderer: "fmz"

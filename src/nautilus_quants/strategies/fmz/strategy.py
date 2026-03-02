@@ -190,6 +190,16 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
         factors = data.factors
         composite_factor = self.config.composite_factor
 
+        # Diagnostic: log factor reception for first 5 calls
+        if self._bar_count <= 5 * self._n_instruments or self._hour_count == 0:
+            factor_summary = {k: len(v) for k, v in factors.items()}
+            has_composite = composite_factor in factors and len(factors[composite_factor]) > 0
+            self.log.info(
+                f"on_data received: ts={ts_ns}, "
+                f"composite_present={has_composite}, "
+                f"factor_sizes={factor_summary}"
+            )
+
         # Timestamp changed - process previous batch
         if self._current_batch_ts > 0 and ts_ns > self._current_batch_ts:
             self._process_batch()

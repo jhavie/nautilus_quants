@@ -24,8 +24,9 @@ class TestCsRank:
         values = {"A": 1.0, "B": 2.0, "C": 3.0}
         result = cs_rank(values)
         
-        assert result["A"] == pytest.approx(0.0)  # Lowest
-        assert result["B"] == pytest.approx(0.5)  # Middle
+        # popbo-aligned: rank(method='min', pct=True) → [1/n, 1]
+        assert result["A"] == pytest.approx(1 / 3)  # Lowest
+        assert result["B"] == pytest.approx(2 / 3)  # Middle
         assert result["C"] == pytest.approx(1.0)  # Highest
 
     def test_rank_with_ties(self):
@@ -41,7 +42,8 @@ class TestCsRank:
         values = {"A": 1.0, "B": float('nan'), "C": 3.0}
         result = cs_rank(values)
         
-        assert result["A"] == pytest.approx(0.0)
+        # popbo-aligned: 2 valid values → rank [1/2, 1]
+        assert result["A"] == pytest.approx(0.5)
         assert math.isnan(result["B"])
         assert result["C"] == pytest.approx(1.0)
 
@@ -54,7 +56,8 @@ class TestCsRank:
         """Test with single value."""
         values = {"A": 5.0}
         result = cs_rank(values)
-        assert result["A"] == pytest.approx(0.5)
+        # popbo-aligned: single value → rank 1/1 = 1.0
+        assert result["A"] == pytest.approx(1.0)
 
 
 class TestCsZscore:

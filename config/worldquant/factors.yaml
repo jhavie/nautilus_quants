@@ -1,0 +1,49 @@
+# WorldQuant Factor Configuration
+#
+# Alpha101: Body-to-Range Ratio
+#   (close - open) / ((high - low) + 0.001)
+#
+# VWAP 4h: Volume-Weighted Average Price (4h window from 1h BinanceBar)
+#   vwap_4h = ts_sum(quote_volume, 4) / ts_sum(volume, 4)
+#   signal  = -(close - vwap_4h) / vwap_4h  (均值回归)
+#
+# 解读:
+#   - Alpha101: 收益体比率，正值看多（均值回归）
+#   - VWAP: 价格高于 VWAP 做空，低于 VWAP 做多
+
+metadata:
+  name: "worldquant_factors"
+  version: "1.1.0"
+  description: "WorldQuant factors: Alpha101 body-to-range + VWAP 4h mean-reversion"
+# variables:
+#   alpha_101_raw: "-(close - open) / ((high - low) + 0.001)"
+#   # 4h等价：用1h数据合成真实4h K线的body-to-range
+#   #   分子: ts_sum(close-open, 4) = 4根1h K线的净涨跌之和 ≈ 4h K线的 close-open
+#   #   分母: ts_max(high, 4) - ts_min(low, 4) = 4h内最高-最低 ≈ 4h K线的 high-low
+#   body_1h: "close - open"
+#   alpha_101_4h_raw: "-ts_sum(body_1h, 4) / (ts_max(high, 4) - ts_min(low, 4) + 0.001)"
+#   # VWAP 4h: 从1h BinanceBar的quote_volume和volume合成真实4h VWAP
+#   vwap_4h: "ts_sum(quote_volume, 4) / ts_sum(volume, 4)"
+#   vwap_dev_4h_raw: "-rank((close - vwap_4h) / vwap_4h)"
+
+factors:
+  new_alpha:
+    expression: "-(close - open) / ((high - low) + 0.001)"
+    description: "Alpha101: 1h K线收益体比率，正值为看多信号（均值回归，已取负）"
+    category: "worldquant"
+  # alpha_101:
+  #   expression: "alpha_101_raw"
+  #   description: "Alpha101: 1h K线收益体比率，正值为看多信号（均值回归，已取负）"
+  #   category: "worldquant"
+  # alpha_101_4h:
+  #   expression: "rank(alpha_101_4h_raw)"
+  #   description: "Alpha101 4h等价: 用1h数据合成4h K线body-to-range，正值为看多信号（均值回归，已取负）"
+  #   category: "worldquant"
+  # vwap_dev_4h:
+  #   expression: "vwap_dev_4h_raw"
+  #   description: "4h VWAP deviation: mean-reversion signal from 1h BinanceBar quote_volume synthesis"
+  #   category: "worldquant"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

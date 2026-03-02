@@ -9,7 +9,7 @@ catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-012-fmz-strate
 bar_spec: "1h"
 
 # Factor definition
-factor_config_path: "config/factors_fmz_4factor.yaml"
+factor_config_path: "config/fmz/factors.yaml"
 
 # Instrument universe
 instrument_ids:
