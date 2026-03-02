@@ -1,36 +1,30 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-Factor Engine module - Core computation engine.
+Factor Engine module - Panel-based computation engine.
 
-Provides the FactorEngine class and supporting components for
-multi-instrument factor computation.
+Provides the PanelFactorEngine and supporting components for
+multi-instrument factor computation using DataFrame[T x N] architecture.
 
 Constitution Compliance:
     - FactorEngineActor extends Nautilus Actor (Principle I)
-    - FactorEngineConfig extends ActorConfig (Principle II)
+    - FactorEngineActorConfig extends ActorConfig (Principle II)
 """
 
 from nautilus_quants.actors.factor_engine import (
     FactorEngineActor,
     FactorEngineActorConfig,
 )
-from nautilus_quants.factors.engine.cs_factor_engine import CsFactorEngine
-from nautilus_quants.factors.engine.dependency_resolver import (
-    CircularDependencyError,
-    DependencyError,
-    DependencyResolver,
-)
-from nautilus_quants.factors.engine.factor_engine import FactorEngine
+from nautilus_quants.factors.engine.panel_buffer import PanelBuffer
+from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
 
 __all__ = [
     # Nautilus-native Actor (Constitution compliant)
     "FactorEngineActor",
     "FactorEngineActorConfig",
-    # Core engines (standalone usage)
-    "FactorEngine",
-    "CsFactorEngine",
-    "DependencyResolver",
-    "DependencyError",
-    "CircularDependencyError",
+    # Panel engine
+    "PanelFactorEngine",
+    "PanelBuffer",
+    "PanelEvaluator",
 ]

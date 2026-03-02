@@ -15,11 +15,6 @@ Skipped (IndNeutralize): 048, 056, 058, 059, 063, 067, 069, 070, 076,
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from nautilus_quants.factors.engine.factor_engine import FactorEngine
-
 
 # Alpha101 factor expressions
 # Reference: https://arxiv.org/abs/1601.00991
@@ -518,29 +513,6 @@ ALPHA101_FACTORS = {
         "category": "momentum",
     },
 }
-
-
-def register_alpha101_factors(engine: FactorEngine, factors: list[str] | None = None) -> None:
-    """
-    Register Alpha101 factors with the engine.
-
-    Args:
-        engine: FactorEngine instance
-        factors: List of factor names to register (default: all)
-    """
-    if factors is None:
-        factors = list(ALPHA101_FACTORS.keys())
-
-    for factor_name in factors:
-        if factor_name not in ALPHA101_FACTORS:
-            raise ValueError(f"Unknown Alpha101 factor: {factor_name}")
-
-        factor_def = ALPHA101_FACTORS[factor_name]
-        engine.register_expression_factor(
-            name=factor_name,
-            expression=factor_def["expression"],
-            description=factor_def["description"],
-        )
 
 
 def get_alpha101_expression(name: str) -> str:
