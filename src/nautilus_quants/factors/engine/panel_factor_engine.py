@@ -23,7 +23,6 @@ Usage::
 from __future__ import annotations
 
 import time
-from collections import defaultdict
 from typing import Any
 
 import numpy as np
@@ -87,10 +86,6 @@ class PanelFactorEngine:
         self._total_computes: int = 0
         self._enable_timing: bool = True
         self._warning_threshold_ms: float = 0.5
-
-        # Detailed profiling (per-phase breakdown)
-        self._enable_profiling: bool = False
-        self._phase_times: defaultdict[str, list[float]] = defaultdict(list)
 
         # Cached evaluator (reused across flushes to avoid re-creation overhead)
         self._evaluator: PanelEvaluator | None = None
@@ -187,7 +182,6 @@ class PanelFactorEngine:
             ``{factor_name: {instrument_id: value}}``.
             Instruments with NaN values are excluded.
         """
-        profiling = self._enable_profiling
         pc = time.perf_counter
 
         t0 = pc()
@@ -271,14 +265,6 @@ class PanelFactorEngine:
             self._compute_times.append(elapsed_ms)
             self._total_computes += 1
 
-        # Track detailed profiling
-        if profiling:
-            self._phase_times["flush"].append((t1 - t0) * 1000)
-            self._phase_times["to_panel"].append((t2 - t1) * 1000)
-            self._phase_times["variables"].append((t3 - t2) * 1000)
-            self._phase_times["factors"].append((t4 - t3) * 1000)
-            self._phase_times["total"].append((t4 - t0) * 1000)
-
         return results
 
     # ------------------------------------------------------------------
@@ -307,15 +293,6 @@ class PanelFactorEngine:
             extra_fields=tuple(fields),
         )
 
-    @property
-    def enable_profiling(self) -> bool:
-        """Whether detailed per-phase profiling is enabled."""
-        return self._enable_profiling
-
-    @enable_profiling.setter
-    def enable_profiling(self, value: bool) -> None:
-        self._enable_profiling = value
-
     def get_performance_stats(self) -> dict[str, float]:
         """Return performance statistics."""
         if not self._compute_times:
@@ -332,32 +309,6 @@ class PanelFactorEngine:
             "p95_ms": float(np.percentile(self._compute_times, 95)),
             "total_computes": self._total_computes,
         }
-
-    def get_profiling_stats(self) -> dict[str, dict[str, float]]:
-        """Return detailed per-phase profiling statistics.
-
-        Requires ``enable_profiling = True`` before running.
-
-        Returns
-        -------
-        dict[str, dict[str, float]]
-            ``{phase_name: {"mean_ms": ..., "max_ms": ..., "p95_ms": ..., "pct": ...}}``.
-        """
-        if not self._phase_times:
-            return {}
-
-        total_mean = float(np.mean(self._phase_times["total"])) if self._phase_times["total"] else 1.0
-        stats: dict[str, dict[str, float]] = {}
-        for phase, times in self._phase_times.items():
-            arr = np.array(times)
-            mean = float(arr.mean())
-            stats[phase] = {
-                "mean_ms": mean,
-                "max_ms": float(arr.max()),
-                "p95_ms": float(np.percentile(arr, 95)),
-                "pct": mean / total_mean * 100 if total_mean > 0 else 0.0,
-            }
-        return stats
 
     def reset(self) -> None:
         """Reset all engine state."""
