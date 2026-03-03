@@ -19,7 +19,7 @@ import pytest
 from scipy.stats import rankdata
 
 from nautilus_quants.factors.builtin.alpha101 import ALPHA101_FACTORS
-from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+from nautilus_quants.factors.engine.evaluator import Evaluator
 from nautilus_quants.factors.expression import parse_expression
 from nautilus_quants.factors.operators.cross_sectional import (
     CS_OPERATOR_INSTANCES,
@@ -349,8 +349,8 @@ def big_panel() -> dict[str, pd.DataFrame]:
 
 
 @pytest.fixture(scope="module")
-def big_evaluator(big_panel: dict[str, pd.DataFrame]) -> PanelEvaluator:
-    return PanelEvaluator(
+def big_evaluator(big_panel: dict[str, pd.DataFrame]) -> Evaluator:
+    return Evaluator(
         panel_fields=big_panel,
         ts_ops=TS_OPERATOR_INSTANCES,
         cs_ops=CS_OPERATOR_INSTANCES,
@@ -362,7 +362,7 @@ def big_evaluator(big_panel: dict[str, pd.DataFrame]) -> PanelEvaluator:
 def test_alpha101_evaluates(
     alpha_name: str,
     big_panel: dict[str, pd.DataFrame],
-    big_evaluator: PanelEvaluator,
+    big_evaluator: Evaluator,
 ) -> None:
     """Every non-IndNeutralize alpha evaluates without error on 300x10 panel."""
     expr = ALPHA101_FACTORS[alpha_name]["expression"]
@@ -422,8 +422,8 @@ def real_panel() -> dict[str, pd.DataFrame]:
 
 
 @pytest.fixture(scope="module")
-def real_evaluator(real_panel: dict[str, pd.DataFrame]) -> PanelEvaluator:
-    return PanelEvaluator(
+def real_evaluator(real_panel: dict[str, pd.DataFrame]) -> Evaluator:
+    return Evaluator(
         panel_fields=real_panel,
         ts_ops=TS_OPERATOR_INSTANCES,
         cs_ops=CS_OPERATOR_INSTANCES,
@@ -467,7 +467,7 @@ _REAL_TESTABLE = sorted(
 def test_alpha101_real_data(
     alpha_name: str,
     real_panel: dict[str, pd.DataFrame],
-    real_evaluator: PanelEvaluator,
+    real_evaluator: Evaluator,
 ) -> None:
     """All non-IndNeutralize alphas evaluate on real 12-coin 4h data."""
     expr = ALPHA101_FACTORS[alpha_name]["expression"]
@@ -480,13 +480,13 @@ def test_alpha101_real_data(
 
 
 @pytest.mark.skipif(not _REAL_DATA_AVAILABLE, reason="Real data not found")
-class TestPanelFactorEngineE2E:
-    """E2E: CSV → PanelFactorEngine → factor values."""
+class TestFactorEngineE2E:
+    """E2E: CSV → FactorEngine → factor values."""
 
     def test_engine_e2e(self, real_panel: dict[str, pd.DataFrame]) -> None:
-        from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+        from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
-        engine = PanelFactorEngine(max_history=300)
+        engine = FactorEngine(max_history=300)
 
         # Register a few representative alphas
         sample_alphas = ["alpha001", "alpha003", "alpha006", "alpha012", "alpha101"]

@@ -175,15 +175,25 @@ class TsRank(TimeSeriesOperator):
         return float(avg_rank / window)
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
-        """popbo semantics: scipy.rankdata(method='min')[-1], returns [1, d]."""
-        from scipy.stats import rankdata
+        """popbo semantics: rankdata(method='min')[-1], returns [1, d].
 
+        Optimized: numpy batch comparison replaces per-window scipy.rankdata.
+        rank_min(last) = count(window < last) + 1
+        """
         w = int(window)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
 
-        def _rank_last(arr: np.ndarray) -> float:
-            return float(rankdata(arr, method="min")[-1])
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)  # [N]
+            last = win[-1:]  # [1, N]
+            rank = np.nansum(win < last, axis=0).astype(float) + 1.0
+            rank[has_nan] = np.nan
+            result[t] = rank
 
-        return data.rolling(w, min_periods=w).apply(_rank_last, raw=True)
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 @register_operator
@@ -211,9 +221,23 @@ class TsArgmax(TimeSeriesOperator):
         return float(idx + 1)  # 1-indexed, 1 = oldest, window = newest
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
-        """popbo semantics: np.argmax + 1 (1-indexed from oldest)."""
+        """popbo semantics: np.argmax + 1 (1-indexed from oldest).
+
+        Optimized: numpy batch argmax replaces per-window lambda.
+        """
         w = int(window)
-        return data.rolling(w, min_periods=w).apply(lambda x: np.argmax(x) + 1, raw=True)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            r = np.argmax(win, axis=0).astype(float) + 1.0
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 @register_operator
@@ -241,9 +265,23 @@ class TsArgmin(TimeSeriesOperator):
         return float(idx + 1)  # 1-indexed, 1 = oldest, window = newest
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
-        """popbo semantics: np.argmin + 1 (1-indexed from oldest)."""
+        """popbo semantics: np.argmin + 1 (1-indexed from oldest).
+
+        Optimized: numpy batch argmin replaces per-window lambda.
+        """
         w = int(window)
-        return data.rolling(w, min_periods=w).apply(lambda x: np.argmin(x) + 1, raw=True)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            r = np.argmin(win, axis=0).astype(float) + 1.0
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 @register_operator
@@ -332,12 +370,15 @@ class Correlation(TimeSeriesOperator):
         
         x = data[-window:]
         y = data2[-window:]
-        
-        # Handle constant arrays
+
+        # Handle constant arrays — popbo-aligned: undefined correlation = 0.0
         if np.std(x) == 0 or np.std(y) == 0:
-            return float('nan')
-        
-        return float(np.corrcoef(x, y)[0, 1])
+            return 0.0
+
+        result = float(np.corrcoef(x, y)[0, 1])
+        if np.isnan(result) or np.isinf(result):
+            return 0.0
+        return result
 
     def make_incremental(self, window: int) -> "IncrementalCorr":
         """Return O(1) incremental Pearson correlation state."""
@@ -352,19 +393,19 @@ class Correlation(TimeSeriesOperator):
         return data.rolling(int(window)).corr(data2).fillna(0).replace([np.inf, -np.inf], 0)
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """DataFrame-level rolling Pearson correlation.
+
+        Uses pandas DataFrame.rolling().corr(other_df) which computes all
+        columns simultaneously (C-optimized), avoiding per-column Python loop.
+
+        Popbo-aligned: fillna(0) treats undefined correlation (constant series)
+        as uncorrelated (0).
+        """
         data2 = kwargs.get("data2")
         if data2 is None:
             return pd.DataFrame(np.nan, index=data.index, columns=data.columns)
         w = int(window)
-        result = pd.DataFrame(
-            {col: data[col].rolling(w).corr(data2[col]) for col in data.columns},
-            index=data.index,
-        )
-        # Popbo-aligned: fillna(0) treats undefined correlation
-        # (constant series within window → std=0 → NaN/inf) as uncorrelated (0).
-        # This is critical for rank-based alphas where CS rank is often constant
-        # within small rolling windows (e.g., correlation(high, rank(volume), 5)
-        # with stable volume rankings among few instruments).
+        result = data.rolling(w).corr(data2)
         return result.fillna(0).replace([np.inf, -np.inf], 0)
 
 
@@ -405,14 +446,16 @@ class Covariance(TimeSeriesOperator):
         return data.rolling(int(window)).cov(data2, ddof=1)
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """DataFrame-level rolling covariance.
+
+        Uses pandas DataFrame.rolling().cov(other_df) which computes all
+        columns simultaneously (C-optimized), avoiding per-column Python loop.
+        """
         data2 = kwargs.get("data2")
         if data2 is None:
             return pd.DataFrame(np.nan, index=data.index, columns=data.columns)
         w = int(window)
-        return pd.DataFrame(
-            {col: data[col].rolling(w).cov(data2[col], ddof=1) for col in data.columns},
-            index=data.index,
-        )
+        return data.rolling(w).cov(data2, ddof=1)
 
 
 @register_operator
@@ -449,14 +492,25 @@ class DecayLinear(TimeSeriesOperator):
         """popbo-aligned: exact same computation form as popbo's decay_linear.
 
         popbo uses: np.sum(weights * x) / sum_weights  (un-normalized weights)
-        NOT: np.dot(x, pre_normalized_weights)
-        The difference in evaluation order causes floating-point divergence
-        in deeply nested rank(decay_linear(...)) expressions.
+        Optimized: numpy batch weighted sum replaces per-window lambda.
         """
         w = int(window)
-        weights = np.array(range(1, w + 1), dtype=float)
-        sum_weights = float(np.sum(weights))
-        return data.rolling(w).apply(lambda x: np.sum(weights * x) / sum_weights, raw=True)
+        weights = np.arange(1, w + 1, dtype=float)  # [w]
+        sum_weights = weights.sum()
+
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            # np.sum(weights * x) / sum_weights — popbo evaluation order
+            r = np.sum(weights[:, None] * win, axis=0) / sum_weights
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 @register_operator
@@ -480,7 +534,20 @@ class TsProduct(TimeSeriesOperator):
         return data.rolling(int(window)).apply(np.prod, raw=True)
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
-        return data.rolling(int(window)).apply(np.prod, raw=True)
+        """Optimized: numpy batch product replaces per-window lambda."""
+        w = int(window)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            r = np.prod(win, axis=0)
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 # ---------------------------------------------------------------------------
@@ -510,15 +577,28 @@ class WqTsRank(TimeSeriesOperator):
         return (raw - 1) / (window - 1) if window > 1 else 0.5
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
-        from scipy.stats import rankdata
+        """BRAIN semantics: (average_rank - 1) / (d - 1), value range [0, 1].
 
+        Optimized: numpy batch comparison replaces per-window scipy.rankdata.
+        average_rank(last) = count_less + (count_equal + 1) / 2
+        """
         w = int(window)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
 
-        def _brain_rank(arr: np.ndarray) -> float:
-            raw = float(rankdata(arr)[-1])
-            return (raw - 1) / (len(arr) - 1) if len(arr) > 1 else 0.5
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            last = win[-1:]  # [1, N]
+            count_less = np.nansum(win < last, axis=0).astype(float)
+            count_equal = np.nansum(win == last, axis=0).astype(float)
+            avg_rank = count_less + (count_equal + 1.0) / 2.0
+            r = (avg_rank - 1.0) / (w - 1.0) if w > 1 else np.full(N, 0.5)
+            r[has_nan] = np.nan
+            result[t] = r
 
-        return data.rolling(w, min_periods=w).apply(_brain_rank, raw=True)
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 @register_operator
@@ -541,12 +621,23 @@ class WqTsArgmax(TimeSeriesOperator):
         return float(len(arr) - 1 - np.argmax(arr))
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """BRAIN semantics: d - 1 - argmax (0-indexed from today).
+
+        Optimized: numpy batch argmax replaces per-window lambda.
+        """
         w = int(window)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
 
-        def _brain_argmax(arr: np.ndarray) -> float:
-            return float(len(arr) - 1 - np.argmax(arr))
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            r = (w - 1.0 - np.argmax(win, axis=0)).astype(float)
+            r[has_nan] = np.nan
+            result[t] = r
 
-        return data.rolling(w, min_periods=w).apply(_brain_argmax, raw=True)
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 @register_operator
@@ -567,12 +658,23 @@ class WqTsArgmin(TimeSeriesOperator):
         return float(len(arr) - 1 - np.argmin(arr))
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """BRAIN semantics: d - 1 - argmin (0-indexed from today).
+
+        Optimized: numpy batch argmin replaces per-window lambda.
+        """
         w = int(window)
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
 
-        def _brain_argmin(arr: np.ndarray) -> float:
-            return float(len(arr) - 1 - np.argmin(arr))
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            r = (w - 1.0 - np.argmin(win, axis=0)).astype(float)
+            r[has_nan] = np.nan
+            result[t] = r
 
-        return data.rolling(w, min_periods=w).apply(_brain_argmin, raw=True)
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
 # ---------------------------------------------------------------------------

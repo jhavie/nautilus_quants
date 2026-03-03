@@ -11,13 +11,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
-
-if TYPE_CHECKING:
-    from nautilus_quants.factors.types import FactorInput
 
 
 class OperatorType(Enum):

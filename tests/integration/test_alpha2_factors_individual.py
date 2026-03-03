@@ -4,7 +4,7 @@
 Integration tests for Alpha2 8-factor composite — individual factor verification.
 
 Loads real 12-coin BinanceBar 4h data from the catalog parquet files and feeds
-them into PanelFactorEngine directly (bypassing the Nautilus backtest framework)
+them into FactorEngine directly (bypassing the Nautilus backtest framework)
 to verify that each factor in factors_alpha2.yaml produces non-empty results.
 
 Data source: /Users/joe/Sync/nautilus_quants2/data/12coin_catalog
@@ -20,6 +20,7 @@ Test sequence:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -27,7 +28,7 @@ import pandas as pd
 import pytest
 
 from nautilus_quants.factors.config import load_factor_config
-from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -135,14 +136,14 @@ def _create_engine_with_single_factor(
     panel: dict[str, pd.DataFrame],
     with_returns: bool = False,
 ) -> dict[str, dict[str, float]]:
-    """Create a PanelFactorEngine, feed panel data, and compute a single factor.
+    """Create a FactorEngine, feed panel data, and compute a single factor.
 
     Returns the last compute results: {factor_name: {instrument: value}}.
     """
     n_timestamps = len(next(iter(panel.values())))
     instruments = list(next(iter(panel.values())).columns)
 
-    engine = PanelFactorEngine(max_history=600)
+    engine = FactorEngine(max_history=600)
 
     # Register returns variable if needed
     if with_returns:
@@ -172,8 +173,8 @@ def _create_engine_with_single_factor(
 
 def _create_full_engine(
     panel: dict[str, pd.DataFrame],
-) -> tuple[PanelFactorEngine, dict[str, dict[str, float]]]:
-    """Create a PanelFactorEngine loaded from config, feed all data.
+) -> tuple[FactorEngine, dict[str, dict[str, float]]]:
+    """Create a FactorEngine loaded from config, feed all data.
 
     Returns (engine, last_results).
     """
@@ -184,7 +185,7 @@ def _create_full_engine(
     n_timestamps = len(next(iter(panel.values())))
     instruments = list(next(iter(panel.values())).columns)
 
-    engine = PanelFactorEngine(config=config, max_history=600)
+    engine = FactorEngine(config=config, max_history=600)
 
     results = {}
     for ts_idx in range(n_timestamps):
@@ -407,3 +408,129 @@ class TestFactorValuesPublish:
             "strategy on_data() will never accumulate values"
         )
         print(f"\n  FactorValues composite: {len(composite)} instruments with values")
+
+
+# ---------------------------------------------------------------------------
+# Test 5: Golden Reference — precision regression guard
+# ---------------------------------------------------------------------------
+
+GOLDEN_FILE = Path(__file__).resolve().parents[1] / "fixtures" / "golden_panel_e2e_12coin.json"
+SAMPLE_INTERVAL = 25  # sample every 25 timestamps
+
+
+def _run_engine_with_snapshots(
+    panel: dict[str, pd.DataFrame],
+) -> dict[int, dict[str, dict[str, float]]]:
+    """Run full engine with multi-timestamp snapshots for golden comparison."""
+    if not CONFIG_PATH.exists():
+        pytest.skip(f"Config not found: {CONFIG_PATH}")
+
+    config = load_factor_config(str(CONFIG_PATH))
+    n_ts = len(next(iter(panel.values())))
+    instruments = list(next(iter(panel.values())).columns)
+
+    engine = FactorEngine(config=config, max_history=200)
+
+    snapshots: dict[int, dict[str, dict[str, float]]] = {}
+    for ts_idx in range(n_ts):
+        for inst in instruments:
+            bar_data = {}
+            for field_name, df in panel.items():
+                if field_name == "returns":
+                    continue
+                if inst in df.columns:
+                    val = df[inst].iloc[ts_idx]
+                    if not np.isnan(val):
+                        bar_data[field_name] = float(val)
+            if bar_data:
+                engine.on_bar(inst, bar_data, ts_idx)
+
+        results = engine.flush_and_compute(ts_idx)
+
+        # Sample: capture snapshots after warmup, every SAMPLE_INTERVAL
+        if ts_idx >= 50 and ts_idx % SAMPLE_INTERVAL == 0:
+            snapshots[ts_idx] = results
+
+    return snapshots
+
+
+class TestGoldenReference:
+    """Precision regression guard — ensures optimization doesn't change factor values.
+
+    Run ``test_generate_golden_reference`` once before any optimization to produce
+    ``tests/fixtures/golden_panel_e2e_12coin.json``.  After each optimization phase,
+    ``test_factor_values_exact_match`` verifies values remain identical (< 1e-10).
+    """
+
+    def test_generate_golden_reference(
+        self,
+        catalog_panel: dict[str, pd.DataFrame],
+    ) -> None:
+        """Generate golden reference file (run once, skip if already exists)."""
+        if GOLDEN_FILE.exists():
+            pytest.skip("Golden reference already exists — delete to regenerate")
+
+        snapshots = _run_engine_with_snapshots(catalog_panel)
+
+        # Serialize: keys must be strings for JSON
+        serializable = {str(k): v for k, v in snapshots.items()}
+
+        GOLDEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        GOLDEN_FILE.write_text(json.dumps(serializable, indent=2, sort_keys=True))
+
+        print(f"\n  Golden reference generated: {GOLDEN_FILE}")
+        print(f"  Snapshots: {len(snapshots)} timestamps")
+        for ts_idx in sorted(snapshots.keys())[:3]:
+            factors_with_values = [
+                f for f, v in snapshots[ts_idx].items() if v
+            ]
+            print(f"    ts={ts_idx}: {len(factors_with_values)} factors with values")
+
+    def test_factor_values_exact_match(
+        self,
+        catalog_panel: dict[str, pd.DataFrame],
+    ) -> None:
+        """Verify factor values match golden reference within 1e-10 tolerance."""
+        if not GOLDEN_FILE.exists():
+            pytest.skip("Golden reference not yet generated — run test_generate_golden_reference first")
+
+        golden = json.loads(GOLDEN_FILE.read_text())
+        snapshots = _run_engine_with_snapshots(catalog_panel)
+
+        mismatches = []
+        total_checked = 0
+
+        for ts_str, expected_factors in golden.items():
+            ts_idx = int(ts_str)
+            actual_factors = snapshots.get(ts_idx, {})
+
+            for fname, expected_insts in expected_factors.items():
+                for inst, expected_val in expected_insts.items():
+                    total_checked += 1
+                    actual_val = actual_factors.get(fname, {}).get(inst)
+
+                    if actual_val is None:
+                        mismatches.append(
+                            f"MISSING {fname}@{inst} ts={ts_idx}: expected={expected_val}"
+                        )
+                        continue
+
+                    diff = abs(actual_val - expected_val)
+                    if diff > 1e-10:
+                        mismatches.append(
+                            f"MISMATCH {fname}@{inst} ts={ts_idx}: "
+                            f"actual={actual_val:.15e}, expected={expected_val:.15e}, "
+                            f"diff={diff:.2e}"
+                        )
+
+        print(f"\n  Checked {total_checked} values across {len(golden)} timestamps")
+
+        if mismatches:
+            # Show first 20 mismatches
+            detail = "\n  ".join(mismatches[:20])
+            suffix = f"\n  ... and {len(mismatches) - 20} more" if len(mismatches) > 20 else ""
+            pytest.fail(
+                f"{len(mismatches)} mismatches found (tolerance=1e-10):\n  {detail}{suffix}"
+            )
+        else:
+            print(f"  ALL {total_checked} values match golden reference (tolerance=1e-10)")

@@ -1,7 +1,7 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-PanelBuffer — Rolling panel data accumulator.
+Buffer — Rolling panel data accumulator.
 
 Accumulates per-instrument bar data into rolling DataFrame panels
 (rows = timestamps, columns = instruments) for cross-sectional + time-series
@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 
-class PanelBuffer:
+class Buffer:
     """Rolling panel data accumulator.
 
     Maintains a sliding window of ``max_history`` timestamps.  Each OHLCV
@@ -26,7 +26,7 @@ class PanelBuffer:
 
     Usage::
 
-        buf = PanelBuffer(max_history=500)
+        buf = Buffer(max_history=500)
 
         # For each bar received:
         buf.append("AAPL", ts=1, bar_data={"open": 150, "high": 155, ...})

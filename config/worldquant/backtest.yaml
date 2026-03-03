@@ -496,7 +496,7 @@ engine:
           - "ZENUSDT.BINANCE"
           - "ZILUSDT.BINANCE"
           - "ZRXUSDT.BINANCE"
-        factor_name: "alpha044"
+        factor_name: "composite_neg"
         delay: 0
         decay: 6
         neutralization: "MARKET"

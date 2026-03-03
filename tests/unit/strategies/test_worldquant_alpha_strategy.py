@@ -865,17 +865,23 @@ class TestBrainRawReturnsToPositions:
     # s4=−0.01, s5=−0.03, s6=−0.05, s7=−0.07
 
     def test_rank_neg_returns_matches_brain_doc_d_column(self) -> None:
-        """验证 CsRank 直接调用：rank(-returns) 产生 BRAIN 文档 D列精确值 [0/7, ..., 7/7]"""
+        """验证 CsRank 直接调用：rank(-returns) 产生 [1/n, ..., 1] (popbo-aligned).
+
+        CsRank 使用 rank(method='min', pct=True)，值域 [1/n, 1]。
+        这与 pandas/popbo 约定一致（83 个 alpha101 精确匹配测试验证）。
+        BRAIN 文档 D列用 [0/(n-1), 1] 简化展示，但实际 pipeline 结果相同。
+        """
         neg_returns = {k: -v for k, v in self.RETURNS.items()}
         rank_result = CsRank().compute(neg_returns)
 
+        # [1/8, 2/8, ..., 8/8] = [0.125, 0.25, ..., 1.0]
         for i in range(8):
-            assert rank_result[f"s{i}"] == pytest.approx(i / 7)
+            assert rank_result[f"s{i}"] == pytest.approx((i + 1) / 8)
 
     def test_full_chain_raw_returns_to_625k_positions(self) -> None:
         """完整链路：原始收益率 → rank(-returns) → pipeline → $20M 头寸
         逐列验证 BRAIN 文档 fig_03：
-          D列: rank(-returns) = [0/7, ..., 7/7]
+          D列: rank(-returns) = [(i+1)/8] (popbo-aligned [1/n, 1])
           H列: 缩放后权重     = (2i-7)/32
           头寸: × $20M        = ±k × $625,000
         """
@@ -885,9 +891,9 @@ class TestBrainRawReturnsToPositions:
         neg_returns = {k: -v for k, v in self.RETURNS.items()}
         rank_values = CsRank().compute(neg_returns)
 
-        # 验证 D列
+        # 验证 D列 — [1/8, 2/8, ..., 8/8] (popbo-aligned)
         for i in range(8):
-            assert rank_values[f"s{i}"] == pytest.approx(i / 7)
+            assert rank_values[f"s{i}"] == pytest.approx((i + 1) / 8)
 
         # Step2-4: 策略 pipeline（neutralize → scale → positions）
         strategy = _make_strategy(neutralization="MARKET", decay=0, truncation=0.0)

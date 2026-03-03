@@ -171,7 +171,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-12-31"
+    end_time: "2023-12-31"
   # BinanceBar (provides extra fields like quote_volume to FactorEngineActor)
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
@@ -318,7 +318,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-12-31"
+    end_time: "2023-12-31"
 
 engine:
   trader_id: "BACKTESTER-FMZ-4F-001"
