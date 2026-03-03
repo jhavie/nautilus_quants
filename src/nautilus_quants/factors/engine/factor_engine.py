@@ -22,6 +22,7 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -36,6 +37,8 @@ from nautilus_quants.factors.expression.ast import ASTNode
 from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
 from nautilus_quants.factors.operators.time_series import TS_OPERATOR_INSTANCES
+
+logger = logging.getLogger(__name__)
 
 
 class FactorEngine:
@@ -85,7 +88,6 @@ class FactorEngine:
         self._compute_times: list[float] = []
         self._total_computes: int = 0
         self._enable_timing: bool = True
-        self._warning_threshold_ms: float = 0.5
 
         # Cached evaluator (reused across flushes to avoid re-creation overhead)
         self._evaluator: Evaluator | None = None
@@ -115,7 +117,6 @@ class FactorEngine:
             )
 
         # Performance settings
-        self._warning_threshold_ms = config.performance.warning_threshold_ms
         self._enable_timing = config.performance.enable_timing
 
     def register_expression_factor(
@@ -208,7 +209,7 @@ class FactorEngine:
                 parameters=self._parameters,
             )
         else:
-            self._evaluator._fields = panel_fields
+            self._evaluator.update_fields(panel_fields)
         evaluator = self._evaluator
 
         # Phase: variables
@@ -218,7 +219,7 @@ class FactorEngine:
                 var_result = evaluator.evaluate(var_ast)
                 panel_fields[var_name] = var_result
             except Exception:
-                pass  # Variable evaluation failure — skip silently
+                logger.debug("Variable '%s' evaluation failed", var_name, exc_info=True)
         t3 = pc()
 
         # Phase: factors
@@ -256,6 +257,7 @@ class FactorEngine:
                 else:
                     results[name] = {}
             except Exception:
+                logger.warning("Factor '%s' evaluation failed", name, exc_info=True)
                 results[name] = {}
         t4 = pc()
 

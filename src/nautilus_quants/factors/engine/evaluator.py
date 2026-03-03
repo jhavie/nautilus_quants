@@ -95,6 +95,10 @@ class Evaluator(ASTVisitor):
         self._math_ops = math_ops
         self._parameters = parameters or {}
 
+    def update_fields(self, panel_fields: dict[str, pd.DataFrame | float]) -> None:
+        """Replace the panel fields for a new evaluation cycle."""
+        self._fields = panel_fields
+
     def evaluate(self, node: ASTNode) -> pd.DataFrame | float:
         """Evaluate an AST node, returning a panel DataFrame or scalar."""
         return node.accept(self)
@@ -304,9 +308,7 @@ class Evaluator(ASTVisitor):
     def _pow(
         left: pd.DataFrame | float, right: pd.DataFrame | float
     ) -> pd.DataFrame | float:
-        if isinstance(left, pd.DataFrame) or isinstance(right, pd.DataFrame):
-            return np.power(left, right)  # type: ignore[arg-type]
-        return np.power(left, right)
+        return np.power(left, right)  # type: ignore[arg-type]
 
     @staticmethod
     def _cmp(
