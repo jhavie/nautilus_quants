@@ -1,15 +1,15 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-PanelFactorEngine — Unified factor engine using panel (matrix) architecture.
+FactorEngine — Unified factor engine using panel (matrix) architecture.
 
-Replaces the two-phase ``FactorEngine`` + ``CsFactorEngine`` with a single
-engine that evaluates all expressions (including nested CS/TS operators)
-correctly via panel ``pd.DataFrame[T x N]`` intermediates.
+Replaces the two-phase engine with a single engine that evaluates all
+expressions (including nested CS/TS operators) correctly via panel
+``pd.DataFrame[T x N]`` intermediates.
 
 Usage::
 
-    engine = PanelFactorEngine(config=factor_config, max_history=500)
+    engine = FactorEngine(config=factor_config, max_history=500)
 
     # On each bar:
     engine.on_bar("AAPL", {"open": 150, "close": 155, ...}, ts=1)
@@ -29,8 +29,8 @@ import numpy as np
 import pandas as pd
 
 from nautilus_quants.factors.config import FactorConfig, load_factor_config
-from nautilus_quants.factors.engine.panel_buffer import PanelBuffer
-from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+from nautilus_quants.factors.engine.buffer import Buffer
+from nautilus_quants.factors.engine.evaluator import Evaluator
 from nautilus_quants.factors.expression import parse_expression
 from nautilus_quants.factors.expression.ast import ASTNode
 from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
@@ -38,11 +38,11 @@ from nautilus_quants.factors.operators.math import MATH_OPERATORS
 from nautilus_quants.factors.operators.time_series import TS_OPERATOR_INSTANCES
 
 
-class PanelFactorEngine:
+class FactorEngine:
     """Unified panel-based factor engine.
 
-    Accumulates bar data in a :class:`PanelBuffer` and evaluates factor
-    ASTs via :class:`PanelEvaluator`.  All intermediate results are
+    Accumulates bar data in a :class:`Buffer` and evaluates factor
+    ASTs via :class:`Evaluator`.  All intermediate results are
     ``pd.DataFrame[T x N]`` which naturally handles any nesting of
     cross-sectional (row-wise) and time-series (column-wise) operators.
 
@@ -62,7 +62,7 @@ class PanelFactorEngine:
         max_history: int = 500,
         extra_fields: tuple[str, ...] = (),
     ) -> None:
-        self._buffer = PanelBuffer(max_history=max_history, extra_fields=extra_fields)
+        self._buffer = Buffer(max_history=max_history, extra_fields=extra_fields)
         self._max_history = max_history
 
         # Pre-parsed factor ASTs
@@ -88,7 +88,7 @@ class PanelFactorEngine:
         self._warning_threshold_ms: float = 0.5
 
         # Cached evaluator (reused across flushes to avoid re-creation overhead)
-        self._evaluator: PanelEvaluator | None = None
+        self._evaluator: Evaluator | None = None
 
         if config:
             self._apply_config(config)
@@ -200,7 +200,7 @@ class PanelFactorEngine:
 
         # Reuse evaluator — only update the fields reference
         if self._evaluator is None:
-            self._evaluator = PanelEvaluator(
+            self._evaluator = Evaluator(
                 panel_fields=panel_fields,
                 ts_ops=self._ts_ops,
                 cs_ops=self._cs_ops,
@@ -288,7 +288,7 @@ class PanelFactorEngine:
 
     def set_extra_fields(self, fields: list[str]) -> None:
         """Set extra bar fields to track beyond OHLCV."""
-        self._buffer = PanelBuffer(
+        self._buffer = Buffer(
             max_history=self._max_history,
             extra_fields=tuple(fields),
         )

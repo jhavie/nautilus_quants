@@ -1,7 +1,7 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-PanelEvaluator — AST evaluator for panel (matrix) factor computation.
+Evaluator — AST evaluator for panel (matrix) factor computation.
 
 Evaluates Alpha101-style AST expressions where every intermediate result
 is a ``pd.DataFrame[T x N]`` (rows=timestamps, cols=instruments) or a scalar.
@@ -35,7 +35,7 @@ from nautilus_quants.factors.operators.base import (
 )
 
 
-class PanelEvaluationError(Exception):
+class EvaluationError(Exception):
     """Raised when panel expression evaluation fails."""
 
     pass
@@ -57,7 +57,7 @@ def _get_two_data_ops() -> frozenset[str]:
     return _TWO_DATA_OPS
 
 
-class PanelEvaluator(ASTVisitor):
+class Evaluator(ASTVisitor):
     """Evaluate AST nodes over panel DataFrames.
 
     Variables are bound to ``pd.DataFrame[T x N]`` (full panel per field).
@@ -120,7 +120,7 @@ class PanelEvaluator(ASTVisitor):
             return self._parameters[name]
         if name in self._BOOL_LITERALS:
             return self._BOOL_LITERALS[name]
-        raise PanelEvaluationError(f"Unknown variable: '{name}'")
+        raise EvaluationError(f"Unknown variable: '{name}'")
 
     def visit_binary_op(self, node: BinaryOpNode) -> pd.DataFrame | float:
         left = self.evaluate(node.left)
@@ -159,7 +159,7 @@ class PanelEvaluator(ASTVisitor):
         if op == "||":
             return self._logical_or(left, right)
 
-        raise PanelEvaluationError(f"Unknown binary operator: '{op}'")
+        raise EvaluationError(f"Unknown binary operator: '{op}'")
 
     def visit_unary_op(self, node: UnaryOpNode) -> pd.DataFrame | float:
         operand = self.evaluate(node.operand)
@@ -169,7 +169,7 @@ class PanelEvaluator(ASTVisitor):
             if isinstance(operand, pd.DataFrame):
                 return (~operand.astype(bool)).astype(float)
             return float(not bool(operand))
-        raise PanelEvaluationError(f"Unknown unary operator: '{node.operator}'")
+        raise EvaluationError(f"Unknown unary operator: '{node.operator}'")
 
     def visit_ternary(self, node: TernaryNode) -> pd.DataFrame | float:
         condition = self.evaluate(node.condition)
@@ -234,7 +234,7 @@ class PanelEvaluator(ASTVisitor):
                                     result, index=a.index, columns=a.columns
                                 )
                     return result
-                raise PanelEvaluationError(
+                raise EvaluationError(
                     f"TS operator '{func_name}' received non-scalar window"
                 )
             else:
@@ -261,7 +261,7 @@ class PanelEvaluator(ASTVisitor):
                         )
             return result
 
-        raise PanelEvaluationError(f"Unknown operator: '{func_name}'")
+        raise EvaluationError(f"Unknown operator: '{func_name}'")
 
     # ------------------------------------------------------------------
     # Arithmetic helpers (handle DataFrame/scalar mixed ops)
@@ -325,7 +325,7 @@ class PanelEvaluator(ASTVisitor):
         elif op == "!=":
             r = left != right  # type: ignore[operator]
         else:
-            raise PanelEvaluationError(f"Unknown comparison: '{op}'")
+            raise EvaluationError(f"Unknown comparison: '{op}'")
 
         if isinstance(r, pd.DataFrame):
             return r.astype(float)

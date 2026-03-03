@@ -141,12 +141,12 @@ class TestFactorEvaluator:
         assert "ic" in result
 
 
-class TestPanelEvaluatorIntegration:
-    """Test that PanelEvaluator (which replaced CS expression methods) works correctly."""
+class TestEvaluatorIntegration:
+    """Test that Evaluator (which replaced CS expression methods) works correctly."""
 
-    def test_weighted_sum_via_panel_evaluator(self):
-        """PanelEvaluator evaluates weighted-sum expressions correctly."""
-        from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+    def test_weighted_sum_via_evaluator(self):
+        """Evaluator evaluates weighted-sum expressions correctly."""
+        from nautilus_quants.factors.engine.evaluator import Evaluator
         from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 
         idx = pd.date_range("2024-01-01", periods=5, freq="h")
@@ -154,7 +154,7 @@ class TestPanelEvaluatorIntegration:
             "x": pd.DataFrame({"A": [1, 2, 3, 4, 5], "B": [5, 4, 3, 2, 1]}, index=idx, dtype=float),
             "y": pd.DataFrame({"A": [10, 20, 30, 40, 50], "B": [50, 40, 30, 20, 10]}, index=idx, dtype=float),
         }
-        evaluator = PanelEvaluator(
+        evaluator = Evaluator(
             panel_fields=panel,
             ts_ops=TS_OPERATOR_INSTANCES,
             cs_ops=CS_OPERATOR_INSTANCES,
@@ -165,15 +165,15 @@ class TestPanelEvaluatorIntegration:
         pd.testing.assert_frame_equal(result, expected)
 
     def test_simple_variable_reference(self):
-        """PanelEvaluator resolves simple variable references."""
-        from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+        """Evaluator resolves simple variable references."""
+        from nautilus_quants.factors.engine.evaluator import Evaluator
         from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 
         idx = pd.date_range("2024-01-01", periods=5, freq="h")
         panel = {
             "x": pd.DataFrame({"A": [1, 2, 3, 4, 5], "B": [5, 4, 3, 2, 1]}, index=idx, dtype=float),
         }
-        evaluator = PanelEvaluator(
+        evaluator = Evaluator(
             panel_fields=panel,
             ts_ops=TS_OPERATOR_INSTANCES,
             cs_ops=CS_OPERATOR_INSTANCES,

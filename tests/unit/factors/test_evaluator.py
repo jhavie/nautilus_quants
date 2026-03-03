@@ -1,6 +1,6 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""Tests for PanelEvaluator — AST evaluator for panel factor computation."""
+"""Tests for Evaluator — AST evaluator for panel factor computation."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator, PanelEvaluationError
+from nautilus_quants.factors.engine.evaluator import Evaluator, EvaluationError
 from nautilus_quants.factors.expression import parse_expression
 from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES, CsRank
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
@@ -60,8 +60,8 @@ def _make_panel(
     }
 
 
-def _make_evaluator(panel: dict[str, pd.DataFrame]) -> PanelEvaluator:
-    return PanelEvaluator(
+def _make_evaluator(panel: dict[str, pd.DataFrame]) -> Evaluator:
+    return Evaluator(
         panel_fields=panel,
         ts_ops=TS_OPERATOR_INSTANCES,
         cs_ops=CS_OPERATOR_INSTANCES,
@@ -92,7 +92,7 @@ class TestVariableAccess:
         assert result == 42.5
 
     def test_unknown_variable_raises(self) -> None:
-        with pytest.raises(PanelEvaluationError, match="Unknown variable"):
+        with pytest.raises(EvaluationError, match="Unknown variable"):
             _evaluate("nonexistent")
 
 

@@ -4,7 +4,7 @@
 Integration tests for Alpha2 8-factor composite — individual factor verification.
 
 Loads real 12-coin BinanceBar 4h data from the catalog parquet files and feeds
-them into PanelFactorEngine directly (bypassing the Nautilus backtest framework)
+them into FactorEngine directly (bypassing the Nautilus backtest framework)
 to verify that each factor in factors_alpha2.yaml produces non-empty results.
 
 Data source: /Users/joe/Sync/nautilus_quants2/data/12coin_catalog
@@ -28,7 +28,7 @@ import pandas as pd
 import pytest
 
 from nautilus_quants.factors.config import load_factor_config
-from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -136,14 +136,14 @@ def _create_engine_with_single_factor(
     panel: dict[str, pd.DataFrame],
     with_returns: bool = False,
 ) -> dict[str, dict[str, float]]:
-    """Create a PanelFactorEngine, feed panel data, and compute a single factor.
+    """Create a FactorEngine, feed panel data, and compute a single factor.
 
     Returns the last compute results: {factor_name: {instrument: value}}.
     """
     n_timestamps = len(next(iter(panel.values())))
     instruments = list(next(iter(panel.values())).columns)
 
-    engine = PanelFactorEngine(max_history=600)
+    engine = FactorEngine(max_history=600)
 
     # Register returns variable if needed
     if with_returns:
@@ -173,8 +173,8 @@ def _create_engine_with_single_factor(
 
 def _create_full_engine(
     panel: dict[str, pd.DataFrame],
-) -> tuple[PanelFactorEngine, dict[str, dict[str, float]]]:
-    """Create a PanelFactorEngine loaded from config, feed all data.
+) -> tuple[FactorEngine, dict[str, dict[str, float]]]:
+    """Create a FactorEngine loaded from config, feed all data.
 
     Returns (engine, last_results).
     """
@@ -185,7 +185,7 @@ def _create_full_engine(
     n_timestamps = len(next(iter(panel.values())))
     instruments = list(next(iter(panel.values())).columns)
 
-    engine = PanelFactorEngine(config=config, max_history=600)
+    engine = FactorEngine(config=config, max_history=600)
 
     results = {}
     for ts_idx in range(n_timestamps):
@@ -429,7 +429,7 @@ def _run_engine_with_snapshots(
     n_ts = len(next(iter(panel.values())))
     instruments = list(next(iter(panel.values())).columns)
 
-    engine = PanelFactorEngine(config=config, max_history=200)
+    engine = FactorEngine(config=config, max_history=200)
 
     snapshots: dict[int, dict[str, dict[str, float]]] = {}
     for ts_idx in range(n_ts):

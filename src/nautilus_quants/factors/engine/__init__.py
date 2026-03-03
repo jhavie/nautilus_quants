@@ -3,7 +3,7 @@
 """
 Factor Engine module - Panel-based computation engine.
 
-Provides the PanelFactorEngine and supporting components for
+Provides the FactorEngine and supporting components for
 multi-instrument factor computation using DataFrame[T x N] architecture.
 
 Constitution Compliance:
@@ -15,16 +15,16 @@ from nautilus_quants.actors.factor_engine import (
     FactorEngineActor,
     FactorEngineActorConfig,
 )
-from nautilus_quants.factors.engine.panel_buffer import PanelBuffer
-from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
-from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+from nautilus_quants.factors.engine.buffer import Buffer
+from nautilus_quants.factors.engine.evaluator import Evaluator
+from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
 __all__ = [
     # Nautilus-native Actor (Constitution compliant)
     "FactorEngineActor",
     "FactorEngineActorConfig",
     # Panel engine
-    "PanelFactorEngine",
-    "PanelBuffer",
-    "PanelEvaluator",
+    "FactorEngine",
+    "Buffer",
+    "Evaluator",
 ]

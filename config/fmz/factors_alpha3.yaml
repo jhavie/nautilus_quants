@@ -1,5 +1,5 @@
 # Alpha101 8-Factor Composite Strategy Configuration (方案 A)
-# Based on PanelEvaluator alpha analysis scoring (20260301_113217)
+# Based on Evaluator alpha analysis scoring (20260301_113217)
 #
 # Composite formula:
 #   0.20 * alpha044 + 0.15 * alpha033 + 0.15 * alpha017
@@ -30,14 +30,14 @@
 metadata:
   name: alpha101
   version: "2.0"
-  description: "Alpha101 8-factor composite based on PanelEvaluator alpha analysis (方案A)"
+  description: "Alpha101 8-factor composite based on Evaluator alpha analysis (方案A)"
 
 variables:
   returns: "delta(close, 1) / delay(close, 1)"
 
 factors:
   # ==========================================================================
-  # Phase 1: 原始因子 (Time-Series + Cross-Sectional via PanelEvaluator)
+  # Phase 1: 原始因子 (Time-Series + Cross-Sectional via Evaluator)
   # ==========================================================================
 
   # 量价rank相关因子 — 全局最高 ICIR=0.265

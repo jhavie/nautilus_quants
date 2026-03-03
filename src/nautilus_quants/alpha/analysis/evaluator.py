@@ -1,6 +1,6 @@
 """Factor evaluator - core alpha analysis logic.
 
-Computes factor values using PanelEvaluator (unified TS+CS evaluation),
+Computes factor values using Evaluator (unified TS+CS evaluation),
 then evaluates factor quality via alphalens-reloaded.
 """
 
@@ -14,7 +14,7 @@ import pandas as pd
 
 from nautilus_quants.alpha.data_loader import CatalogDataLoader
 from nautilus_quants.factors.config import FactorConfig
-from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+from nautilus_quants.factors.engine.evaluator import Evaluator
 from nautilus_quants.factors.expression import parse_expression
 from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class FactorEvaluator:
     """Evaluate factor quality using alphalens.
 
-    Uses PanelEvaluator for unified TS+CS factor computation over
+    Uses Evaluator for unified TS+CS factor computation over
     panel DataFrames (timestamps × instruments).  All factor expressions
     — including nested rank(ts_argmax(…)) — are evaluated in a single
     recursive AST pass.
@@ -60,11 +60,11 @@ class FactorEvaluator:
         self,
         bars_by_instrument: dict[str, list[Bar]],
     ) -> tuple[dict[str, pd.Series], pd.DataFrame]:
-        """Unified panel-based factor computation via PanelEvaluator.
+        """Unified panel-based factor computation via Evaluator.
 
         1. Convert bars to per-instrument DataFrames
         2. Build OHLCV panel DataFrames (timestamps × instruments)
-        3. Evaluate ALL expressions (variables + factors) via PanelEvaluator
+        3. Evaluate ALL expressions (variables + factors) via Evaluator
         4. Convert to alphalens MultiIndex format
         """
         if not bars_by_instrument:
@@ -100,8 +100,8 @@ class FactorEvaluator:
         for p_name, p_val in config.parameters.items():
             panel_fields[p_name] = p_val
 
-        # --- Step 3: Evaluate via PanelEvaluator ---
-        evaluator = PanelEvaluator(
+        # --- Step 3: Evaluate via Evaluator ---
+        evaluator = Evaluator(
             panel_fields=panel_fields,
             ts_ops=dict(TS_OPERATOR_INSTANCES),
             cs_ops=dict(CS_OPERATOR_INSTANCES),

@@ -1,15 +1,14 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-FactorEngineActor - Nautilus Actor wrapper for PanelFactorEngine.
+FactorEngineActor - Nautilus Actor wrapper for FactorEngine.
 
-This module provides a Nautilus-native Actor that wraps the PanelFactorEngine,
+This module provides a Nautilus-native Actor that wraps the FactorEngine,
 enabling seamless integration with the Nautilus trading system.
 
 The Panel architecture evaluates all factor expressions (including nested
 CS/TS operators like ``correlation(rank(open), rank(volume), 10)``) correctly
-via pd.DataFrame[T x N] intermediates. This replaces the previous two-phase
-FactorEngine + CsFactorEngine approach.
+via pd.DataFrame[T x N] intermediates.
 
 Constitution Compliance:
     - Extends Nautilus Actor base class (Principle I)
@@ -25,7 +24,7 @@ from nautilus_trader.model.data import Bar, BarType, DataType
 
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.factors.config import load_factor_config
-from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
 
 
@@ -111,7 +110,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
     """
     Nautilus Actor that computes factors and publishes results.
 
-    This actor wraps the PanelFactorEngine and integrates it with the Nautilus
+    This actor wraps the FactorEngine and integrates it with the Nautilus
     trading system, providing:
     - Direct bar subscription (no aggregation - BinanceBar fields preserved)
     - Panel-based factor computation (CS + TS evaluated together)
@@ -151,7 +150,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         super().__init__(config)
 
         self._config: FactorEngineActorConfig = config
-        self._engine: PanelFactorEngine | None = None
+        self._engine: FactorEngine | None = None
 
         # Timestamp synchronization:
         # Bars arrive instrument-by-instrument.  We accumulate bars for the
@@ -164,7 +163,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         """
         Actions to perform on actor start.
 
-        Initializes the PanelFactorEngine and subscribes directly to bar types.
+        Initializes the FactorEngine and subscribes directly to bar types.
         Always uses direct subscription (no aggregation) to preserve
         BinanceBar extra fields like quote_volume and count.
         """
@@ -182,8 +181,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 self.log.error(f"Failed to load factor config: {e}")
                 return
 
-        # Initialize PanelFactorEngine (replaces FactorEngine + CsFactorEngine)
-        self._engine = PanelFactorEngine(
+        # Initialize FactorEngine
+        self._engine = FactorEngine(
             config=factor_config,
             max_history=self._config.max_history,
         )
@@ -311,8 +310,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
     # -------------------------------------------------------------------------
 
     @property
-    def engine(self) -> PanelFactorEngine | None:
-        """Get the underlying PanelFactorEngine instance."""
+    def engine(self) -> FactorEngine | None:
+        """Get the underlying FactorEngine instance."""
         return self._engine
 
     @property

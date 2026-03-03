@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from nautilus_quants.factors.builtin.alpha101 import ALPHA101_FACTORS
-from nautilus_quants.factors.engine.panel_evaluator import PanelEvaluator
+from nautilus_quants.factors.engine.evaluator import Evaluator
 from nautilus_quants.factors.expression import parse_expression
 from nautilus_quants.factors.operators.cross_sectional import CS_OPERATOR_INSTANCES, CsRank
 from nautilus_quants.factors.operators.math import MATH_OPERATORS
@@ -62,8 +62,8 @@ def panel() -> dict[str, pd.DataFrame]:
 
 
 @pytest.fixture()
-def evaluator(panel: dict[str, pd.DataFrame]) -> PanelEvaluator:
-    return PanelEvaluator(
+def evaluator(panel: dict[str, pd.DataFrame]) -> Evaluator:
+    return Evaluator(
         panel_fields=panel,
         ts_ops=TS_OPERATOR_INSTANCES,
         cs_ops=CS_OPERATOR_INSTANCES,
@@ -84,7 +84,7 @@ def evaluator(panel: dict[str, pd.DataFrame]) -> PanelEvaluator:
 def test_alpha101_evaluates_without_error(
     alpha_name: str,
     panel: dict[str, pd.DataFrame],
-    evaluator: PanelEvaluator,
+    evaluator: Evaluator,
 ) -> None:
     """Each Alpha101 expression should produce a valid DataFrame or scalar."""
     expr = ALPHA101_FACTORS[alpha_name]["expression"]
@@ -116,7 +116,7 @@ class TestAlpha006Correctness:
     Pure TS expression — no CS operators.
     """
 
-    def test_matches_manual(self, panel: dict[str, pd.DataFrame], evaluator: PanelEvaluator) -> None:
+    def test_matches_manual(self, panel: dict[str, pd.DataFrame], evaluator: Evaluator) -> None:
         result = evaluator.evaluate(parse_expression("-1 * correlation(open, volume, 10)"))
         corr = pd.DataFrame(
             {col: panel["open"][col].rolling(10).corr(panel["volume"][col])
@@ -134,7 +134,7 @@ class TestAlpha003Correctness:
     CS → TS nesting — the core value of the Panel architecture.
     """
 
-    def test_matches_manual(self, panel: dict[str, pd.DataFrame], evaluator: PanelEvaluator) -> None:
+    def test_matches_manual(self, panel: dict[str, pd.DataFrame], evaluator: Evaluator) -> None:
         result = evaluator.evaluate(parse_expression("-1 * correlation(rank(open), rank(volume), 10)"))
 
         rank_op = CsRank()
@@ -156,7 +156,7 @@ class TestAlpha013Correctness:
     CS → TS → CS three-layer nesting.
     """
 
-    def test_matches_manual(self, panel: dict[str, pd.DataFrame], evaluator: PanelEvaluator) -> None:
+    def test_matches_manual(self, panel: dict[str, pd.DataFrame], evaluator: Evaluator) -> None:
         result = evaluator.evaluate(
             parse_expression("-1 * rank(covariance(rank(close), rank(volume), 5))")
         )
@@ -174,17 +174,17 @@ class TestAlpha013Correctness:
 
 
 # ---------------------------------------------------------------------------
-# PanelFactorEngine integration test
+# FactorEngine integration test
 # ---------------------------------------------------------------------------
 
 
-class TestPanelFactorEngine:
-    """Test the full PanelFactorEngine workflow."""
+class TestFactorEngine:
+    """Test the full FactorEngine workflow."""
 
     def test_on_bar_and_flush(self) -> None:
-        from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+        from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
-        engine = PanelFactorEngine(max_history=100)
+        engine = FactorEngine(max_history=100)
         engine.register_expression_factor("alpha006", "-1 * correlation(open, volume, 10)")
 
         rng = np.random.RandomState(42)
@@ -208,7 +208,7 @@ class TestPanelFactorEngine:
 
     def test_config_driven(self, tmp_path) -> None:
         """Test engine loads factors from config YAML."""
-        from nautilus_quants.factors.engine.panel_factor_engine import PanelFactorEngine
+        from nautilus_quants.factors.engine.factor_engine import FactorEngine
 
         config_yaml = tmp_path / "test_factors.yaml"
         config_yaml.write_text("""
@@ -228,7 +228,7 @@ factors:
     description: "Cross-sectional rank"
 """)
 
-        engine = PanelFactorEngine(max_history=50)
+        engine = FactorEngine(max_history=50)
         engine.load_config(str(config_yaml))
 
         assert "alpha_simple" in engine.factor_names
