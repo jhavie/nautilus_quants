@@ -117,7 +117,7 @@ class Buffer:
             Mapping of field name -> DataFrame[T x N] where T = timestamps
             and N = instruments.  Missing values are NaN.
         """
-        instruments = self._instruments
+        instruments = sorted(self._instruments)
         panels: dict[str, pd.DataFrame] = {}
 
         for field_name in self._all_fields:

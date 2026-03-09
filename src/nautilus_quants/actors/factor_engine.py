@@ -22,6 +22,7 @@ from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
 
+from nautilus_quants.backtest.protocols import FACTOR_VALUES_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.factors.config import load_factor_config
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
@@ -158,6 +159,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         # starts (guaranteeing all instruments have reported).
         self._last_processed_ts: int = 0
         self._extra_fields_detected: bool = False
+        self._factor_snapshots: list[tuple[int, dict[str, dict[str, float]]]] = []
 
     def on_start(self) -> None:
         """
@@ -211,6 +213,12 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         """Actions to perform on actor stop."""
         self.log.info("Stopping FactorEngineActor...")
 
+        # Flush the last timestamp (deferred flush means the final bar is
+        # still pending when no new timestamp arrives to trigger it).
+        if self._last_processed_ts > 0 and self._engine is not None:
+            self._flush_and_publish(self._last_processed_ts)
+            self._last_processed_ts = 0
+
         # Log performance stats
         if self._engine:
             stats = self._engine.get_performance_stats()
@@ -220,6 +228,19 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 f"max={stats['max_ms']:.4f}ms, "
                 f"total_computes={stats['total_computes']}"
             )
+
+        # Serialize factor snapshots to cache for report generation
+        if self._factor_snapshots:
+            import pickle
+
+            try:
+                self.cache.add(FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots))
+                self.log.info(
+                    f"Cached {len(self._factor_snapshots)} factor snapshots "
+                    f"({FACTOR_VALUES_CACHE_KEY})"
+                )
+            except Exception as e:
+                self.log.warning(f"Failed to cache factor snapshots: {e}")
 
         self.log.info("FactorEngineActor stopped")
 
@@ -278,6 +299,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         results = self._engine.flush_and_compute(ts)
 
+        # Accumulate snapshot for factor export
+        self._factor_snapshots.append((ts, results))
+
         # Diagnostic: log per-factor non-empty instrument count (first 5 + every 50th)
         compute_count = self._engine.get_performance_stats().get("total_computes", 0)
         if compute_count <= 5 or compute_count % 50 == 0:
@@ -303,6 +327,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if self._engine:
             self._engine.reset()
         self._last_processed_ts = 0
+        self._factor_snapshots.clear()
         self.log.info("FactorEngineActor reset")
 
     # -------------------------------------------------------------------------
