@@ -23,6 +23,10 @@ venues:
     starting_balances:
       - "10000 USDT"
     default_leverage: 1
+    fill_model:
+      fill_model_path: "nautilus_quants.backtest.models.signal_close_fill:SignalCloseFillModel"
+      config_path: "nautilus_quants.backtest.models.signal_close_fill:SignalCloseFillModelConfig"
+      config: {}
 
 data:
   - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-012-fmz-strategy/data/catalog"
@@ -353,7 +357,7 @@ engine:
         n_long: 40
         n_short: 40
         position_value: 100
-        rebalance_period: 4
+        rebalance_interval: 1
         composite_factor: "composite"
 
 report:

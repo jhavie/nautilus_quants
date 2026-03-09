@@ -27,10 +27,15 @@ from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import Bar, DataType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.objects import Quantity
+from nautilus_trader.model.orders.base import Order
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
+from nautilus_quants.common.event_time_pending_execution import (
+    EventTimePendingExecutionMixin,
+)
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.fmz.metadata import FMZMetadataProvider
 
@@ -54,8 +59,9 @@ class FMZFactorStrategyConfig(StrategyConfig, frozen=True):
         Number of instruments to short (highest composite factor values).
     position_value : float, default 300.0
         Fixed position value per instrument in quote currency (USDT).
-    rebalance_period : int, default 1
-        Rebalance every N hours.
+    rebalance_interval : int, default 1
+        Rebalance every N bars (e.g., 2 means every 2nd valid signal).
+        Equivalent to qlib's rebalance_interval parameter.
     composite_factor : str, default "composite"
         Name of the composite factor to use for ranking.
     bar_types : list[str], default []
@@ -66,12 +72,16 @@ class FMZFactorStrategyConfig(StrategyConfig, frozen=True):
     n_long: int = 40
     n_short: int = 40
     position_value: float = 300.0
-    rebalance_period: int = 1
+    rebalance_interval: int = 1
     composite_factor: str = "composite"
     bar_types: list[str] = []
 
 
-class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
+class FMZFactorStrategy(
+    EventTimePendingExecutionMixin[dict[str, float]],
+    BarSubscriptionMixin,
+    Strategy,
+):
     """
     FMZ Multi-Factor Selection Strategy.
 
@@ -96,22 +106,19 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
         self._n_instruments = len(config.instrument_ids)
 
         # State tracking
-        self._current_prices: dict[str, float] = {}
-        self._long_positions: set[str] = set()
-        self._short_positions: set[str] = set()
+        self._init_event_time_pending(max_timestamps=6, max_pending_wait_timestamps=2)
+        self._long_positions: dict[str, Quantity] = {}
+        self._short_positions: dict[str, Quantity] = {}
         self._hour_count: int = 0
         self._bar_count: int = 0
-
-        # Accumulate composite factor values for current hour
-        self._composite_values: dict[str, float] = {}
-        # Track current batch timestamp for synchronization
-        self._current_batch_ts: int = 0
+        self._bars_until_rebalance: int = 0  # 0 = rebalance on next valid signal
 
         # Metadata tracking for position visualization
         self._metadata_provider = FMZMetadataProvider()
 
     def on_start(self) -> None:
         """Actions to perform on strategy start."""
+        self._stopping = False
         self.log.info(
             f"Starting FMZFactorStrategy with {len(self._instrument_ids)} instruments"
         )
@@ -149,11 +156,12 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
         self.log.info(
             f"Strategy started: n_long={self.config.n_long}, n_short={self.config.n_short}, "
             f"position_value={self.config.position_value}, "
-            f"rebalance_period={self.config.rebalance_period}h"
+            f"rebalance_interval={self.config.rebalance_interval} bars"
         )
 
     def on_stop(self) -> None:
         """Actions to perform on strategy stop."""
+        self._stopping = True
         self._close_all_positions("STRATEGY_STOP")
 
         # Store metadata in cache for report generation
@@ -167,26 +175,20 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
         )
 
     def on_bar(self, bar: Bar) -> None:
-        """Handle bar updates - track current prices."""
+        """Handle bar updates - track closes by event timestamp."""
         instrument_id = self._resolve_bar(bar)
         if instrument_id is None:
             return
 
         self._bar_count += 1
-        self._current_prices[instrument_id] = float(bar.close)
+        self._record_close_and_try_execute(bar.ts_event, instrument_id, float(bar.close))
 
     def on_data(self, data) -> None:
-        """
-        Handle FactorValues from FactorEngineActor.
-
-        Uses timestamp-based synchronization:
-        - When timestamp changes, process previous batch
-        - Accumulate values for current timestamp
-        """
+        """Handle FactorValues and defer execution until signal-ts prices are complete."""
         if not isinstance(data, FactorValues):
             return
 
-        ts_ns = data.ts_event
+        signal_ts = data.ts_event
         factors = data.factors
         composite_factor = self.config.composite_factor
 
@@ -195,67 +197,69 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
             factor_summary = {k: len(v) for k, v in factors.items()}
             has_composite = composite_factor in factors and len(factors[composite_factor]) > 0
             self.log.info(
-                f"on_data received: ts={ts_ns}, "
+                f"on_data received: ts={signal_ts}, "
                 f"composite_present={has_composite}, "
                 f"factor_sizes={factor_summary}"
             )
 
-        # Timestamp changed - process previous batch
-        if self._current_batch_ts > 0 and ts_ns > self._current_batch_ts:
-            self._process_batch()
-
-        # Update current batch timestamp
-        self._current_batch_ts = ts_ns
-
-        # Extract composite factor values and accumulate
-        if composite_factor in factors:
-            for instrument_id, value in factors[composite_factor].items():
-                self._composite_values[instrument_id] = value
-
-    def _process_batch(self) -> None:
-        """
-        Process accumulated factor values for the previous timestamp.
-
-        Called when timestamp changes to process the complete batch.
-        """
-        if not self._composite_values:
-            self.log.debug(f"_process_batch: no composite values")
+        composite = factors.get(composite_factor, {})
+        if not composite:
+            self.log.debug(f"Skip signal_ts={signal_ts}: no '{composite_factor}' values")
             return
-
-        self._hour_count += 1
-
-        # Get timestamp from batch
-        ts_dt = datetime.fromtimestamp(self._current_batch_ts / 1e9, tz=timezone.utc)
-        current_hour = ts_dt.hour
-
-        # Only rebalance at specific hours (0, 8, 16 for period=8)
-        if current_hour % self.config.rebalance_period != 0:
-            self._composite_values = {}
-            return
-
-        # Use composite values directly - NaN filtering is handled by CsFactorEngine
-        composite = self._composite_values
 
         if len(composite) < self.config.n_long + self.config.n_short:
             self.log.warning(
-                f"Not enough valid instruments: {len(composite)} < "
-                f"{self.config.n_long + self.config.n_short}"
+                f"Skip signal_ts={signal_ts}: not enough valid instruments "
+                f"{len(composite)} < {self.config.n_long + self.config.n_short}"
             )
-            self._composite_values = {}
             return
 
-        # Debug: Log composite factor rankings on first rebalance
-        if len(self._long_positions) == 0 and len(self._short_positions) == 0:
-            sorted_composite = sorted(composite.items(), key=lambda x: x[1])
+        self._enqueue_pending(signal_ts, dict(composite))
+
+    def _required_instruments(self, payload: dict[str, float]) -> list[str]:
+        """Return required instruments for this pending composite payload."""
+        return list(payload.keys())
+
+    def _on_pending_ready(
+        self,
+        signal_ts: int,
+        payload: dict[str, float],
+        execution_prices: dict[str, float],
+    ) -> None:
+        """Apply FMZ interval gate then execute rebalance on ready snapshot."""
+        self._hour_count += 1
+        if self._bars_until_rebalance > 0:
+            self.log.info(
+                f"Skip rebalance: signal_ts={signal_ts}, "
+                f"rebalance_gate_state=countdown({self._bars_until_rebalance})"
+            )
+            self._bars_until_rebalance -= 1
+            return
+
+        self._bars_until_rebalance = self.config.rebalance_interval - 1
+        ts_dt = datetime.fromtimestamp(signal_ts / 1e9, tz=timezone.utc)
+        if not self._long_positions and not self._short_positions:
+            sorted_composite = sorted(payload.items(), key=lambda x: (x[1], x[0]))
             self.log.info(f"FIRST REBALANCE at {ts_dt} - Composite factor rankings:")
-            self.log.info(f"  Bottom 5 (LONG): {[(k, f'{v:.4f}') for k, v in sorted_composite[:5]]}")
-            self.log.info(f"  Top 5 (SHORT): {[(k, f'{v:.4f}') for k, v in sorted_composite[-5:]]}")
+            self.log.info(
+                f"  Bottom 5 (LONG): {[(k, f'{v:.4f}') for k, v in sorted_composite[:5]]}"
+            )
+            self.log.info(
+                f"  Top 5 (SHORT): {[(k, f'{v:.4f}') for k, v in sorted_composite[-5:]]}"
+            )
 
-        # Execute rebalance
-        self._rebalance(composite)
-        self._composite_values = {}
+        self._rebalance(
+            composite=payload,
+            execution_prices=execution_prices,
+            signal_ts=signal_ts,
+        )
 
-    def _rebalance(self, composite: dict[str, float]) -> None:
+    def _rebalance(
+        self,
+        composite: dict[str, float],
+        execution_prices: dict[str, float],
+        signal_ts: int,
+    ) -> None:
         """
         Execute rebalance - FMZ logic adapted for HEDGING mode.
 
@@ -278,7 +282,7 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
         In HEDGING mode, we need 2 trades to flip (close + open).
         """
         # Sort by factor value
-        sorted_symbols = sorted(composite.items(), key=lambda x: x[1])
+        sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
 
         # Build rank and composite lookups for metadata tracking
         rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
@@ -293,18 +297,29 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
         instruments_with_data = set(composite.keys())
 
         # Check long positions for missing data
-        missing_long = self._long_positions - instruments_with_data
+        missing_long = sorted(set(self._long_positions) - instruments_with_data)
+        # Check short positions for missing data
+        missing_short = sorted(set(self._short_positions) - instruments_with_data)
+
+        # Fetch latest closes only when needed (deterministic anchor for fill model)
+        if missing_long or missing_short:
+            latest_closes = self._price_book.get_latest_closes()
+
         for inst_id in missing_long:
             self.log.warning(f"Closing LONG {inst_id}: no factor data (possible delisting)")
-            self._close_position(inst_id, "NO_FACTOR_DATA")
-            self._long_positions.discard(inst_id)
+            self._close_position(
+                inst_id, "NO_FACTOR_DATA",
+                exec_price=latest_closes.get(inst_id),
+            )
+            self._long_positions.pop(inst_id, None)
 
-        # Check short positions for missing data
-        missing_short = self._short_positions - instruments_with_data
         for inst_id in missing_short:
             self.log.warning(f"Closing SHORT {inst_id}: no factor data (possible delisting)")
-            self._close_position(inst_id, "NO_FACTOR_DATA")
-            self._short_positions.discard(inst_id)
+            self._close_position(
+                inst_id, "NO_FACTOR_DATA",
+                exec_price=latest_closes.get(inst_id),
+            )
+            self._short_positions.pop(inst_id, None)
 
         if self._hour_count <= 10 or self._hour_count % 24 == 0:
             self.log.info(
@@ -314,62 +329,88 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
             )
 
         # === FMZ Logic adapted for HEDGING mode ===
-        for inst_id in composite.keys():
+        for inst_id in sorted(composite.keys()):
             is_long_target = inst_id in long_targets
             is_short_target = inst_id in short_targets
             currently_long = inst_id in self._long_positions
             currently_short = inst_id in self._short_positions
+            exec_price = execution_prices.get(inst_id)
+            if exec_price is None or exec_price <= 0:
+                self.log.warning(
+                    f"Skip {inst_id}: missing/invalid execution price "
+                    f"for signal_ts={signal_ts}"
+                )
+                continue
 
             # FMZ: if in buy_symbols AND amount <= 0, then Buy
             if is_long_target and not currently_long:
                 # If currently short, close first then open long
                 if currently_short:
-                    self._close_position(inst_id, "FLIP_TO_LONG")
-                    self._short_positions.discard(inst_id)
-                if self._open_position(inst_id, OrderSide.BUY, rank_lookup.get(inst_id), composite_lookup.get(inst_id), self._current_batch_ts):
-                    self._long_positions.add(inst_id)
+                    self._close_position(inst_id, "FLIP_TO_LONG", exec_price=exec_price)
+                    self._short_positions.pop(inst_id, None)
+                qty_opened = self._open_position(
+                    inst_id,
+                    OrderSide.BUY,
+                    exec_price=exec_price,
+                    rank=rank_lookup.get(inst_id),
+                    composite_value=composite_lookup.get(inst_id),
+                    ts_event=signal_ts,
+                )
+                if qty_opened is not None:
+                    self._long_positions[inst_id] = qty_opened
 
             # FMZ: if in sell_symbols AND amount >= 0, then Sell
             elif is_short_target and not currently_short:
                 # If currently long, close first then open short
                 if currently_long:
-                    self._close_position(inst_id, "FLIP_TO_SHORT")
-                    self._long_positions.discard(inst_id)
-                if self._open_position(inst_id, OrderSide.SELL, rank_lookup.get(inst_id), composite_lookup.get(inst_id), self._current_batch_ts):
-                    self._short_positions.add(inst_id)
+                    self._close_position(inst_id, "FLIP_TO_SHORT", exec_price=exec_price)
+                    self._long_positions.pop(inst_id, None)
+                qty_opened = self._open_position(
+                    inst_id,
+                    OrderSide.SELL,
+                    exec_price=exec_price,
+                    rank=rank_lookup.get(inst_id),
+                    composite_value=composite_lookup.get(inst_id),
+                    ts_event=signal_ts,
+                )
+                if qty_opened is not None:
+                    self._short_positions[inst_id] = qty_opened
 
             # FMZ CRITICAL: Do NOT close positions that are not in target
             # Positions are only closed when they FLIP direction.
 
         # Update rank history for all current positions
-        all_positions = list(self._long_positions) + list(self._short_positions)
+        all_positions = sorted(set(self._long_positions) | set(self._short_positions))
         self._metadata_provider.update_rank_history(
             instrument_ids=all_positions,
             rank_lookup=rank_lookup,
             composite_lookup=composite_lookup,
-            ts_event=self._current_batch_ts,
+            ts_event=signal_ts,
         )
 
     def _open_position(
         self,
         instrument_id_str: str,
         side: OrderSide,
+        exec_price: float,
         rank: int | None = None,
         composite_value: float | None = None,
         ts_event: int | None = None,
-    ) -> bool:
-        """Open position with fixed value and record metadata."""
+    ) -> Quantity | None:
+        """Open position with fixed value and record metadata.
+
+        Returns the submitted Quantity on success, or None on failure.
+        """
         instrument_id = InstrumentId.from_str(instrument_id_str)
         instrument = self._instruments.get(instrument_id)
 
         if instrument is None:
-            return False
+            return None
 
-        price = self._current_prices.get(instrument_id_str)
-        if price is None or price <= 0:
-            return False
+        if exec_price <= 0:
+            return None
 
-        raw_qty = Decimal(str(self.config.position_value / price))
+        raw_qty = Decimal(str(self.config.position_value / exec_price))
         qty = instrument.make_qty(raw_qty)
 
         # Record position metadata
@@ -385,28 +426,109 @@ class FMZFactorStrategy(BarSubscriptionMixin, Strategy):
             instrument_id=instrument_id,
             order_side=side,
             quantity=qty,
+            exec_algorithm_params={"anchor_px": str(exec_price)},
         )
         self.submit_order(order)
 
-        return True
+        return qty
 
-    def _close_position(self, instrument_id_str: str, reason: str) -> None:
-        """Close a position and record metadata."""
+    def _close_position(
+        self,
+        instrument_id_str: str,
+        reason: str,
+        exec_price: float | None = None,
+    ) -> None:
+        """Close a position and record metadata.
+
+        When exec_price is provided, creates explicit MarketOrders with anchor_px
+        so the SignalCloseFillModel can fill at the deterministic signal-time price.
+        """
         instrument_id = InstrumentId.from_str(instrument_id_str)
         self._metadata_provider.record_close(
             instrument_id=instrument_id_str,
             reason=reason,
             hour_count=self._hour_count,
         )
-        self.close_all_positions(instrument_id)
+        for position in self.cache.positions_open(
+            instrument_id=instrument_id, strategy_id=self.id
+        ):
+            if position.is_closed:
+                continue
+            if exec_price is not None and exec_price > 0:
+                params = {"anchor_px": str(exec_price)}
+            else:
+                self.log.warning(
+                    f"CLOSE {instrument_id_str}: no anchor_px, using default matching"
+                )
+                params = None
+            order = self.order_factory.market(
+                instrument_id=instrument_id,
+                order_side=Order.closing_side(position.side),
+                quantity=position.quantity,
+                reduce_only=True,
+                exec_algorithm_params=params,
+            )
+            self.submit_order(order, position_id=position.id)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
-        """Close all open positions."""
-        for inst_id in list(self._long_positions):
-            self._close_position(inst_id, reason)
-        for inst_id in list(self._short_positions):
-            self._close_position(inst_id, reason)
+        """Close all open positions from cache with deterministic fill pricing.
+
+        Uses cache.positions_open() as source of truth instead of tracking dicts,
+        because pending rebalance orders may have updated tracking dicts without
+        their fills being reflected in cache yet.
+        """
+        latest_closes = self._price_book.get_latest_closes()
+
+        for position in sorted(
+            self.cache.positions_open(strategy_id=self.id),
+            key=lambda p: str(p.instrument_id),
+        ):
+            if position.is_closed:
+                continue
+            inst_id = str(position.instrument_id)
+            close_side = Order.closing_side(position.side)
+            self._metadata_provider.record_close(
+                instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
+            )
+            anchor_px = latest_closes.get(inst_id)
+            if anchor_px is None:
+                self.log.warning(f"CLOSE {inst_id}: no anchor_px in latest_closes, using default matching")
+            params = {"anchor_px": str(anchor_px)} if anchor_px is not None else None
+            order = self.order_factory.market(
+                instrument_id=position.instrument_id,
+                order_side=close_side,
+                quantity=position.quantity,
+                reduce_only=True,
+                exec_algorithm_params=params,
+            )
+            self.submit_order(order, position_id=position.id)
+            self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()
         self._short_positions.clear()
+
+    def on_position_opened(self, event) -> None:
+        """Auto-close positions opened after strategy stop (late rebalance fills)."""
+        if not self._stopping:
+            return
+
+        position = self.cache.position(event.position_id)
+        if position is None or position.is_closed:
+            return
+
+        inst_id = str(position.instrument_id)
+        close_side = Order.closing_side(position.side)
+        latest_closes = self._price_book.get_latest_closes()
+        anchor_px = latest_closes.get(inst_id)
+        params = {"anchor_px": str(anchor_px)} if anchor_px is not None else None
+
+        order = self.order_factory.market(
+            instrument_id=position.instrument_id,
+            order_side=close_side,
+            quantity=position.quantity,
+            reduce_only=True,
+            exec_algorithm_params=params,
+        )
+        self.submit_order(order, position_id=position.id)
+        self.log.info(f"LATE_CLOSE {inst_id}: position opened after stop, closing immediately")
