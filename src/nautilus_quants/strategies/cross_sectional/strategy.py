@@ -31,6 +31,7 @@ from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
+from nautilus_quants.common.anchor_price_execution import AnchorPriceExecutionMixin
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
@@ -88,6 +89,7 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
 
 
 class CrossSectionalFactorStrategy(
+    AnchorPriceExecutionMixin,
     EventTimePendingExecutionMixin[list[tuple[str, float]]],
     BarSubscriptionMixin,
     Strategy,
@@ -286,12 +288,14 @@ class CrossSectionalFactorStrategy(
         # === STEP 1: CLOSE (with buffer) ===
         for inst_id in sorted(self._long_positions):
             if inst_id in rank and rank[inst_id] > mid:
-                self._close_position(inst_id, f"LONG_EXCEEDED_BUFFER_RANK_{rank[inst_id]}")
+                exec_price = execution_prices.get(inst_id)
+                self._close_position(inst_id, f"LONG_EXCEEDED_BUFFER_RANK_{rank[inst_id]}", exec_price=exec_price)
                 self._long_positions.discard(inst_id)
 
         for inst_id in sorted(self._short_positions):
             if inst_id in rank and rank[inst_id] < mid:
-                self._close_position(inst_id, f"SHORT_EXCEEDED_BUFFER_RANK_{rank[inst_id]}")
+                exec_price = execution_prices.get(inst_id)
+                self._close_position(inst_id, f"SHORT_EXCEEDED_BUFFER_RANK_{rank[inst_id]}", exec_price=exec_price)
                 self._short_positions.discard(inst_id)
 
         # === STEP 2: OPEN (target zones only) ===
@@ -492,12 +496,7 @@ class CrossSectionalFactorStrategy(
             ts_event=ts_event or 0,
         )
 
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=side,
-            quantity=qty,
-        )
-        self.submit_order(order)
+        self._submit_anchor_open(instrument_id, side, qty, exec_price)
 
         return True
 
@@ -516,8 +515,13 @@ class CrossSectionalFactorStrategy(
             ts_event=ts_event,
         )
 
-    def _close_position(self, instrument_id_str: str, reason: str) -> None:
-        """Close a position for an instrument."""
+    def _close_position(
+        self,
+        instrument_id_str: str,
+        reason: str,
+        exec_price: float | None = None,
+    ) -> None:
+        """Close a position for an instrument with deterministic anchor pricing."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
 
         # Record close in metadata provider
@@ -527,15 +531,25 @@ class CrossSectionalFactorStrategy(
             hour_count=self._hour_count,
         )
 
-        self.close_all_positions(instrument_id)
+        self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
-        """Close all open positions."""
-        for instrument_id_str in sorted(self._long_positions):
-            self._close_position(instrument_id_str, reason)
-        for instrument_id_str in sorted(self._short_positions):
-            self._close_position(instrument_id_str, reason)
+        """Close all open positions with deterministic fill pricing."""
+        latest_closes = self._price_book.get_latest_closes()
+
+        for position in sorted(
+            self.cache.positions_open(strategy_id=self.id),
+            key=lambda p: str(p.instrument_id),
+        ):
+            if position.is_closed:
+                continue
+            inst_id = str(position.instrument_id)
+            self._metadata_provider.record_close(
+                instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
+            )
+            self._submit_anchor_close(position, latest_closes.get(inst_id))
+            self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()
         self._short_positions.clear()

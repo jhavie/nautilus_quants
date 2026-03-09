@@ -33,6 +33,7 @@ from nautilus_trader.model.identifiers import InstrumentId, PositionId
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
+from nautilus_quants.common.anchor_price_execution import AnchorPriceExecutionMixin
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
@@ -105,6 +106,7 @@ class _PendingWorldQuantRebalance:
 
 
 class WorldQuantAlphaStrategy(
+    AnchorPriceExecutionMixin,
     EventTimePendingExecutionMixin[_PendingWorldQuantRebalance],
     BarSubscriptionMixin,
     Strategy,
@@ -519,13 +521,22 @@ class WorldQuantAlphaStrategy(
                 new_shorts.add(inst_id)
 
         # Close positions no longer in target
-        for inst_id in sorted(self._long_positions - new_longs):
-            self._close_position(inst_id, "EXIT_LONG")
+        # Instruments dropping from the alpha universe won't be in execution_prices,
+        # so we fall back to the price_book's latest closes for deterministic anchoring.
+        exiting_longs = sorted(self._long_positions - new_longs)
+        exiting_shorts = sorted(self._short_positions - new_shorts)
+        if exiting_longs or exiting_shorts:
+            latest_closes = self._price_book.get_latest_closes()
+
+        for inst_id in exiting_longs:
+            exec_price = execution_prices.get(inst_id) or latest_closes.get(inst_id)
+            self._close_position(inst_id, "EXIT_LONG", exec_price=exec_price)
             self._long_positions.discard(inst_id)
             self._long_position_ids.pop(inst_id, None)
 
-        for inst_id in sorted(self._short_positions - new_shorts):
-            self._close_position(inst_id, "EXIT_SHORT")
+        for inst_id in exiting_shorts:
+            exec_price = execution_prices.get(inst_id) or latest_closes.get(inst_id)
+            self._close_position(inst_id, "EXIT_SHORT", exec_price=exec_price)
             self._short_positions.discard(inst_id)
             self._short_position_ids.pop(inst_id, None)
 
@@ -542,7 +553,7 @@ class WorldQuantAlphaStrategy(
                 continue
             # Close opposite position first if needed
             if inst_id in self._short_positions:
-                self._close_position(inst_id, "FLIP_TO_LONG")
+                self._close_position(inst_id, "FLIP_TO_LONG", exec_price=exec_price)
                 self._short_positions.discard(inst_id)
                 self._short_position_ids.pop(inst_id, None)
             is_new_long = inst_id not in self._long_positions
@@ -584,7 +595,7 @@ class WorldQuantAlphaStrategy(
                 continue
             # Close opposite position first if needed
             if inst_id in self._long_positions:
-                self._close_position(inst_id, "FLIP_TO_SHORT")
+                self._close_position(inst_id, "FLIP_TO_SHORT", exec_price=exec_price)
                 self._long_positions.discard(inst_id)
                 self._long_position_ids.pop(inst_id, None)
             is_new_short = inst_id not in self._short_positions
@@ -702,13 +713,14 @@ class WorldQuantAlphaStrategy(
         except ValueError:
             return False
 
+        params = self._anchor_params(exec_price)
         if delta_qty > 0:
             # Increase position in the same direction
-            order_side = side
             order = self.order_factory.market(
                 instrument_id=instrument_id,
-                order_side=order_side,
+                order_side=side,
                 quantity=qty,
+                exec_algorithm_params=params,
             )
             self.submit_order(order, position_id=pid)
             self.log.debug(
@@ -723,6 +735,7 @@ class WorldQuantAlphaStrategy(
                 order_side=order_side,
                 quantity=qty,
                 reduce_only=True,
+                exec_algorithm_params=params,
             )
             self.submit_order(order, position_id=pid)
             self.log.debug(
@@ -757,30 +770,41 @@ class WorldQuantAlphaStrategy(
             # Quantity rounds to zero (e.g. high-priced instruments with integer lot size)
             return False
 
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=side,
-            quantity=qty,
-        )
-        self.submit_order(order, position_id=position_id)
+        self._submit_anchor_open(instrument_id, side, qty, exec_price, position_id)
         self.log.debug(
             f"OPEN {side.name} {instrument_id_str}: qty={qty}, value={target_value:.2f}"
         )
         return True
 
-    def _close_position(self, instrument_id_str: str, reason: str) -> None:
-        """Close all positions for an instrument."""
+    def _close_position(
+        self,
+        instrument_id_str: str,
+        reason: str,
+        exec_price: float | None = None,
+    ) -> None:
+        """Close all positions for an instrument with deterministic anchor pricing."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
-        self.close_all_positions(instrument_id)
         self._metadata_provider.record_close(instrument_id_str, reason, self._signal_count)
+        self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
-        """Close all open positions."""
-        for inst_id in sorted(self._long_positions):
-            self._close_position(inst_id, reason)
-        for inst_id in sorted(self._short_positions):
-            self._close_position(inst_id, reason)
+        """Close all open positions with deterministic fill pricing."""
+        latest_closes = self._price_book.get_latest_closes()
+
+        for position in sorted(
+            self.cache.positions_open(strategy_id=self.id),
+            key=lambda p: str(p.instrument_id),
+        ):
+            if position.is_closed:
+                continue
+            inst_id = str(position.instrument_id)
+            self._metadata_provider.record_close(
+                instrument_id=inst_id, reason=reason, signal_count=self._signal_count,
+            )
+            self._submit_anchor_close(position, latest_closes.get(inst_id))
+            self.log.debug(f"CLOSE {inst_id}: {reason}")
+
         self._long_positions.clear()
         self._short_positions.clear()
         self._long_position_ids.clear()

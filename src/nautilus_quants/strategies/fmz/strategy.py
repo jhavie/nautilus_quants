@@ -28,10 +28,10 @@ from nautilus_trader.model.data import Bar, DataType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.objects import Quantity
-from nautilus_trader.model.orders.base import Order
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
+from nautilus_quants.common.anchor_price_execution import AnchorPriceExecutionMixin
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
@@ -78,6 +78,7 @@ class FMZFactorStrategyConfig(StrategyConfig, frozen=True):
 
 
 class FMZFactorStrategy(
+    AnchorPriceExecutionMixin,
     EventTimePendingExecutionMixin[dict[str, float]],
     BarSubscriptionMixin,
     Strategy,
@@ -422,13 +423,7 @@ class FMZFactorStrategy(
             ts_event=ts_event or 0,
         )
 
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=side,
-            quantity=qty,
-            exec_algorithm_params={"anchor_px": str(exec_price)},
-        )
-        self.submit_order(order)
+        self._submit_anchor_open(instrument_id, side, qty, exec_price)
 
         return qty
 
@@ -438,46 +433,18 @@ class FMZFactorStrategy(
         reason: str,
         exec_price: float | None = None,
     ) -> None:
-        """Close a position and record metadata.
-
-        When exec_price is provided, creates explicit MarketOrders with anchor_px
-        so the SignalCloseFillModel can fill at the deterministic signal-time price.
-        """
+        """Close a position and record metadata."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
         self._metadata_provider.record_close(
             instrument_id=instrument_id_str,
             reason=reason,
             hour_count=self._hour_count,
         )
-        for position in self.cache.positions_open(
-            instrument_id=instrument_id, strategy_id=self.id
-        ):
-            if position.is_closed:
-                continue
-            if exec_price is not None and exec_price > 0:
-                params = {"anchor_px": str(exec_price)}
-            else:
-                self.log.warning(
-                    f"CLOSE {instrument_id_str}: no anchor_px, using default matching"
-                )
-                params = None
-            order = self.order_factory.market(
-                instrument_id=instrument_id,
-                order_side=Order.closing_side(position.side),
-                quantity=position.quantity,
-                reduce_only=True,
-                exec_algorithm_params=params,
-            )
-            self.submit_order(order, position_id=position.id)
+        self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
-        """Close all open positions from cache with deterministic fill pricing.
-
-        Uses cache.positions_open() as source of truth instead of tracking dicts,
-        because pending rebalance orders may have updated tracking dicts without
-        their fills being reflected in cache yet.
-        """
+        """Close all open positions from cache with deterministic fill pricing."""
         latest_closes = self._price_book.get_latest_closes()
 
         for position in sorted(
@@ -487,22 +454,10 @@ class FMZFactorStrategy(
             if position.is_closed:
                 continue
             inst_id = str(position.instrument_id)
-            close_side = Order.closing_side(position.side)
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
             )
-            anchor_px = latest_closes.get(inst_id)
-            if anchor_px is None:
-                self.log.warning(f"CLOSE {inst_id}: no anchor_px in latest_closes, using default matching")
-            params = {"anchor_px": str(anchor_px)} if anchor_px is not None else None
-            order = self.order_factory.market(
-                instrument_id=position.instrument_id,
-                order_side=close_side,
-                quantity=position.quantity,
-                reduce_only=True,
-                exec_algorithm_params=params,
-            )
-            self.submit_order(order, position_id=position.id)
+            self._submit_anchor_close(position, latest_closes.get(inst_id))
             self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()
@@ -518,17 +473,6 @@ class FMZFactorStrategy(
             return
 
         inst_id = str(position.instrument_id)
-        close_side = Order.closing_side(position.side)
         latest_closes = self._price_book.get_latest_closes()
-        anchor_px = latest_closes.get(inst_id)
-        params = {"anchor_px": str(anchor_px)} if anchor_px is not None else None
-
-        order = self.order_factory.market(
-            instrument_id=position.instrument_id,
-            order_side=close_side,
-            quantity=position.quantity,
-            reduce_only=True,
-            exec_algorithm_params=params,
-        )
-        self.submit_order(order, position_id=position.id)
+        self._submit_anchor_close(position, latest_closes.get(inst_id))
         self.log.info(f"LATE_CLOSE {inst_id}: position opened after stop, closing immediately")
