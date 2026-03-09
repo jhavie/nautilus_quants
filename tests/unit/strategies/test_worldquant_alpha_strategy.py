@@ -13,6 +13,7 @@ import pytest
 
 from nautilus_quants.factors.operators.cross_sectional import CsRank
 from nautilus_quants.strategies.worldquant.strategy import (
+    _PendingWorldQuantRebalance,
     WorldQuantAlphaConfig,
     WorldQuantAlphaStrategy,
 )
@@ -86,7 +87,7 @@ class TestWorldQuantAlphaStrategyInit:
             instrument_ids=["BTCUSDT.BINANCE"],
         )
         strategy = WorldQuantAlphaStrategy(config)
-        assert strategy._current_prices == {}
+        assert strategy._pending_by_ts == {}
         assert strategy._long_positions == set()
         assert strategy._short_positions == set()
         assert strategy._prev_alpha is None
@@ -915,3 +916,100 @@ class TestBrainRawReturnsToPositions:
         short_total = sum(v for v in positions.values() if v < 0)
         assert long_total == pytest.approx(10_000_000)
         assert short_total == pytest.approx(-10_000_000)
+
+
+class TestWorldQuantPendingExecution:
+    """Tests for pending rebalance execution with event-time snapshots."""
+
+    def test_try_execute_pending_waits_until_snapshot_complete(self) -> None:
+        config = WorldQuantAlphaConfig(
+            instrument_ids=["A.BINANCE", "B.BINANCE"],
+            delay=0,
+            rebalance_period=1,
+        )
+        strategy = WorldQuantAlphaStrategy(config)
+        pending = _PendingWorldQuantRebalance(
+            weights={"A.BINANCE": 0.6, "B.BINANCE": -0.4},
+            alpha101={"A.BINANCE": 0.6, "B.BINANCE": -0.4},
+            neutralized={"A.BINANCE": 0.5, "B.BINANCE": -0.5},
+            scaled={"A.BINANCE": 0.6, "B.BINANCE": -0.4},
+            decayed={"A.BINANCE": 0.6, "B.BINANCE": -0.4},
+        )
+        strategy._pending_by_ts[100] = pending
+
+        captured: list[tuple[int, dict[str, float]]] = []
+
+        def _capture_rebalance(
+            weights: dict[str, float],
+            execution_prices: dict[str, float],
+            signal_ts: int,
+            alpha101_lookup: dict[str, float],
+            neutralized_lookup: dict[str, float],
+            scaled_lookup: dict[str, float],
+            decayed_lookup: dict[str, float],
+        ) -> None:
+            _ = (weights, alpha101_lookup, neutralized_lookup, scaled_lookup, decayed_lookup)
+            captured.append((signal_ts, execution_prices))
+
+        strategy._rebalance = _capture_rebalance  # type: ignore[method-assign]
+
+        strategy._price_book.record_close(100, "A.BINANCE", 10.0)
+        strategy._try_execute_pending(100)
+        assert captured == []
+
+        strategy._price_book.record_close(100, "B.BINANCE", 20.0)
+        strategy._try_execute_pending(100)
+        assert captured == [(100, {"A.BINANCE": 10.0, "B.BINANCE": 20.0})]
+
+    def test_rebalance_passes_exec_price_to_open_and_adjust(self) -> None:
+        config = WorldQuantAlphaConfig(
+            instrument_ids=["A.BINANCE", "B.BINANCE"],
+            delay=0,
+            rebalance_period=1,
+        )
+        strategy = WorldQuantAlphaStrategy(config)
+        strategy._long_positions = {"A.BINANCE"}
+        strategy._short_positions = set()
+        strategy._long_position_ids = {}
+        strategy._short_position_ids = {}
+
+        open_calls: list[tuple[str, float]] = []
+        adjust_calls: list[tuple[str, float]] = []
+
+        def _capture_open(
+            instrument_id_str: str,
+            side,
+            target_value: float,
+            exec_price: float,
+            position_id=None,
+        ) -> bool:
+            _ = (side, target_value, position_id)
+            open_calls.append((instrument_id_str, exec_price))
+            return True
+
+        def _capture_adjust(
+            instrument_id_str: str,
+            side,
+            target_value: float,
+            exec_price: float,
+        ) -> bool:
+            _ = (side, target_value)
+            adjust_calls.append((instrument_id_str, exec_price))
+            return True
+
+        strategy._open_position = _capture_open  # type: ignore[method-assign]
+        strategy._adjust_position = _capture_adjust  # type: ignore[method-assign]
+        strategy._metadata_provider.record_open = lambda **kwargs: None  # type: ignore[method-assign]
+
+        strategy._rebalance(
+            weights={"A.BINANCE": 0.2, "B.BINANCE": -0.2},
+            execution_prices={"A.BINANCE": 11.0, "B.BINANCE": 22.0},
+            signal_ts=123,
+            alpha101_lookup={},
+            neutralized_lookup={},
+            scaled_lookup={},
+            decayed_lookup={},
+        )
+
+        assert ("A.BINANCE", 11.0) in adjust_calls
+        assert ("B.BINANCE", 22.0) in open_calls

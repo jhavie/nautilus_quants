@@ -22,6 +22,7 @@ Constitution Compliance:
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,9 @@ from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
+from nautilus_quants.common.event_time_pending_execution import (
+    EventTimePendingExecutionMixin,
+)
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.worldquant.metadata import WorldQuantMetadataProvider
 
@@ -89,7 +93,22 @@ class WorldQuantAlphaConfig(StrategyConfig, frozen=True):
     bar_types: list[str] = []
 
 
-class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
+@dataclass
+class _PendingWorldQuantRebalance:
+    """Pending worldquant rebalance payload captured at signal time."""
+
+    weights: dict[str, float]
+    alpha101: dict[str, float]
+    neutralized: dict[str, float]
+    scaled: dict[str, float]
+    decayed: dict[str, float]
+
+
+class WorldQuantAlphaStrategy(
+    EventTimePendingExecutionMixin[_PendingWorldQuantRebalance],
+    BarSubscriptionMixin,
+    Strategy,
+):
     """
     WorldQuant BRAIN Alpha Strategy.
 
@@ -117,8 +136,8 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         ]
         self._instruments: dict[InstrumentId, Instrument] = {}
 
-        # Price tracking
-        self._current_prices: dict[str, float] = {}
+        # Price tracking keyed by event timestamp for deterministic signal execution.
+        self._init_event_time_pending(max_timestamps=6, max_pending_wait_timestamps=2)
 
         # Position state
         self._long_positions: set[str] = set()
@@ -140,8 +159,6 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
 
         # Metadata tracking
         self._metadata_provider: WorldQuantMetadataProvider = WorldQuantMetadataProvider()
-        self._current_alpha101: dict[str, float] = {}
-        self._current_ts_event: int = 0
 
         # Pipeline intermediate values (captured in _process_alpha)
         self._last_neutralized: dict[str, float] = {}
@@ -209,12 +226,12 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         )
 
     def on_bar(self, bar: Bar) -> None:
-        """Handle bar updates - track current prices for position sizing."""
+        """Handle bar updates - track close snapshots and trigger pending checks."""
         instrument_id_str = self._resolve_bar(bar)
         if instrument_id_str is None:
             return
         self._bar_count += 1
-        self._current_prices[instrument_id_str] = float(bar.close)
+        self._record_close_and_try_execute(bar.ts_event, instrument_id_str, float(bar.close))
 
     def on_data(self, data: object) -> None:
         """
@@ -259,12 +276,8 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         if not processed:
             return
 
-        # Save current signal state for record_open in _rebalance
-        self._current_alpha101 = alpha
-        self._current_ts_event = data.ts_event
-
         # Update alpha101 history for all open positions on every signal cycle
-        all_open = list(self._long_positions | self._short_positions)
+        all_open = sorted(self._long_positions | self._short_positions)
         if all_open:
             self._metadata_provider.update_alpha101_history(
                 instrument_ids=all_open,
@@ -281,11 +294,34 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         if not self._should_rebalance():
             return
 
-        self.log.info(
-            f"Rebalancing #{self._rebalance_count + 1}: "
-            f"{len(processed)} instruments, signal_count={self._signal_count}"
+        signal_ts = data.ts_event
+        pending = _PendingWorldQuantRebalance(
+            weights=dict(processed),
+            alpha101=dict(alpha),
+            neutralized=dict(self._last_neutralized),
+            scaled=dict(self._last_scaled),
+            decayed=dict(self._last_decayed),
         )
-        self._rebalance(processed)
+        self._enqueue_pending(signal_ts, pending)
+
+    def _required_instruments(self, payload: _PendingWorldQuantRebalance) -> list[str]:
+        return list(payload.weights.keys())
+
+    def _on_pending_ready(
+        self,
+        signal_ts: int,
+        payload: _PendingWorldQuantRebalance,
+        execution_prices: dict[str, float],
+    ) -> None:
+        self._rebalance(
+            weights=payload.weights,
+            execution_prices=execution_prices,
+            signal_ts=signal_ts,
+            alpha101_lookup=payload.alpha101,
+            neutralized_lookup=payload.neutralized,
+            scaled_lookup=payload.scaled,
+            decayed_lookup=payload.decayed,
+        )
 
     def _process_alpha(self, alpha: dict[str, float]) -> dict[str, float]:
         """
@@ -381,7 +417,7 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             all_keys.update(hist.keys())
 
         result: dict[str, float] = {}
-        for key in all_keys:
+        for key in sorted(all_keys):
             weighted_sum = sum(
                 w * hist.get(key, 0.0)
                 for w, hist in zip(weights, self._alpha_history)
@@ -453,7 +489,16 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         period: int = self.config.rebalance_period
         return self._signal_count % period == 0
 
-    def _rebalance(self, weights: dict[str, float]) -> None:
+    def _rebalance(
+        self,
+        weights: dict[str, float],
+        execution_prices: dict[str, float],
+        signal_ts: int,
+        alpha101_lookup: dict[str, float],
+        neutralized_lookup: dict[str, float],
+        scaled_lookup: dict[str, float],
+        decayed_lookup: dict[str, float],
+    ) -> None:
         """
         Execute portfolio rebalancing based on target weights.
 
@@ -467,29 +512,34 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         new_longs: set[str] = set()
         new_shorts: set[str] = set()
 
-        for inst_id, weight in weights.items():
+        for inst_id, weight in sorted(weights.items()):
             if weight > 1e-8 and self.config.enable_long:
                 new_longs.add(inst_id)
             elif weight < -1e-8 and self.config.enable_short:
                 new_shorts.add(inst_id)
 
         # Close positions no longer in target
-        for inst_id in list(self._long_positions):
-            if inst_id not in new_longs:
-                self._close_position(inst_id, "EXIT_LONG")
-                self._long_positions.discard(inst_id)
-                self._long_position_ids.pop(inst_id, None)
+        for inst_id in sorted(self._long_positions - new_longs):
+            self._close_position(inst_id, "EXIT_LONG")
+            self._long_positions.discard(inst_id)
+            self._long_position_ids.pop(inst_id, None)
 
-        for inst_id in list(self._short_positions):
-            if inst_id not in new_shorts:
-                self._close_position(inst_id, "EXIT_SHORT")
-                self._short_positions.discard(inst_id)
-                self._short_position_ids.pop(inst_id, None)
+        for inst_id in sorted(self._short_positions - new_shorts):
+            self._close_position(inst_id, "EXIT_SHORT")
+            self._short_positions.discard(inst_id)
+            self._short_position_ids.pop(inst_id, None)
 
         # Open/resize long positions
-        for inst_id in new_longs:
+        for inst_id in sorted(new_longs):
             weight = weights[inst_id]
             target_value = self.config.capital * weight
+            exec_price = execution_prices.get(inst_id)
+            if exec_price is None or exec_price <= 0:
+                self.log.warning(
+                    f"Skip LONG {inst_id}: missing/invalid execution price "
+                    f"for signal_ts={signal_ts}"
+                )
+                continue
             # Close opposite position first if needed
             if inst_id in self._short_positions:
                 self._close_position(inst_id, "FLIP_TO_LONG")
@@ -498,27 +548,40 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             is_new_long = inst_id not in self._long_positions
             if is_new_long:
                 position_id = self._make_position_id(inst_id, OrderSide.BUY)
-                if self._open_position(inst_id, OrderSide.BUY, target_value, position_id=position_id):
+                if self._open_position(
+                    inst_id,
+                    OrderSide.BUY,
+                    target_value,
+                    exec_price=exec_price,
+                    position_id=position_id,
+                ):
                     self._long_positions.add(inst_id)
                     self._long_position_ids[inst_id] = position_id
                     self._metadata_provider.record_open(
                         instrument_id=inst_id,
                         side="LONG",
-                        alpha101=self._current_alpha101.get(inst_id),
+                        alpha101=alpha101_lookup.get(inst_id),
                         weight=weight,
-                        neutralized=self._last_neutralized.get(inst_id),
-                        scaled=self._last_scaled.get(inst_id),
-                        decayed=self._last_decayed.get(inst_id),
-                        ts_event=self._current_ts_event,
+                        neutralized=neutralized_lookup.get(inst_id),
+                        scaled=scaled_lookup.get(inst_id),
+                        decayed=decayed_lookup.get(inst_id),
+                        ts_event=signal_ts,
                     )
             else:
                 # Existing LONG: submit only the delta quantity
-                self._adjust_position(inst_id, OrderSide.BUY, target_value)
+                self._adjust_position(inst_id, OrderSide.BUY, target_value, exec_price=exec_price)
 
         # Open/resize short positions
-        for inst_id in new_shorts:
+        for inst_id in sorted(new_shorts):
             weight = weights[inst_id]
             target_value = self.config.capital * abs(weight)
+            exec_price = execution_prices.get(inst_id)
+            if exec_price is None or exec_price <= 0:
+                self.log.warning(
+                    f"Skip SHORT {inst_id}: missing/invalid execution price "
+                    f"for signal_ts={signal_ts}"
+                )
+                continue
             # Close opposite position first if needed
             if inst_id in self._long_positions:
                 self._close_position(inst_id, "FLIP_TO_SHORT")
@@ -527,22 +590,28 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
             is_new_short = inst_id not in self._short_positions
             if is_new_short:
                 position_id = self._make_position_id(inst_id, OrderSide.SELL)
-                if self._open_position(inst_id, OrderSide.SELL, target_value, position_id=position_id):
+                if self._open_position(
+                    inst_id,
+                    OrderSide.SELL,
+                    target_value,
+                    exec_price=exec_price,
+                    position_id=position_id,
+                ):
                     self._short_positions.add(inst_id)
                     self._short_position_ids[inst_id] = position_id
                     self._metadata_provider.record_open(
                         instrument_id=inst_id,
                         side="SHORT",
-                        alpha101=self._current_alpha101.get(inst_id),
+                        alpha101=alpha101_lookup.get(inst_id),
                         weight=weights[inst_id],
-                        neutralized=self._last_neutralized.get(inst_id),
-                        scaled=self._last_scaled.get(inst_id),
-                        decayed=self._last_decayed.get(inst_id),
-                        ts_event=self._current_ts_event,
+                        neutralized=neutralized_lookup.get(inst_id),
+                        scaled=scaled_lookup.get(inst_id),
+                        decayed=decayed_lookup.get(inst_id),
+                        ts_event=signal_ts,
                     )
             else:
                 # Existing SHORT: submit only the delta quantity
-                self._adjust_position(inst_id, OrderSide.SELL, target_value)
+                self._adjust_position(inst_id, OrderSide.SELL, target_value, exec_price=exec_price)
 
         if self._rebalance_count <= 5 or self._rebalance_count % 30 == 0:
             self.log.info(
@@ -580,6 +649,7 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         instrument_id_str: str,
         side: OrderSide,
         target_value: float,
+        exec_price: float,
     ) -> bool:
         """
         Submit only the delta order needed to reach target_value for an existing position.
@@ -592,11 +662,10 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         if instrument is None:
             return False
 
-        price = self._current_prices.get(instrument_id_str)
-        if price is None or price <= 0:
+        if exec_price <= 0:
             return False
 
-        target_qty = Decimal(str(target_value / price))
+        target_qty = Decimal(str(target_value / exec_price))
 
         # Resolve current position — refresh pid if the stored position was closed
         # (e.g. a previous reduce_only order brought qty to exactly 0).
@@ -668,6 +737,7 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         instrument_id_str: str,
         side: OrderSide,
         target_value: float,
+        exec_price: float,
         position_id: PositionId | None = None,
     ) -> bool:
         """Open a new position with target dollar value, bound to a named PositionId."""
@@ -677,11 +747,10 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
         if instrument is None:
             return False
 
-        price = self._current_prices.get(instrument_id_str)
-        if price is None or price <= 0:
+        if exec_price <= 0:
             return False
 
-        raw_qty = Decimal(str(target_value / price))
+        raw_qty = Decimal(str(target_value / exec_price))
         try:
             qty = instrument.make_qty(raw_qty)
         except ValueError:
@@ -708,9 +777,9 @@ class WorldQuantAlphaStrategy(BarSubscriptionMixin, Strategy):
 
     def _close_all_positions(self, reason: str) -> None:
         """Close all open positions."""
-        for inst_id in list(self._long_positions):
+        for inst_id in sorted(self._long_positions):
             self._close_position(inst_id, reason)
-        for inst_id in list(self._short_positions):
+        for inst_id in sorted(self._short_positions):
             self._close_position(inst_id, reason)
         self._long_positions.clear()
         self._short_positions.clear()
