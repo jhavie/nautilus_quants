@@ -14,7 +14,7 @@ authors = [
 ]
 
 dependencies = [
-    "nautilus_trader==1.222.0",
+    "nautilus_trader==1.224.0",
     "numpy>=1.26.4",
     "pandas>=2.3.3,<3.0.0",
     "pyyaml>=6.0",
