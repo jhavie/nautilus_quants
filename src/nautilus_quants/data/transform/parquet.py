@@ -228,8 +228,8 @@ def csv_to_bars(
     df = df.set_index("timestamp")
 
     # Use quote_volume (USDT turnover) as volume - standard for crypto futures trading
-    df = df[["open", "high", "low", "close", "quote_volume"]]
-    df = df.rename(columns={"quote_volume": "volume"})
+    df = df[["open", "high", "low", "close", "volume"]]
+    # df = df.rename(columns={"quote_volume": "volume"})
 
     # Use official Wrangler for batch conversion
     wrangler = BarDataWrangler(bar_type, instrument)
