@@ -1,0 +1,80 @@
+# Binance FMZ Factor Strategy - Live Trading Configuration
+#
+# Usage:
+#   python -m nautilus_quants.live run config/live/binance_fmz.yaml
+#   python -m nautilus_quants.live run config/live/binance_fmz.yaml --dry-run
+#
+# Required environment variables:
+#   BINANCE_API_KEY, BINANCE_API_SECRET
+
+venue:
+  name: "BINANCE"
+  instrument_type: "SWAP"
+  contract_type: "LINEAR"
+  margin_mode: "CROSS"
+  is_demo: true  # Uses testnet
+
+instruments:
+  bar_spec: "1h"
+  instrument_ids:
+    - "BTCUSDT"
+    - "ETHUSDT"
+    - "SOLUSDT"
+    - "DOGEUSDT"
+    - "XRPUSDT"
+    - "ADAUSDT"
+    - "AVAXUSDT"
+    - "LINKUSDT"
+    - "DOTUSDT"
+    - "MATICUSDT"
+    - "UNIUSDT"
+    - "ATOMUSDT"
+    - "FILUSDT"
+    - "LTCUSDT"
+    - "NEARUSDT"
+    - "ARBUSDT"
+    - "OPUSDT"
+    - "APTUSDT"
+    - "INJUSDT"
+    - "AAVEUSDT"
+    - "MKRUSDT"
+    - "SNXUSDT"
+    - "CRVUSDT"
+    - "SUSHIUSDT"
+    - "SANDUSDT"
+    - "MANAUSDT"
+    - "GRTUSDT"
+    - "FTMUSDT"
+    - "ALGOUSDT"
+    - "EOSUSDT"
+
+engine:
+  trader_id: "LIVE-BN-FMZ-001"
+  logging:
+    log_level: "INFO"
+    log_level_file: "DEBUG"
+    log_directory: "logs/live"
+    use_pyo3: true
+  risk_engine:
+    bypass: false
+  exec_engine:
+    reconciliation: true
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors.yaml"
+        max_history: 500
+        publish_signals: true
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
+      config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
+      config:
+        instrument_ids: []  # Auto-injected from instruments.instrument_ids
+        n_long: 10
+        n_short: 10
+        position_value: 300
+        rebalance_period: 1
+        composite_factor: "composite"

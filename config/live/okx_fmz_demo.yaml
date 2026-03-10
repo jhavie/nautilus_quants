@@ -1,0 +1,52 @@
+# OKX FMZ Factor Strategy - Demo/Testnet Configuration
+#
+# Usage:
+#   python -m nautilus_quants.live run config/live/okx_fmz_demo.yaml --dry-run
+#   python -m nautilus_quants.live run config/live/okx_fmz_demo.yaml
+#
+# Required environment variables:
+#   OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
+#   (Use demo/testnet API keys from OKX)
+
+venue:
+  name: "OKX"
+  instrument_type: "SWAP"
+  contract_type: "LINEAR"
+  margin_mode: "CROSS"
+  is_demo: true
+
+instruments:
+  bar_spec: "1h"
+  instrument_ids:
+    - "BTC-USDT-SWAP"
+    - "ETH-USDT-SWAP"
+    - "SOL-USDT-SWAP"
+
+engine:
+  trader_id: "DEMO-FMZ-001"
+  logging:
+    log_level: "DEBUG"
+    log_level_file: "DEBUG"
+    log_directory: "logs/live_demo"
+    use_pyo3: true
+  risk_engine:
+    bypass: false
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors.yaml"
+        max_history: 500
+        publish_signals: true
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
+      config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
+      config:
+        instrument_ids: []  # Auto-injected
+        n_long: 1
+        n_short: 1
+        position_value: 100
+        rebalance_period: 1
+        composite_factor: "composite"
