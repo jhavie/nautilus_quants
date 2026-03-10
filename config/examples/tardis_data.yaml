@@ -1,0 +1,17 @@
+download:
+  exchange: "binance-futures"
+  api_key_env: "TARDIS_API_KEY"        # env var name (no key = only 1st-of-month data)
+  data_types:
+    - trades
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+  from_date: "2024-01-01"
+  to_date: "2024-07-01"               # non-inclusive
+  concurrency: 5                       # per-symbol file concurrency (tardis-dev internal)
+  max_symbol_workers: 3                # concurrent symbols (ThreadPoolExecutor)
+
+paths:
+  raw_data: "data/raw/tardis"          # download output directory
+  catalog: "data/catalog"              # Parquet catalog directory

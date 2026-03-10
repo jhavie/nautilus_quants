@@ -16,8 +16,10 @@ import click
 from nautilus_quants.data.config import (
     ConfigurationError,
     PipelineConfig,
+    TardisPipelineConfig,
     config_to_dict,
     load_config,
+    load_tardis_config,
 )
 from nautilus_quants.data.download.binance import (
     BinanceDownloader,
@@ -949,6 +951,137 @@ def clean(
             click.echo("Removed checkpoints")
 
     click.echo("Clean complete.")
+
+
+@cli.command("tardis-download")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default="config/examples/tardis_data.yaml",
+    help="Tardis configuration file path",
+)
+@click.option("--symbol", "-s", help="Override symbols, comma-separated")
+@click.option("--from-date", help="Override start date (YYYY-MM-DD)")
+@click.option("--to-date", help="Override end date (YYYY-MM-DD, non-inclusive)")
+@click.option("--force", is_flag=True, help="Re-download all (delete existing first)")
+@click.pass_context
+def tardis_download(
+    ctx: click.Context,
+    config_path: str,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    force: bool,
+) -> None:
+    """Download tick-level trade data from Tardis.dev."""
+    overrides: dict[str, str] = {}
+    if symbol:
+        overrides["download.symbols"] = symbol
+    if from_date:
+        overrides["download.from_date"] = from_date
+    if to_date:
+        overrides["download.to_date"] = to_date
+
+    try:
+        config = load_tardis_config(config_path, overrides if overrides else None)
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if ctx.obj.get("dry_run"):
+        click.echo("DRY RUN: Would download Tardis data with config:")
+        click.echo(f"  Exchange: {config.download.exchange}")
+        click.echo(f"  Symbols: {list(config.download.symbols)}")
+        click.echo(f"  Data types: {list(config.download.data_types)}")
+        click.echo(f"  Date range: {config.download.from_date} to {config.download.to_date}")
+        click.echo(f"  Symbol workers: {config.download.max_symbol_workers}")
+        return
+
+    from nautilus_quants.data.download.tardis import TardisDownloader
+
+    downloader = TardisDownloader(config=config.download, paths=config.paths)
+
+    if force:
+        click.echo("Force mode: cleaning existing data...")
+        downloader.clean()
+
+    results = downloader.download_all()
+
+    failed = [r for r in results if not r.success]
+    succeeded = [r for r in results if r.success]
+
+    if succeeded:
+        click.echo(f"\nDownload complete: {len(succeeded)} symbol(s) successful")
+    if failed:
+        click.echo(f"Download failed for {len(failed)} symbol(s):", err=True)
+        for r in failed:
+            click.echo(f"  {r.symbol}: {r.error}", err=True)
+        ctx.exit(EXIT_DOWNLOAD_ERROR)
+
+
+@cli.command("tardis-transform")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default="config/examples/tardis_data.yaml",
+    help="Tardis configuration file path",
+)
+@click.option("--symbol", "-s", help="Override symbols, comma-separated")
+@click.pass_context
+def tardis_transform(
+    ctx: click.Context,
+    config_path: str,
+    symbol: Optional[str],
+) -> None:
+    """Transform Tardis CSV trade data to NautilusTrader Parquet format."""
+    overrides: dict[str, str] = {}
+    if symbol:
+        overrides["download.symbols"] = symbol
+
+    try:
+        config = load_tardis_config(config_path, overrides if overrides else None)
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if ctx.obj.get("dry_run"):
+        click.echo("DRY RUN: Would transform Tardis data:")
+        click.echo(f"  Symbols: {list(config.download.symbols)}")
+        click.echo(f"  Input: {config.paths.raw_data}/{config.download.exchange}/trades/")
+        click.echo(f"  Catalog: {config.paths.catalog}")
+        return
+
+    from nautilus_quants.data.transform.tardis import transform_tardis_trades
+
+    input_dir = Path(config.paths.raw_data) / config.download.exchange / "trades"
+    catalog_path = Path(config.paths.catalog)
+
+    has_errors = False
+    for sym in config.download.symbols:
+        click.echo(f"Transforming {sym}...")
+
+        result = transform_tardis_trades(
+            input_dir=input_dir,
+            catalog_path=catalog_path,
+            symbol=sym,
+        )
+
+        if result.success:
+            click.echo(
+                f"  \u2713 {result.total_ticks} ticks from {result.files_processed} file(s)"
+            )
+        else:
+            click.echo(f"  \u2717 Failed: {result.errors}", err=True)
+            has_errors = True
+
+    if has_errors:
+        ctx.exit(EXIT_TRANSFORM_ERROR)
+
+    click.echo("\nTransform complete.")
 
 
 def _load_config_with_overrides(
