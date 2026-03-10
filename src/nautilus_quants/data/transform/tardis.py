@@ -47,7 +47,7 @@ def transform_tardis_trades(
         TardisTransformResult with counts and status.
     """
     instrument_id = InstrumentId.from_str(f"{symbol}-PERP.BINANCE")
-    loader = TardisCSVDataLoader()
+    loader = TardisCSVDataLoader(instrument_id=instrument_id)
     catalog = ParquetDataCatalog(str(catalog_path))
 
     files = sorted(input_dir.glob(f"*_{symbol}.csv.gz"))
@@ -65,7 +65,7 @@ def transform_tardis_trades(
 
     for f in files:
         try:
-            trades = loader.load_trades(filepath=str(f), instrument_id=instrument_id)
+            trades = loader.load_trades(filepath=str(f))
             if trades:
                 catalog.write_data(trades)
                 total_ticks += len(trades)

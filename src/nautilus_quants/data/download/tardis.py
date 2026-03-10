@@ -17,6 +17,17 @@ from tqdm import tqdm
 from nautilus_quants.data.config import TardisDownloadConfig, TardisPathsConfig
 
 
+def _resolve_api_key(raw: str) -> str:
+    """Resolve API key: env var name → lookup, literal key → use directly.
+
+    Heuristic: values starting with "TD." are Tardis API keys;
+    otherwise treat as environment variable name.
+    """
+    if raw.startswith("TD."):
+        return raw
+    return os.environ.get(raw, "")
+
+
 @dataclass(frozen=True)
 class TardisDownloadResult:
     """Result of a single symbol download."""
@@ -89,7 +100,7 @@ class TardisDownloader:
         tardis-dev internally creates an asyncio event loop and aiohttp session,
         so each thread is fully isolated and thread-safe.
         """
-        api_key = os.environ.get(self._config.api_key_env, "")
+        api_key = _resolve_api_key(self._config.api_key_env)
         output_dir = str(Path(self._paths.raw_data) / self._config.exchange)
 
         def get_filename(

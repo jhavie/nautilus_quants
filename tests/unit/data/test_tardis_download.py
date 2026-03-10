@@ -236,13 +236,13 @@ class TestTardisDownloader:
         assert call_kwargs["api_key"] == "test-key-123"
 
     @patch("nautilus_quants.data.download.tardis.datasets")
-    def test_download_empty_api_key_when_not_set(
+    def test_download_empty_api_key_when_env_var_not_set(
         self,
         mock_datasets: MagicMock,
         paths: TardisPathsConfig,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Test that empty API key is passed when env var not set."""
+        """Test that empty API key is passed when env var name is used but not set."""
         monkeypatch.delenv("TARDIS_API_KEY", raising=False)
         mock_datasets.download = MagicMock(return_value=None)
 
@@ -252,6 +252,25 @@ class TestTardisDownloader:
 
         call_kwargs = mock_datasets.download.call_args[1]
         assert call_kwargs["api_key"] == ""
+
+    @patch("nautilus_quants.data.download.tardis.datasets")
+    def test_download_literal_api_key(
+        self,
+        mock_datasets: MagicMock,
+        paths: TardisPathsConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Test that literal TD.xxx key is used directly without env lookup."""
+        monkeypatch.delenv("TARDIS_API_KEY", raising=False)
+        mock_datasets.download = MagicMock(return_value=None)
+
+        literal_key = "TD.test-key-12345"
+        config = TardisDownloadConfig(symbols=("BTCUSDT",), api_key_env=literal_key)
+        downloader = TardisDownloader(config=config, paths=paths)
+        downloader.download_symbol("BTCUSDT")
+
+        call_kwargs = mock_datasets.download.call_args[1]
+        assert call_kwargs["api_key"] == literal_key
 
     def test_clean_removes_directory(self, tmp_path: Path) -> None:
         """Test that clean removes the exchange directory."""
