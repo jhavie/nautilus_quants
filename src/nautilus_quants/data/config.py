@@ -100,6 +100,39 @@ class PipelineConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
 
 
+@dataclass(frozen=True)
+class TardisDownloadConfig:
+    """Download configuration for Tardis tick data."""
+
+    exchange: str = "binance-futures"
+    api_key_env: str = "TARDIS_API_KEY"
+    data_types: tuple[str, ...] = ("trades",)
+    symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT")
+    from_date: str = "2024-01-01"
+    to_date: str = "2024-07-01"
+    concurrency: int = 5
+    max_symbol_workers: int = 3
+
+
+@dataclass(frozen=True)
+class TardisPathsConfig:
+    """Paths configuration for Tardis data."""
+
+    raw_data: str = "data/raw/tardis"
+    catalog: str = "data/catalog"
+
+
+@dataclass(frozen=True)
+class TardisPipelineConfig:
+    """Complete Tardis pipeline configuration.
+
+    No transform config needed — TardisCSVDataLoader infers precision automatically.
+    """
+
+    download: TardisDownloadConfig = TardisDownloadConfig()
+    paths: TardisPathsConfig = TardisPathsConfig()
+
+
 class ConfigurationError(Exception):
     """Raised when configuration is invalid."""
 
@@ -256,6 +289,66 @@ def _merge_overrides(data: dict, overrides: dict) -> dict:
             current[parts[-1]] = value
 
     return result
+
+
+def _parse_tardis_download(data: dict) -> TardisDownloadConfig:
+    """Parse Tardis download configuration from dict."""
+    data_types = data.get("data_types", ["trades"])
+    symbols = data.get("symbols", ["BTCUSDT", "ETHUSDT"])
+    return TardisDownloadConfig(
+        exchange=data.get("exchange", "binance-futures"),
+        api_key_env=data.get("api_key_env", "TARDIS_API_KEY"),
+        data_types=tuple(data_types),
+        symbols=tuple(symbols),
+        from_date=data.get("from_date", "2024-01-01"),
+        to_date=data.get("to_date", "2024-07-01"),
+        concurrency=data.get("concurrency", 5),
+        max_symbol_workers=data.get("max_symbol_workers", 3),
+    )
+
+
+def _parse_tardis_paths(data: dict) -> TardisPathsConfig:
+    """Parse Tardis paths configuration from dict."""
+    return TardisPathsConfig(
+        raw_data=data.get("raw_data", "data/raw/tardis"),
+        catalog=data.get("catalog", "data/catalog"),
+    )
+
+
+def load_tardis_config(
+    config_path: Path | str = "config/examples/tardis_data.yaml",
+    overrides: Optional[dict[str, Any]] = None,
+) -> TardisPipelineConfig:
+    """Load Tardis configuration from YAML file and merge with CLI overrides.
+
+    Args:
+        config_path: Path to the YAML configuration file
+        overrides: Optional dictionary of CLI overrides
+
+    Returns:
+        TardisPipelineConfig with merged configuration
+
+    Raises:
+        ConfigurationError: If configuration file is invalid or not found
+    """
+    config_path = Path(config_path)
+
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                data = yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            raise ConfigurationError(f"Invalid YAML in {config_path}: {e}")
+    else:
+        data = {}
+
+    if overrides:
+        data = _merge_overrides(data, overrides)
+
+    return TardisPipelineConfig(
+        download=_parse_tardis_download(data.get("download", {})),
+        paths=_parse_tardis_paths(data.get("paths", {})),
+    )
 
 
 def config_to_dict(config: PipelineConfig) -> dict:
