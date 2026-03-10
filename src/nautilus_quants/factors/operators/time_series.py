@@ -371,13 +371,13 @@ class Correlation(TimeSeriesOperator):
         x = data[-window:]
         y = data2[-window:]
 
-        # Handle constant arrays — popbo-aligned: undefined correlation = 0.0
+        # Constant arrays → undefined correlation → NaN (consistent with IncrementalCorr)
         if np.std(x) == 0 or np.std(y) == 0:
-            return 0.0
+            return float("nan")
 
         result = float(np.corrcoef(x, y)[0, 1])
-        if np.isnan(result) or np.isinf(result):
-            return 0.0
+        if np.isinf(result):
+            return float("nan")
         return result
 
     def make_incremental(self, window: int) -> "IncrementalCorr":
@@ -389,8 +389,8 @@ class Correlation(TimeSeriesOperator):
     ) -> pd.Series:
         if data2 is None:
             return pd.Series(np.nan, index=data.index)
-        # Popbo-aligned: fillna(0) treats undefined correlation (constant series) as uncorrelated
-        return data.rolling(int(window)).corr(data2).fillna(0).replace([np.inf, -np.inf], 0)
+        # Let NaN propagate naturally; only convert inf to NaN (numerical error).
+        return data.rolling(int(window)).corr(data2).replace([np.inf, -np.inf], np.nan)
 
     def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
         """DataFrame-level rolling Pearson correlation.
@@ -398,15 +398,15 @@ class Correlation(TimeSeriesOperator):
         Uses pandas DataFrame.rolling().corr(other_df) which computes all
         columns simultaneously (C-optimized), avoiding per-column Python loop.
 
-        Popbo-aligned: fillna(0) treats undefined correlation (constant series)
-        as uncorrelated (0).
+        NaN propagates naturally through downstream operations (rank, normalize,
+        composite weighting).  Only inf (numerical error) is converted to NaN.
         """
         data2 = kwargs.get("data2")
         if data2 is None:
             return pd.DataFrame(np.nan, index=data.index, columns=data.columns)
         w = int(window)
         result = data.rolling(w).corr(data2)
-        return result.fillna(0).replace([np.inf, -np.inf], 0)
+        return result.replace([np.inf, -np.inf], np.nan)
 
 
 @register_operator

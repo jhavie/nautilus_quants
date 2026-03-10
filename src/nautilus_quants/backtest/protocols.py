@@ -26,6 +26,9 @@ EQUITY_SNAPSHOTS_CACHE_KEY = "equity_snapshots"
 # Cache key for EquitySnapshotActor → ReportGenerator per-instrument market values
 POSITION_MARKET_VALUES_CACHE_KEY = "position_market_values"
 
+# Cache key for FactorEngineActor → ReportGenerator factor values transfer
+FACTOR_VALUES_CACHE_KEY = "factor_values"
+
 
 class ColumnConfig(TypedDict):
     """Configuration for a table column in position timeline.

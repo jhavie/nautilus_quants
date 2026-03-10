@@ -9,6 +9,7 @@ import pandas as pd
 from nautilus_quants.backtest.exceptions import BacktestReportError
 from nautilus_quants.backtest.protocols import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
+    FACTOR_VALUES_CACHE_KEY,
     POSITION_MARKET_VALUES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
     BaseMetadataRenderer,
@@ -168,6 +169,11 @@ class ReportGenerator:
         position_viz_path = self.generate_position_visualization()
         if position_viz_path:
             reports["position_viz"] = position_viz_path
+
+        # Generate factor values CSV if data is available
+        factor_csv_path = self.generate_factor_values_csv()
+        if factor_csv_path:
+            reports["factor_values"] = factor_csv_path
 
         return reports
 
@@ -698,6 +704,54 @@ class ReportGenerator:
                 continue
 
         return reports
+
+    def generate_factor_values_csv(self) -> Path | None:
+        """Generate CSV of per-bar, per-instrument factor values.
+
+        Reads factor snapshots from engine cache (written by FactorEngineActor)
+        and writes a flat CSV with columns:
+        timestamp_ns, instrument_id, factor_name, value.
+
+        Returns:
+            Path to CSV file, or None if no factor data available.
+        """
+        import pickle
+
+        try:
+            data = self.engine.cache.get(FACTOR_VALUES_CACHE_KEY)
+        except Exception:
+            return None
+
+        if not data:
+            return None
+
+        try:
+            snapshots: list[tuple[int, dict[str, dict[str, float]]]] = pickle.loads(data)
+        except Exception:
+            return None
+
+        if not snapshots:
+            return None
+
+        rows: list[dict] = []
+        for ts_ns, factors in snapshots:
+            for factor_name, instrument_values in factors.items():
+                for instrument_id, value in instrument_values.items():
+                    rows.append({
+                        "timestamp_ns": ts_ns,
+                        "instrument_id": instrument_id,
+                        "factor_name": factor_name,
+                        "value": value,
+                    })
+
+        if not rows:
+            return None
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame(rows)
+        csv_path = self.output_dir / "factor_values_report.csv"
+        df.to_csv(csv_path, index=False)
+        return csv_path
 
     def generate_position_visualization(self) -> Path | None:
         """Generate ECharts position timeline visualization.

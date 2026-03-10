@@ -125,7 +125,7 @@ def _build_backtest_config(factors_yaml_path: str) -> dict:
                         "n_long": 3,
                         "n_short": 3,
                         "position_value": 100,
-                        "rebalance_period": 6,
+                        "rebalance_interval": 6,
                         "composite_factor": COMPOSITE_FACTOR,
                     },
                 }

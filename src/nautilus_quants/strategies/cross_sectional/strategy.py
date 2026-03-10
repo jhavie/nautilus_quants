@@ -31,7 +31,11 @@ from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
+from nautilus_quants.common.anchor_price_execution import AnchorPriceExecutionMixin
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
+from nautilus_quants.common.event_time_pending_execution import (
+    EventTimePendingExecutionMixin,
+)
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.cross_sectional.metadata import CrossSectionalMetadataProvider
 
@@ -84,7 +88,12 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
     monthly_position_update: bool = True
 
 
-class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
+class CrossSectionalFactorStrategy(
+    AnchorPriceExecutionMixin,
+    EventTimePendingExecutionMixin[list[tuple[str, float]]],
+    BarSubscriptionMixin,
+    Strategy,
+):
     """
     Cross-sectional multi-factor selection strategy.
 
@@ -109,15 +118,12 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         self._n_instruments = len(config.instrument_ids)
 
         # State tracking
-        self._current_prices: dict[str, float] = {}
+        self._init_event_time_pending(max_timestamps=6, max_pending_wait_timestamps=2)
         self._long_positions: set[str] = set()
         self._short_positions: set[str] = set()
         self._bar_count: int = 0
         self._signal_count: int = 0
         self._hour_count: int = 0
-
-        # Accumulate composite factor values for current hour
-        self._composite_values: dict[str, float] = {}
 
         # Monthly position update state
         self._current_month: int | None = None
@@ -190,53 +196,38 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         )
 
     def on_bar(self, bar: Bar) -> None:
-        """Handle bar updates - track current prices."""
+        """Handle bar updates - cache closes by event timestamp."""
         instrument_id = self._resolve_bar(bar)
         if instrument_id is None:
             return
 
         self._bar_count += 1
-        self._current_prices[instrument_id] = float(bar.close)
+        self._record_close_and_try_execute(bar.ts_event, instrument_id, float(bar.close))
 
     def on_data(self, data) -> None:
-        """
-        Handle FactorValues from FactorEngineActor.
-
-        FactorValues are published per-bar (one instrument at a time).
-        We accumulate composite factor values and rebalance when we have all instruments.
-        """
+        """Handle FactorValues and defer execution until signal-ts prices are ready."""
         if not isinstance(data, FactorValues):
             return
 
+        signal_ts = data.ts_event
         # Check for monthly position value update
-        self._update_monthly_position_value(data.ts_event)
+        self._update_monthly_position_value(signal_ts)
 
         self._signal_count += 1
         factors = data.factors
         composite_factor = self.config.composite_factor
 
         # Extract composite factor values
-        if composite_factor in factors:
-            for instrument_id, value in factors[composite_factor].items():
-                self._composite_values[instrument_id] = value
-
-        # Check if we have all instruments for this hour
-        n_accumulated = len(self._composite_values)
-        if n_accumulated < self._n_instruments:
+        raw_composite = factors.get(composite_factor, {})
+        if not raw_composite:
             return
 
+        composite = {k: v for k, v in raw_composite.items() if not math.isnan(v)}
         self._hour_count += 1
 
         # Only rebalance every rebalance_period hours
         if self._hour_count % self.config.rebalance_period != 0:
-            self._composite_values = {}
             return
-
-        # Filter out NaN values
-        composite = {
-            k: v for k, v in self._composite_values.items()
-            if not math.isnan(v)
-        }
 
         if self._hour_count <= 20 or self._hour_count % 100 == 0:
             self.log.info(f"Hour #{self._hour_count}: Computed composite for {len(composite)} instruments")
@@ -246,17 +237,31 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
                 f"Not enough instruments with valid factor values: "
                 f"{len(composite)} < {2 * self.config.n_positions}"
             )
-            self._composite_values = {}
             return
 
-        sorted_instruments = sorted(composite.items(), key=lambda x: x[1])
-        self._rebalance_positions_with_buffer(sorted_instruments, data.ts_event)
-        self._composite_values = {}
+        sorted_instruments = sorted(composite.items(), key=lambda x: (x[1], x[0]))
+        self._enqueue_pending(signal_ts, sorted_instruments)
+
+    def _required_instruments(self, payload: list[tuple[str, float]]) -> list[str]:
+        return [inst_id for inst_id, _ in payload]
+
+    def _on_pending_ready(
+        self,
+        signal_ts: int,
+        payload: list[tuple[str, float]],
+        execution_prices: dict[str, float],
+    ) -> None:
+        self._rebalance_positions_with_buffer(
+            sorted_instruments=payload,
+            ts_event=signal_ts,
+            execution_prices=execution_prices,
+        )
 
     def _rebalance_positions_with_buffer(
         self,
         sorted_instruments: list[tuple[str, float]],
         ts_event: int,
+        execution_prices: dict[str, float],
     ) -> None:
         """
         Rebalance with buffer zone.
@@ -281,14 +286,16 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         self._log_position_ranks(rank, total, mid, long_targets, short_targets)
 
         # === STEP 1: CLOSE (with buffer) ===
-        for inst_id in list(self._long_positions):
+        for inst_id in sorted(self._long_positions):
             if inst_id in rank and rank[inst_id] > mid:
-                self._close_position(inst_id, f"LONG_EXCEEDED_BUFFER_RANK_{rank[inst_id]}")
+                exec_price = execution_prices.get(inst_id)
+                self._close_position(inst_id, f"LONG_EXCEEDED_BUFFER_RANK_{rank[inst_id]}", exec_price=exec_price)
                 self._long_positions.discard(inst_id)
 
-        for inst_id in list(self._short_positions):
+        for inst_id in sorted(self._short_positions):
             if inst_id in rank and rank[inst_id] < mid:
-                self._close_position(inst_id, f"SHORT_EXCEEDED_BUFFER_RANK_{rank[inst_id]}")
+                exec_price = execution_prices.get(inst_id)
+                self._close_position(inst_id, f"SHORT_EXCEEDED_BUFFER_RANK_{rank[inst_id]}", exec_price=exec_price)
                 self._short_positions.discard(inst_id)
 
         # === STEP 2: OPEN (target zones only) ===
@@ -296,19 +303,47 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         composite_lookup = dict(sorted_instruments)
 
         if self.config.enable_long:
-            for inst_id in long_targets:
+            for inst_id in sorted(long_targets):
                 if inst_id not in self._long_positions:
                     inst_rank = rank.get(inst_id)
                     composite_val = composite_lookup.get(inst_id)
-                    if self._open_position(inst_id, OrderSide.BUY, inst_rank, composite_val, ts_event):
+                    exec_price = execution_prices.get(inst_id)
+                    if exec_price is None or exec_price <= 0:
+                        self.log.warning(
+                            f"Skip LONG {inst_id}: missing/invalid execution price "
+                            f"for signal_ts={ts_event}"
+                        )
+                        continue
+                    if self._open_position(
+                        inst_id,
+                        OrderSide.BUY,
+                        exec_price=exec_price,
+                        rank=inst_rank,
+                        composite_value=composite_val,
+                        ts_event=ts_event,
+                    ):
                         self._long_positions.add(inst_id)
 
         if self.config.enable_short:
-            for inst_id in short_targets:
+            for inst_id in sorted(short_targets):
                 if inst_id not in self._short_positions:
                     inst_rank = rank.get(inst_id)
                     composite_val = composite_lookup.get(inst_id)
-                    if self._open_position(inst_id, OrderSide.SELL, inst_rank, composite_val, ts_event):
+                    exec_price = execution_prices.get(inst_id)
+                    if exec_price is None or exec_price <= 0:
+                        self.log.warning(
+                            f"Skip SHORT {inst_id}: missing/invalid execution price "
+                            f"for signal_ts={ts_event}"
+                        )
+                        continue
+                    if self._open_position(
+                        inst_id,
+                        OrderSide.SELL,
+                        exec_price=exec_price,
+                        rank=inst_rank,
+                        composite_value=composite_val,
+                        ts_event=ts_event,
+                    ):
                         self._short_positions.add(inst_id)
 
         # === STEP 3: UPDATE RANK HISTORY for all current positions ===
@@ -432,6 +467,7 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         self,
         instrument_id_str: str,
         side: OrderSide,
+        exec_price: float,
         rank: int | None = None,
         composite_value: float | None = None,
         ts_event: int | None = None,
@@ -443,12 +479,11 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         if instrument is None:
             return False
 
-        price = self._current_prices.get(instrument_id_str)
-        if price is None or price <= 0:
+        if exec_price <= 0:
             return False
 
         position_value = self._get_position_value()
-        raw_qty = Decimal(str(position_value / price))
+        raw_qty = Decimal(str(position_value / exec_price))
         qty = instrument.make_qty(raw_qty)
 
         # Record position metadata via provider
@@ -461,12 +496,7 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
             ts_event=ts_event or 0,
         )
 
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=side,
-            quantity=qty,
-        )
-        self.submit_order(order)
+        self._submit_anchor_open(instrument_id, side, qty, exec_price)
 
         return True
 
@@ -477,7 +507,7 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
         ts_event: int,
     ) -> None:
         """Update rank history for all current positions."""
-        all_positions = list(self._long_positions) + list(self._short_positions)
+        all_positions = sorted(self._long_positions | self._short_positions)
         self._metadata_provider.update_rank_history(
             instrument_ids=all_positions,
             rank_lookup=rank,
@@ -485,8 +515,13 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
             ts_event=ts_event,
         )
 
-    def _close_position(self, instrument_id_str: str, reason: str) -> None:
-        """Close a position for an instrument."""
+    def _close_position(
+        self,
+        instrument_id_str: str,
+        reason: str,
+        exec_price: float | None = None,
+    ) -> None:
+        """Close a position for an instrument with deterministic anchor pricing."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
 
         # Record close in metadata provider
@@ -496,15 +531,25 @@ class CrossSectionalFactorStrategy(BarSubscriptionMixin, Strategy):
             hour_count=self._hour_count,
         )
 
-        self.close_all_positions(instrument_id)
+        self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
-        """Close all open positions."""
-        for instrument_id_str in list(self._long_positions):
-            self._close_position(instrument_id_str, reason)
-        for instrument_id_str in list(self._short_positions):
-            self._close_position(instrument_id_str, reason)
+        """Close all open positions with deterministic fill pricing."""
+        latest_closes = self._price_book.get_latest_closes()
+
+        for position in sorted(
+            self.cache.positions_open(strategy_id=self.id),
+            key=lambda p: str(p.instrument_id),
+        ):
+            if position.is_closed:
+                continue
+            inst_id = str(position.instrument_id)
+            self._metadata_provider.record_close(
+                instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
+            )
+            self._submit_anchor_close(position, latest_closes.get(inst_id))
+            self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()
         self._short_positions.clear()
