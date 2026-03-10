@@ -1,0 +1,17 @@
+download:
+  exchange: "binance-futures"
+  api_key_env: "TARDIS_API_KEY"          # set env var, or put TD.xxx key directly
+  data_types:
+    - trades
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+  from_date: "2025-03-01"
+  to_date: "2025-03-02"               # non-inclusive, so only 2025-03-01
+  concurrency: 5
+  max_symbol_workers: 3
+
+paths:
+  raw_data: "data/raw/tardis"
+  catalog: "data/catalog"
