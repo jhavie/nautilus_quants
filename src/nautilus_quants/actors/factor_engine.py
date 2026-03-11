@@ -96,6 +96,11 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
         List of bar type strings to subscribe to (injected by CLI from data config).
         Filtered by data_cls + bar_spec when both are specified.
         If empty, actor will log an error and not start.
+    flush_timeout_secs : int, default 5
+        Seconds to wait for all instruments before force-flushing.
+        Backtest: TestClock inserts a ts+5s alert within bar intervals (1h/4h),
+        delay is negligible. Live: override to e.g. 180 for WebSocket feeds.
+        Set to 0 to disable timeout (relies on set-complete + timestamp-advance).
     """
 
     factor_config_path: str
@@ -105,6 +110,7 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     publish_signals: bool = True
     signal_prefix: str = "factor"
     bar_types: list[str] = []
+    flush_timeout_secs: int = 5
 
 
 class FactorEngineActor(BarSubscriptionMixin, Actor):
@@ -153,11 +159,14 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._config: FactorEngineActorConfig = config
         self._engine: FactorEngine | None = None
 
-        # Timestamp synchronization:
-        # Bars arrive instrument-by-instrument.  We accumulate bars for the
-        # current timestamp and flush the *previous* timestamp once a new one
-        # starts (guaranteeing all instruments have reported).
-        self._last_processed_ts: int = 0
+        # Flush synchronization:
+        # Bars arrive instrument-by-instrument. We flush immediately when all
+        # expected instruments have reported for a timestamp (set-complete),
+        # with a configurable timeout fallback for partial arrivals.
+        self._expected_instruments: set[str] = set()
+        self._pending_instruments: set[str] = set()
+        self._pending_ts: int = 0
+        self._last_flushed_ts: int = 0
         self._extra_fields_detected: bool = False
         self._factor_snapshots: list[tuple[int, dict[str, dict[str, float]]]] = []
 
@@ -188,6 +197,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             config=factor_config,
             max_history=self._config.max_history,
         )
+        self._pending_ts = 0
+        self._last_flushed_ts = 0
+        self._pending_instruments.clear()
 
         self.log.info(
             f"Registered {len(self._engine.factor_names)} factors: "
@@ -207,17 +219,24 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         # Subscribe directly to all injected bar types (no aggregation)
         self._subscribe_bar_types(self._config.bar_types)
 
+        # Track expected instruments for set-complete flush detection
+        self._expected_instruments = set(self._bar_type_to_inst_id.values())
+        self.log.info(
+            f"Tracking {len(self._expected_instruments)} instruments for flush sync"
+        )
+
         self.log.info("FactorEngineActor started successfully")
 
     def on_stop(self) -> None:
         """Actions to perform on actor stop."""
         self.log.info("Stopping FactorEngineActor...")
 
-        # Flush the last timestamp (deferred flush means the final bar is
-        # still pending when no new timestamp arrives to trigger it).
-        if self._last_processed_ts > 0 and self._engine is not None:
-            self._flush_and_publish(self._last_processed_ts)
-            self._last_processed_ts = 0
+        # Flush any pending data before shutdown
+        if self._pending_ts > 0 and self._engine is not None:
+            self._flush_and_publish(self._pending_ts)
+            self._pending_ts = 0
+            self._pending_instruments.clear()
+        self._cancel_flush_alert()
 
         # Log performance stats
         if self._engine:
@@ -234,7 +253,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             import pickle
 
             try:
-                self.cache.add(FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots))
+                self.cache.add(
+                    FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots)
+                )
                 self.log.info(
                     f"Cached {len(self._factor_snapshots)} factor snapshots "
                     f"({FACTOR_VALUES_CACHE_KEY})"
@@ -248,9 +269,10 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         """
         Handle incoming bar data.
 
-        Accumulates bar data in the panel buffer.  When the timestamp
-        advances, flushes and evaluates all factors for the previous
-        timestamp (ensuring all instruments have reported).
+        Accumulates bar data and flushes immediately when all expected
+        instruments have reported for a timestamp.  Falls back to a
+        configurable timeout for partial arrivals, and force-flushes
+        any residual data when the timestamp advances.
 
         Parameters
         ----------
@@ -258,10 +280,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             The received bar data.
         """
         instrument_id = self._resolve_bar(bar)
-        if instrument_id is None:
-            return
-
-        if self._engine is None:
+        if instrument_id is None or self._engine is None:
             return
 
         # Auto-detect extra bar fields on first BinanceBar
@@ -281,16 +300,44 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 self._extra_fields_detected = True
 
         ts = bar.ts_event
+        if self._last_flushed_ts > 0 and ts <= self._last_flushed_ts:
+            self.log.debug(
+                f"Ignoring late/duplicate bar ts={ts} (last_flushed={self._last_flushed_ts})"
+            )
+            return
 
-        # When timestamp advances, flush + compute the previous timestamp
-        if self._last_processed_ts > 0 and ts > self._last_processed_ts:
-            self._flush_and_publish(self._last_processed_ts)
+        # Timestamp advanced → force-flush residual data from previous ts
+        if self._pending_ts > 0 and ts > self._pending_ts:
+            if self._pending_instruments:
+                self.log.warning(
+                    f"Timestamp advanced before flush: ts {self._pending_ts} -> {ts}, "
+                    f"flushing {len(self._pending_instruments)}/"
+                    f"{len(self._expected_instruments)} instruments"
+                )
+                self._cancel_flush_alert()
+                self._flush_and_publish(self._pending_ts)
+            else:
+                self._cancel_flush_alert()
+            self._pending_instruments.clear()
+            self._pending_ts = 0
 
         # Accumulate bar into panel buffer
         bar_data = _extract_bar_data(bar)
         self._engine.on_bar(instrument_id, bar_data, ts)
+        self._pending_ts = ts
+        self._pending_instruments.add(instrument_id)
 
-        self._last_processed_ts = ts
+        # All instruments reported → immediate flush
+        if self._pending_instruments == self._expected_instruments:
+            self._cancel_flush_alert()
+            self._flush_and_publish(ts)
+            self._pending_instruments.clear()
+            self._pending_ts = 0
+        elif (
+            self._config.flush_timeout_secs > 0 and len(self._pending_instruments) == 1
+        ):
+            # First instrument arrived → start one-shot timeout alert
+            self._set_flush_alert(ts)
 
     def _flush_and_publish(self, ts: int) -> None:
         """Flush a timestamp, compute all factors, and publish results."""
@@ -298,6 +345,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             return
 
         results = self._engine.flush_and_compute(ts)
+        self._last_flushed_ts = max(self._last_flushed_ts, ts)
 
         # Accumulate snapshot for factor export
         self._factor_snapshots.append((ts, results))
@@ -308,10 +356,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             diag_parts = []
             for fname, fvals in results.items():
                 diag_parts.append(f"{fname}={len(fvals)}")
-            self.log.info(
-                f"Factor compute #{compute_count} "
-                f"[{', '.join(diag_parts)}]"
-            )
+            self.log.info(f"Factor compute #{compute_count} [{', '.join(diag_parts)}]")
 
         # Create and publish FactorValues
         factor_values = FactorValues.create(
@@ -322,11 +367,59 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if self._config.publish_signals:
             self.publish_data(data_type=DataType(FactorValues), data=factor_values)
 
+    # -------------------------------------------------------------------------
+    # Flush timeout (one-shot time alert)
+    # -------------------------------------------------------------------------
+
+    @property
+    def _flush_alert_name(self) -> str:
+        return f"factor_flush_timeout_{self.id}"
+
+    def _set_flush_alert(self, ts: int) -> None:
+        """Register a one-shot time alert to force-flush after timeout."""
+        self._cancel_flush_alert()
+        # Use clock.timestamp_ns() (not bar ts_event) so the timeout is
+        # relative to wall-clock in live and simulated time in backtest.
+        alert_time_ns = (
+            self.clock.timestamp_ns() + self._config.flush_timeout_secs * 1_000_000_000
+        )
+        self.clock.set_time_alert(
+            name=self._flush_alert_name,
+            alert_time=alert_time_ns,
+            callback=self._on_flush_timeout,
+        )
+
+    def _cancel_flush_alert(self) -> None:
+        """Cancel flush alert if active."""
+        try:
+            self.clock.cancel_timer(self._flush_alert_name)
+        except Exception:
+            pass  # Timer not active or already fired
+
+    def _on_flush_timeout(self, event: object) -> None:
+        """Time alert callback: flush pending data even if not all instruments reported."""
+        if self._pending_ts > 0 and self._pending_instruments:
+            missing = self._expected_instruments - self._pending_instruments
+            if missing:
+                self.log.info(
+                    f"Flush timeout ({self._config.flush_timeout_secs}s) at ts={self._pending_ts}, "
+                    f"proceeding with {len(self._pending_instruments)}/"
+                    f"{len(self._expected_instruments)} instruments "
+                    f"(missing: {missing})"
+                )
+            self._flush_and_publish(self._pending_ts)
+            self._pending_instruments.clear()
+            self._pending_ts = 0
+
     def on_reset(self) -> None:
         """Reset the actor state."""
         if self._engine:
             self._engine.reset()
-        self._last_processed_ts = 0
+        self._pending_ts = 0
+        self._last_flushed_ts = 0
+        self._pending_instruments.clear()
+        self._expected_instruments.clear()
+        self._cancel_flush_alert()
         self._factor_snapshots.clear()
         self.log.info("FactorEngineActor reset")
 
