@@ -103,8 +103,8 @@ class TestTransformTardisTrades:
 
         # Verify loader was called correctly
         assert mock_loader.load_trades.call_count == 2
-        # Verify catalog.write_data was called for each file
-        assert mock_catalog.write_data.call_count == 2
+        # Verify catalog.write_data was called for each file + instrument definition
+        assert mock_catalog.write_data.call_count == 3
 
     @patch("nautilus_quants.data.transform.tardis.ParquetDataCatalog")
     @patch("nautilus_quants.data.transform.tardis.TardisCSVDataLoader")

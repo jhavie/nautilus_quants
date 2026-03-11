@@ -1062,7 +1062,7 @@ def tardis_transform(
         transform_tardis_trades,
     )
 
-    catalog_path = Path(config.paths.catalog)
+    catalog_path = Path(config.transform.catalog_path or config.paths.catalog)
     exchange = config.download.exchange
 
     # Map data_type → (transform function, label)
@@ -1088,6 +1088,10 @@ def tardis_transform(
                 input_dir=input_dir,
                 catalog_path=catalog_path,
                 symbol=sym,
+                maker_fee=config.transform.maker_fee,
+                taker_fee=config.transform.taker_fee,
+                margin_init=config.transform.margin_init,
+                margin_maint=config.transform.margin_maint,
             )
 
             if result.success:

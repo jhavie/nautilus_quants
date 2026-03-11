@@ -13,6 +13,13 @@ download:
   max_symbol_workers: 1                # concurrent symbols (ThreadPoolExecutor)
   proxy: "ssh://aliyun-sg-server"        # optional SSH SOCKS5 tunnel
 
+transform:
+  catalog_path: "data/transform/tardis"  # Parquet catalog output (same as paths.catalog)
+  maker_fee: "0.0002"       # 0.02%
+  taker_fee: "0.0004"       # 0.04%
+  margin_init: "0.05"       # 5% initial margin
+  margin_maint: "0.025"     # 2.5% maintenance margin
+
 paths:
   raw_data: "data/raw/tardis"          # download output directory
   catalog: "data/transform/tardis"       # Parquet catalog directory
