@@ -112,6 +112,7 @@ class TardisDownloadConfig:
     to_date: str = "2024-07-01"
     concurrency: int = 5
     max_symbol_workers: int = 3
+    proxy: str = ""
 
 
 @dataclass(frozen=True)
@@ -304,6 +305,7 @@ def _parse_tardis_download(data: dict) -> TardisDownloadConfig:
         to_date=data.get("to_date", "2024-07-01"),
         concurrency=data.get("concurrency", 5),
         max_symbol_workers=data.get("max_symbol_workers", 3),
+        proxy=data.get("proxy", ""),
     )
 
 
