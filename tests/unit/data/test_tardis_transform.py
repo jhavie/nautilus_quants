@@ -15,6 +15,21 @@ from nautilus_quants.data.transform.tardis import (
 )
 
 
+def _make_trade_mock(
+    ts_init: int = 1704067200000000000,
+    price_precision: int = 2,
+    size_precision: int = 3,
+) -> MagicMock:
+    """Create a trade mock with realistic numeric precision fields."""
+    trade = MagicMock()
+    trade.ts_init = ts_init
+    trade.price = MagicMock()
+    trade.price.precision = price_precision
+    trade.size = MagicMock()
+    trade.size.precision = size_precision
+    return trade
+
+
 class TestTardisTransformResult:
     """Tests for TardisTransformResult dataclass."""
 
@@ -77,7 +92,7 @@ class TestTransformTardisTrades:
         (input_dir / "2024-01-02_BTCUSDT.csv.gz").write_bytes(b"fake")
 
         # Mock loader returns trade objects
-        mock_trades_day1 = [MagicMock() for _ in range(500)]
+        mock_trades_day1 = [_make_trade_mock()] + [MagicMock() for _ in range(499)]
         mock_trades_day2 = [MagicMock() for _ in range(300)]
         mock_loader = MagicMock()
         mock_loader.load_trades.side_effect = [mock_trades_day1, mock_trades_day2]
@@ -124,7 +139,7 @@ class TestTransformTardisTrades:
 
         mock_loader = MagicMock()
         mock_loader.load_trades.side_effect = [
-            [MagicMock() for _ in range(100)],  # First file succeeds
+            [_make_trade_mock()] + [MagicMock() for _ in range(99)],  # First file succeeds
             RuntimeError("Corrupt file"),  # Second file fails
         ]
         mock_loader_cls.return_value = mock_loader
@@ -191,8 +206,9 @@ class TestTransformTardisTrades:
         (input_dir / "2024-01-01_BTCUSDT.csv.gz").write_bytes(b"fake")
         (input_dir / "2024-01-01_ETHUSDT.csv.gz").write_bytes(b"fake")
 
+        trade = _make_trade_mock()
         mock_loader = MagicMock()
-        mock_loader.load_trades.return_value = [MagicMock()]
+        mock_loader.load_trades.return_value = [trade]
         mock_loader_cls.return_value = mock_loader
         mock_catalog_cls.return_value = MagicMock()
         mock_instrument_id_cls.from_str.return_value = MagicMock()

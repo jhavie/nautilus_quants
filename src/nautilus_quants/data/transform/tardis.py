@@ -13,11 +13,7 @@ from nautilus_trader.adapters.tardis.loaders import TardisCSVDataLoader
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
 
-from nautilus_quants.data.transform.parquet import (
-    DEFAULT_PRICE_PRECISION,
-    DEFAULT_QUANTITY_PRECISION,
-    _create_instrument,
-)
+from nautilus_quants.data.transform.parquet import _create_instrument
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +27,6 @@ class TardisTransformResult:
     files_processed: int
     total_ticks: int
     errors: list[str] = field(default_factory=list)
-
-
-def _safe_int(value: object, default: int) -> int:
-    """Best-effort integer coercion with fallback."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def transform_tardis_trades(
@@ -105,15 +93,9 @@ def transform_tardis_trades(
         instrument = _create_instrument(
             symbol=f"{symbol}-PERP",
             venue="BINANCE",
-            ts_init=_safe_int(getattr(first_trade, "ts_init", 0), 0),
-            price_precision=_safe_int(
-                getattr(getattr(first_trade, "price", None), "precision", None),
-                DEFAULT_PRICE_PRECISION,
-            ),
-            size_precision=_safe_int(
-                getattr(getattr(first_trade, "size", None), "precision", None),
-                DEFAULT_QUANTITY_PRECISION,
-            ),
+            ts_init=first_trade.ts_init,
+            price_precision=first_trade.price.precision,
+            size_precision=first_trade.size.precision,
             maker_fee=maker_fee,
             taker_fee=taker_fee,
             margin_init=margin_init,
@@ -192,15 +174,9 @@ def transform_tardis_quotes(
         instrument = _create_instrument(
             symbol=f"{symbol}-PERP",
             venue="BINANCE",
-            ts_init=_safe_int(getattr(first_quote, "ts_init", 0), 0),
-            price_precision=_safe_int(
-                getattr(getattr(first_quote, "bid_price", None), "precision", None),
-                DEFAULT_PRICE_PRECISION,
-            ),
-            size_precision=_safe_int(
-                getattr(getattr(first_quote, "bid_size", None), "precision", None),
-                DEFAULT_QUANTITY_PRECISION,
-            ),
+            ts_init=first_quote.ts_init,
+            price_precision=first_quote.bid_price.precision,
+            size_precision=first_quote.bid_size.precision,
             maker_fee=maker_fee,
             taker_fee=taker_fee,
             margin_init=margin_init,
