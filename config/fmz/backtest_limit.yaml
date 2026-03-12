@@ -1,0 +1,138 @@
+# FMZ 4-Factor Strategy - Limit Order Execution Mode
+#
+# This config switches execution from anchor_px deterministic fills
+# to PostLimitExecAlgorithm (BBO-pegged limit orders with chase + market fallback).
+#
+# Key differences from backtest.yaml:
+#   - book_type: L2_MBP (requires L2 OrderBook data for realistic limit fills)
+#   - engine.exec_algorithms: PostLimitExecAlgorithm registered
+#   - strategy.execution_mode: "limit"
+#   - No SignalCloseFillModel (limit fills via OrderBook matching)
+#
+# Data requirements:
+#   - Bar data (strategy signals): same as backtest.yaml
+#   - OrderBookDelta data (limit matching): Tardis book_snapshot_5 via Feature 023
+#
+# NOTE: First version targets live trading. Backtest accuracy depends on
+#       L2 data availability from Tardis integration (Feature 023).
+
+venues:
+  - name: "BINANCE"
+    oms_type: "HEDGING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+    # L2_MBP enables multi-level OrderBook matching for limit orders
+    book_type: "L2_MBP"
+    bar_execution: true
+    trade_execution: true
+
+data:
+  # Bar data (strategy signal generation - same as backtest.yaml)
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "4h"
+    instrument_ids:
+      - "BTCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "MATICUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+
+  # L2 OrderBook data (limit order matching - requires Tardis Feature 023)
+  # Uncomment when Tardis L2 data is available:
+  # - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/tardis_l2/catalog"
+  #   data_cls: "nautilus_trader.model.data:OrderBookDelta"
+  #   instrument_ids:
+  #     - "BTCUSDT.BINANCE"
+  #     - "ETHUSDT.BINANCE"
+  #     - "BNBUSDT.BINANCE"
+  #     - "SOLUSDT.BINANCE"
+  #     - "ADAUSDT.BINANCE"
+  #     - "DOTUSDT.BINANCE"
+  #     - "AVAXUSDT.BINANCE"
+  #     - "LINKUSDT.BINANCE"
+  #     - "MATICUSDT.BINANCE"
+  #     - "UNIUSDT.BINANCE"
+
+engine:
+  # PostLimitExecAlgorithm - registered via ImportableExecAlgorithmConfig
+  # Nautilus BacktestEngineConfig natively supports exec_algorithms field.
+  # ExecAlgorithmFactory.create() dynamically imports and instantiates.
+  exec_algorithms:
+    - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
+      config_path: "nautilus_quants.execution.post_limit.config:PostLimitExecAlgorithmConfig"
+      config:
+        exec_algorithm_id: "PostLimit"
+        offset_ticks: 0           # 0=BBO pegging, 1=improve 1 tick
+        timeout_secs: 15.0        # Cancel and re-post after 15s
+        max_chase_attempts: 3     # Max chase iterations
+        chase_step_ticks: 1       # Move 1 tick per chase
+        fallback_to_market: true  # Market order after max chase
+        post_only: true           # Maker-only (save fees)
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
+      config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
+      config:
+        execution_mode: "limit"  # Use PostLimitExecAlgorithm
+        instrument_ids:
+          - "BTCUSDT.BINANCE"
+          - "ETHUSDT.BINANCE"
+          - "BNBUSDT.BINANCE"
+          - "SOLUSDT.BINANCE"
+          - "ADAUSDT.BINANCE"
+          - "DOTUSDT.BINANCE"
+          - "AVAXUSDT.BINANCE"
+          - "LINKUSDT.BINANCE"
+          - "MATICUSDT.BINANCE"
+          - "UNIUSDT.BINANCE"
+        n_long: 3
+        n_short: 3
+        position_value: 300
+        rebalance_interval: 1
+        composite_factor: "volume_norm"
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors.yaml"
+        instrument_ids:
+          - "BTCUSDT.BINANCE"
+          - "ETHUSDT.BINANCE"
+          - "BNBUSDT.BINANCE"
+          - "SOLUSDT.BINANCE"
+          - "ADAUSDT.BINANCE"
+          - "DOTUSDT.BINANCE"
+          - "AVAXUSDT.BINANCE"
+          - "LINKUSDT.BINANCE"
+          - "MATICUSDT.BINANCE"
+          - "UNIUSDT.BINANCE"
+
+report:
+  output_dir: "logs/performance_limit"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "FMZ 4-Factor Strategy - Limit Order Execution"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
