@@ -329,6 +329,28 @@ class ReportGenerator:
                 TearsheetConfig as NautilusTearsheetConfig,
                 create_tearsheet_from_stats,
             )
+            from nautilus_trader.analysis.config import (
+                TearsheetChart,
+                TearsheetDistributionChart,
+                TearsheetDrawdownChart,
+                TearsheetEquityChart,
+                TearsheetMonthlyReturnsChart,
+                TearsheetRollingSharpeChart,
+                TearsheetRunInfoChart,
+                TearsheetStatsTableChart,
+                TearsheetYearlyReturnsChart,
+            )
+
+            chart_name_to_class: dict[str, type[TearsheetChart]] = {
+                "run_info": TearsheetRunInfoChart,
+                "stats_table": TearsheetStatsTableChart,
+                "equity": TearsheetEquityChart,
+                "drawdown": TearsheetDrawdownChart,
+                "monthly_returns": TearsheetMonthlyReturnsChart,
+                "distribution": TearsheetDistributionChart,
+                "rolling_sharpe": TearsheetRollingSharpeChart,
+                "yearly_returns": TearsheetYearlyReturnsChart,
+            }
 
             tearsheet_path = self.output_dir / "tearsheet.html"
 
@@ -360,6 +382,14 @@ class ReportGenerator:
                 for currency, balance in account.balances_total().items():
                     account_info[f"Ending Balance ({currency})"] = f"{balance.as_double():.2f} {currency}"
 
+            # Convert str chart names → TearsheetChart instances
+            chart_objects: list[TearsheetChart] = []
+            for name in tearsheet_config.charts:
+                chart_cls = chart_name_to_class.get(name)
+                if chart_cls is not None:
+                    chart_kwargs = tearsheet_config.chart_args.get(name, {})
+                    chart_objects.append(chart_cls(**chart_kwargs))
+
             # Create tearsheet config
             config = NautilusTearsheetConfig(
                 title=tearsheet_config.title,
@@ -367,7 +397,7 @@ class ReportGenerator:
                 height=tearsheet_config.height,
                 show_logo=tearsheet_config.show_logo,
                 include_benchmark=tearsheet_config.include_benchmark,
-                charts=tearsheet_config.charts,
+                charts=chart_objects,
             )
 
             # Use create_tearsheet_from_stats with our filtered returns

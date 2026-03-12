@@ -112,6 +112,7 @@ class TardisDownloadConfig:
     to_date: str = "2024-07-01"
     concurrency: int = 5
     max_symbol_workers: int = 3
+    proxy: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,13 +124,22 @@ class TardisPathsConfig:
 
 
 @dataclass(frozen=True)
-class TardisPipelineConfig:
-    """Complete Tardis pipeline configuration.
+class TardisTransformConfig:
+    """Transform configuration for Tardis instrument creation."""
 
-    No transform config needed — TardisCSVDataLoader infers precision automatically.
-    """
+    catalog_path: str = ""
+    maker_fee: str = "0.0002"
+    taker_fee: str = "0.0004"
+    margin_init: str = "0.05"
+    margin_maint: str = "0.025"
+
+
+@dataclass(frozen=True)
+class TardisPipelineConfig:
+    """Complete Tardis pipeline configuration."""
 
     download: TardisDownloadConfig = TardisDownloadConfig()
+    transform: TardisTransformConfig = TardisTransformConfig()
     paths: TardisPathsConfig = TardisPathsConfig()
 
 
@@ -304,6 +314,18 @@ def _parse_tardis_download(data: dict) -> TardisDownloadConfig:
         to_date=data.get("to_date", "2024-07-01"),
         concurrency=data.get("concurrency", 5),
         max_symbol_workers=data.get("max_symbol_workers", 3),
+        proxy=data.get("proxy", ""),
+    )
+
+
+def _parse_tardis_transform(data: dict) -> TardisTransformConfig:
+    """Parse Tardis transform configuration from dict."""
+    return TardisTransformConfig(
+        catalog_path=data.get("catalog_path", ""),
+        maker_fee=data.get("maker_fee", "0.0002"),
+        taker_fee=data.get("taker_fee", "0.0004"),
+        margin_init=data.get("margin_init", "0.05"),
+        margin_maint=data.get("margin_maint", "0.025"),
     )
 
 
@@ -347,6 +369,7 @@ def load_tardis_config(
 
     return TardisPipelineConfig(
         download=_parse_tardis_download(data.get("download", {})),
+        transform=_parse_tardis_transform(data.get("transform", {})),
         paths=_parse_tardis_paths(data.get("paths", {})),
     )
 

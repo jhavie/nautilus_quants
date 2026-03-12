@@ -1036,7 +1036,7 @@ def tardis_transform(
     config_path: str,
     symbol: Optional[str],
 ) -> None:
-    """Transform Tardis CSV trade data to NautilusTrader Parquet format."""
+    """Transform Tardis CSV data to NautilusTrader Parquet format."""
     overrides: dict[str, str] = {}
     if symbol:
         overrides["download.symbols"] = symbol
@@ -1048,35 +1048,59 @@ def tardis_transform(
         ctx.exit(EXIT_CONFIG_ERROR)
         return
 
+    data_types = list(config.download.data_types)
+
     if ctx.obj.get("dry_run"):
         click.echo("DRY RUN: Would transform Tardis data:")
         click.echo(f"  Symbols: {list(config.download.symbols)}")
-        click.echo(f"  Input: {config.paths.raw_data}/{config.download.exchange}/trades/")
+        click.echo(f"  Data types: {data_types}")
         click.echo(f"  Catalog: {config.paths.catalog}")
         return
 
-    from nautilus_quants.data.transform.tardis import transform_tardis_trades
+    from nautilus_quants.data.transform.tardis import (
+        transform_tardis_quotes,
+        transform_tardis_trades,
+    )
 
-    input_dir = Path(config.paths.raw_data) / config.download.exchange / "trades"
-    catalog_path = Path(config.paths.catalog)
+    catalog_path = Path(config.transform.catalog_path or config.paths.catalog)
+    exchange = config.download.exchange
+
+    # Map data_type → (transform function, label)
+    transform_map = {
+        "trades": (transform_tardis_trades, "trade ticks"),
+        "quotes": (transform_tardis_quotes, "quote ticks"),
+    }
 
     has_errors = False
-    for sym in config.download.symbols:
-        click.echo(f"Transforming {sym}...")
-
-        result = transform_tardis_trades(
-            input_dir=input_dir,
-            catalog_path=catalog_path,
-            symbol=sym,
-        )
-
-        if result.success:
-            click.echo(
-                f"  \u2713 {result.total_ticks} ticks from {result.files_processed} file(s)"
-            )
-        else:
-            click.echo(f"  \u2717 Failed: {result.errors}", err=True)
+    for data_type in data_types:
+        if data_type not in transform_map:
+            click.echo(f"Unknown data type: {data_type}", err=True)
             has_errors = True
+            continue
+
+        transform_fn, label = transform_map[data_type]
+        input_dir = Path(config.paths.raw_data) / exchange / data_type
+
+        for sym in config.download.symbols:
+            click.echo(f"Transforming {sym} {data_type}...")
+
+            result = transform_fn(
+                input_dir=input_dir,
+                catalog_path=catalog_path,
+                symbol=sym,
+                maker_fee=config.transform.maker_fee,
+                taker_fee=config.transform.taker_fee,
+                margin_init=config.transform.margin_init,
+                margin_maint=config.transform.margin_maint,
+            )
+
+            if result.success:
+                click.echo(
+                    f"  \u2713 {result.total_ticks} {label} from {result.files_processed} file(s)"
+                )
+            else:
+                click.echo(f"  \u2717 Failed: {result.errors}", err=True)
+                has_errors = True
 
     if has_errors:
         ctx.exit(EXIT_TRANSFORM_ERROR)
