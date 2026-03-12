@@ -38,6 +38,7 @@ from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
 )
+from nautilus_quants.common.limit_order_execution import LimitOrderExecutionMixin
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.worldquant.metadata import WorldQuantMetadataProvider
 
@@ -92,6 +93,7 @@ class WorldQuantAlphaConfig(StrategyConfig, frozen=True):
     enable_long: bool = True
     enable_short: bool = True
     bar_types: list[str] = []
+    execution_mode: str = "anchor"  # "anchor" | "limit"
 
 
 @dataclass
@@ -107,6 +109,7 @@ class _PendingWorldQuantRebalance:
 
 class WorldQuantAlphaStrategy(
     AnchorPriceExecutionMixin,
+    LimitOrderExecutionMixin,
     EventTimePendingExecutionMixin[_PendingWorldQuantRebalance],
     BarSubscriptionMixin,
     Strategy,
@@ -713,13 +716,22 @@ class WorldQuantAlphaStrategy(
         except ValueError:
             return False
 
-        params = self._anchor_params(exec_price)
+        use_limit = self.config.execution_mode == "limit"
+        if use_limit:
+            from nautilus_trader.model.identifiers import ExecAlgorithmId
+            algo_id = ExecAlgorithmId("PostLimit")
+            params = {"anchor_px": str(exec_price)}
+        else:
+            algo_id = None
+            params = self._anchor_params(exec_price)
+
         if delta_qty > 0:
             # Increase position in the same direction
             order = self.order_factory.market(
                 instrument_id=instrument_id,
                 order_side=side,
                 quantity=qty,
+                exec_algorithm_id=algo_id,
                 exec_algorithm_params=params,
             )
             self.submit_order(order, position_id=pid)
@@ -735,6 +747,7 @@ class WorldQuantAlphaStrategy(
                 order_side=order_side,
                 quantity=qty,
                 reduce_only=True,
+                exec_algorithm_id=algo_id,
                 exec_algorithm_params=params,
             )
             self.submit_order(order, position_id=pid)
@@ -770,7 +783,10 @@ class WorldQuantAlphaStrategy(
             # Quantity rounds to zero (e.g. high-priced instruments with integer lot size)
             return False
 
-        self._submit_anchor_open(instrument_id, side, qty, exec_price, position_id)
+        if self.config.execution_mode == "limit":
+            self._submit_limit_open(instrument_id, side, qty, exec_price, position_id)
+        else:
+            self._submit_anchor_open(instrument_id, side, qty, exec_price, position_id)
         self.log.debug(
             f"OPEN {side.name} {instrument_id_str}: qty={qty}, value={target_value:.2f}"
         )
@@ -785,7 +801,10 @@ class WorldQuantAlphaStrategy(
         """Close all positions for an instrument with deterministic anchor pricing."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
         self._metadata_provider.record_close(instrument_id_str, reason, self._signal_count)
-        self._close_instrument_positions(instrument_id, exec_price)
+        if self.config.execution_mode == "limit":
+            self._close_instrument_positions_limit(instrument_id, exec_price)
+        else:
+            self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
@@ -802,7 +821,10 @@ class WorldQuantAlphaStrategy(
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, signal_count=self._signal_count,
             )
-            self._submit_anchor_close(position, latest_closes.get(inst_id))
+            if self.config.execution_mode == "limit":
+                self._submit_limit_close(position, latest_closes.get(inst_id))
+            else:
+                self._submit_anchor_close(position, latest_closes.get(inst_id))
             self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()

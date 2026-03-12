@@ -23,6 +23,8 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
+from nautilus_quants.common.limit_order_execution import LimitOrderExecutionMixin
+
 if TYPE_CHECKING:
     from nautilus_trader.model.instruments import Instrument
 
@@ -66,9 +68,10 @@ class FactorStrategyConfig(StrategyConfig, frozen=True):
     bar_type: str = ""
     sma_period: int = 200
     exit_bars_below_sma: int = 5
+    execution_mode: str = "market"  # "market" | "post_limit"
 
 
-class FactorStrategy(Strategy):
+class FactorStrategy(LimitOrderExecutionMixin, Strategy):
     """
     Strategy that consumes factor signals via CustomData.
 
@@ -330,12 +333,15 @@ class FactorStrategy(Strategy):
         raw_qty = self._calculate_quantity(price)
         qty = self.instrument.make_qty(raw_qty)
 
-        order = self.order_factory.market(
-            instrument_id=self.instrument_id,
-            order_side=OrderSide.BUY,
-            quantity=qty,
-        )
-        self.submit_order(order)
+        if self.config.execution_mode == "post_limit":
+            self._submit_limit_open(self.instrument_id, OrderSide.BUY, qty, price)
+        else:
+            order = self.order_factory.market(
+                instrument_id=self.instrument_id,
+                order_side=OrderSide.BUY,
+                quantity=qty,
+            )
+            self.submit_order(order)
 
         self.log.info(
             f"OPEN LONG @ {price:.2f}, qty={qty}, amount={self.config.order_amount} USDT"
@@ -362,12 +368,15 @@ class FactorStrategy(Strategy):
         raw_qty = self._calculate_quantity(price)
         qty = self.instrument.make_qty(raw_qty)
 
-        order = self.order_factory.market(
-            instrument_id=self.instrument_id,
-            order_side=OrderSide.SELL,
-            quantity=qty,
-        )
-        self.submit_order(order)
+        if self.config.execution_mode == "post_limit":
+            self._submit_limit_open(self.instrument_id, OrderSide.SELL, qty, price)
+        else:
+            order = self.order_factory.market(
+                instrument_id=self.instrument_id,
+                order_side=OrderSide.SELL,
+                quantity=qty,
+            )
+            self.submit_order(order)
 
         self.log.info(
             f"OPEN SHORT @ {price:.2f}, qty={qty}, amount={self.config.order_amount} USDT"
@@ -424,6 +433,11 @@ class FactorStrategy(Strategy):
         self.position_side = None
 
         # Now safe to close
-        self.close_all_positions(self.instrument_id)
+        if self.config.execution_mode == "post_limit":
+            self._close_instrument_positions_limit(
+                self.instrument_id, self._current_close
+            )
+        else:
+            self.close_all_positions(self.instrument_id)
         entry_str = f"{entry:.2f}" if entry else "N/A"
         self.log.info(f"CLOSE ({side}): {reason} @ entry {entry_str}")
