@@ -6,10 +6,12 @@ from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
 )
 from nautilus_quants.common.event_time_price_book import EventTimePriceBook
+from nautilus_quants.common.limit_order_execution import LimitOrderExecutionMixin
 
 __all__ = [
     "AnchorPriceExecutionMixin",
     "BarSubscriptionMixin",
     "EventTimePendingExecutionMixin",
     "EventTimePriceBook",
+    "LimitOrderExecutionMixin",
 ]
