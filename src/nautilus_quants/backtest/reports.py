@@ -9,6 +9,7 @@ import pandas as pd
 from nautilus_quants.backtest.exceptions import BacktestReportError
 from nautilus_quants.backtest.protocols import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
+    EXECUTION_STATES_CACHE_KEY,
     FACTOR_VALUES_CACHE_KEY,
     POSITION_MARKET_VALUES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
@@ -174,6 +175,11 @@ class ReportGenerator:
         factor_csv_path = self.generate_factor_values_csv()
         if factor_csv_path:
             reports["factor_values"] = factor_csv_path
+
+        # Generate execution report CSV if PostLimit data is available
+        execution_csv_path = self.generate_execution_report_csv()
+        if execution_csv_path:
+            reports["execution_report"] = execution_csv_path
 
         return reports
 
@@ -780,6 +786,73 @@ class ReportGenerator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame(rows)
         csv_path = self.output_dir / "factor_values_report.csv"
+        df.to_csv(csv_path, index=False)
+        return csv_path
+
+    def generate_execution_report_csv(self) -> Path | None:
+        """Generate CSV of per-order execution states from PostLimitExecAlgorithm.
+
+        Reads pickled OrderExecutionState dict from engine cache and writes a
+        flat CSV with one row per execution sequence.
+
+        Returns:
+            Path to CSV file, or None if no execution state data available.
+        """
+        import pickle
+
+        try:
+            data = self.engine.cache.get(EXECUTION_STATES_CACHE_KEY)
+        except Exception:
+            return None
+
+        if not data:
+            return None
+
+        try:
+            states: dict = pickle.loads(data)
+        except Exception:
+            return None
+
+        if not states:
+            return None
+
+        rows: list[dict] = []
+        for state in states.values():
+            filled_qty = float(state.filled_quantity) if state.filled_quantity is not None else 0.0
+            total_qty = float(state.total_quantity)
+            fill_ratio = filled_qty / total_qty if total_qty > 0 else 0.0
+            elapsed_ms = (
+                (state.completed_ns - state.created_ns) / 1_000_000
+                if state.completed_ns > 0 and state.created_ns > 0
+                else 0.0
+            )
+
+            rows.append({
+                "primary_order_id": str(state.primary_order_id),
+                "instrument_id": str(state.instrument_id),
+                "side": state.side.name,
+                "total_quantity": total_qty,
+                "filled_quantity": filled_qty,
+                "fill_ratio": round(fill_ratio, 6),
+                "anchor_px": state.anchor_px,
+                "last_limit_price": state.last_limit_price,
+                "reduce_only": state.reduce_only,
+                "final_state": state.state.value,
+                "chase_count": state.chase_count,
+                "limit_orders_submitted": state.limit_orders_submitted,
+                "used_market_fallback": state.used_market_fallback,
+                "created_ns": state.created_ns,
+                "completed_ns": state.completed_ns,
+                "elapsed_ms": round(elapsed_ms, 3),
+                "timeout_secs": state.timeout_secs,
+                "max_chase_attempts": state.max_chase_attempts,
+                "chase_step_ticks": state.chase_step_ticks,
+                "post_only": state.post_only,
+            })
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame(rows)
+        csv_path = self.output_dir / "execution_report.csv"
         df.to_csv(csv_path, index=False)
         return csv_path
 
