@@ -31,6 +31,7 @@ def _make_state(
     chase_count: int = 0,
     limit_orders_submitted: int = 1,
     last_limit_price: float = 49999.0,
+    fill_cost: float = 0.0,
     reduce_only: bool = False,
     created_ns: int = 1_000_000_000,
     completed_ns: int = 2_000_000_000,
@@ -52,6 +53,7 @@ def _make_state(
         chase_count=chase_count,
         limit_orders_submitted=limit_orders_submitted,
         last_limit_price=last_limit_price,
+        fill_cost=fill_cost,
         created_ns=created_ns,
         completed_ns=completed_ns,
         used_market_fallback=used_market_fallback,
@@ -116,6 +118,7 @@ class TestGenerateExecutionReportCsv:
                 limit_orders_submitted=2,
                 anchor_px=50000.0,
                 last_limit_price=50001.0,
+                fill_cost=99998.0,  # avg_fill_px = 99998/2 = 49999
                 created_ns=1_000_000_000,
                 completed_ns=1_500_000_000,
             ),
@@ -126,6 +129,7 @@ class TestGenerateExecutionReportCsv:
                 filled_qty="0.5",
                 anchor_px=60000.0,
                 last_limit_price=59999.0,
+                fill_cost=30001.0,  # avg_fill_px = 30001/0.5 = 60002
                 reduce_only=True,
                 state=OrderState.COMPLETED,
                 created_ns=2_000_000_000,
@@ -160,6 +164,9 @@ class TestGenerateExecutionReportCsv:
             "fill_ratio",
             "anchor_px",
             "last_limit_price",
+            "avg_fill_px",
+            "slippage",
+            "slippage_bps",
             "reduce_only",
             "final_state",
             "chase_count",
@@ -250,3 +257,150 @@ class TestGenerateExecutionReportCsv:
         reports = generator.generate_all()
 
         assert "execution_report" not in reports
+
+
+class TestSlippageCalculation:
+    """Tests for avg_fill_px, slippage, and slippage_bps columns."""
+
+    def test_buy_negative_slippage_price_improvement(self, tmp_path: Path) -> None:
+        """BUY filled below anchor -> negative slippage (favorable)."""
+        # anchor=2045, avg_fill=2044 -> slippage = 2044 - 2045 = -1
+        states = {
+            ClientOrderId("O-BUY"): _make_state(
+                order_id="O-BUY",
+                side=OrderSide.BUY,
+                total_qty="1.0",
+                filled_qty="1.0",
+                anchor_px=2045.0,
+                fill_cost=2044.0,  # avg_fill_px = 2044
+            ),
+        }
+        data = pickle.dumps(states)
+        generator = _make_generator(tmp_path, cache_data=data)
+        result = generator.generate_execution_report_csv()
+
+        with open(result) as f:
+            row = list(csv.DictReader(f))[0]
+
+        assert float(row["avg_fill_px"]) == pytest.approx(2044.0)
+        assert float(row["slippage"]) == pytest.approx(-1.0)
+        assert float(row["slippage_bps"]) == pytest.approx(-1.0 / 2045.0 * 10000, abs=0.01)
+
+    def test_buy_positive_slippage_adverse(self, tmp_path: Path) -> None:
+        """BUY filled above anchor -> positive slippage (adverse)."""
+        # anchor=2045, avg_fill=2046 -> slippage = 2046 - 2045 = +1
+        states = {
+            ClientOrderId("O-BUY2"): _make_state(
+                order_id="O-BUY2",
+                side=OrderSide.BUY,
+                total_qty="1.0",
+                filled_qty="1.0",
+                anchor_px=2045.0,
+                fill_cost=2046.0,  # avg_fill_px = 2046
+            ),
+        }
+        data = pickle.dumps(states)
+        generator = _make_generator(tmp_path, cache_data=data)
+        result = generator.generate_execution_report_csv()
+
+        with open(result) as f:
+            row = list(csv.DictReader(f))[0]
+
+        assert float(row["avg_fill_px"]) == pytest.approx(2046.0)
+        assert float(row["slippage"]) == pytest.approx(1.0)
+        assert float(row["slippage_bps"]) > 0
+
+    def test_sell_negative_slippage_price_improvement(self, tmp_path: Path) -> None:
+        """SELL filled above anchor -> negative slippage (favorable)."""
+        # anchor=2023, avg_fill=2024 -> slippage = 2023 - 2024 = -1
+        states = {
+            ClientOrderId("O-SELL"): _make_state(
+                order_id="O-SELL",
+                side=OrderSide.SELL,
+                total_qty="1.0",
+                filled_qty="1.0",
+                anchor_px=2023.0,
+                fill_cost=2024.0,  # avg_fill_px = 2024
+            ),
+        }
+        data = pickle.dumps(states)
+        generator = _make_generator(tmp_path, cache_data=data)
+        result = generator.generate_execution_report_csv()
+
+        with open(result) as f:
+            row = list(csv.DictReader(f))[0]
+
+        assert float(row["avg_fill_px"]) == pytest.approx(2024.0)
+        assert float(row["slippage"]) == pytest.approx(-1.0)
+        assert float(row["slippage_bps"]) < 0
+
+    def test_sell_positive_slippage_adverse(self, tmp_path: Path) -> None:
+        """SELL filled below anchor -> positive slippage (adverse)."""
+        # anchor=2023, avg_fill=2022 -> slippage = 2023 - 2022 = +1
+        states = {
+            ClientOrderId("O-SELL2"): _make_state(
+                order_id="O-SELL2",
+                side=OrderSide.SELL,
+                total_qty="1.0",
+                filled_qty="1.0",
+                anchor_px=2023.0,
+                fill_cost=2022.0,  # avg_fill_px = 2022
+            ),
+        }
+        data = pickle.dumps(states)
+        generator = _make_generator(tmp_path, cache_data=data)
+        result = generator.generate_execution_report_csv()
+
+        with open(result) as f:
+            row = list(csv.DictReader(f))[0]
+
+        assert float(row["avg_fill_px"]) == pytest.approx(2022.0)
+        assert float(row["slippage"]) == pytest.approx(1.0)
+        assert float(row["slippage_bps"]) > 0
+
+    def test_zero_filled_qty_gives_zero_slippage(self, tmp_path: Path) -> None:
+        """Zero filled quantity -> avg_fill_px=0, slippage=0, slippage_bps=0."""
+        states = {
+            ClientOrderId("O-ZERO"): _make_state(
+                order_id="O-ZERO",
+                filled_qty="0.0",
+                anchor_px=50000.0,
+                fill_cost=0.0,
+                state=OrderState.FAILED,
+            ),
+        }
+        data = pickle.dumps(states)
+        generator = _make_generator(tmp_path, cache_data=data)
+        result = generator.generate_execution_report_csv()
+
+        with open(result) as f:
+            row = list(csv.DictReader(f))[0]
+
+        assert float(row["avg_fill_px"]) == 0.0
+        assert float(row["slippage"]) == 0.0
+        assert float(row["slippage_bps"]) == 0.0
+
+    def test_multi_fill_vwap(self, tmp_path: Path) -> None:
+        """Multiple fills: fill_cost accumulates correctly for VWAP."""
+        # 2 fills: 0.5 @ 2044 + 0.5 @ 2046 -> fill_cost = 1022 + 1023 = 2045
+        # avg_fill_px = 2045 / 1.0 = 2045, anchor = 2045 -> slippage = 0
+        states = {
+            ClientOrderId("O-MULTI"): _make_state(
+                order_id="O-MULTI",
+                side=OrderSide.BUY,
+                total_qty="1.0",
+                filled_qty="1.0",
+                anchor_px=2045.0,
+                fill_cost=2045.0,  # avg_fill_px = 2045
+            ),
+        }
+        data = pickle.dumps(states)
+        generator = _make_generator(tmp_path, cache_data=data)
+        result = generator.generate_execution_report_csv()
+
+        with open(result) as f:
+            row = list(csv.DictReader(f))[0]
+
+        assert float(row["avg_fill_px"]) == pytest.approx(2045.0)
+        assert float(row["slippage"]) == pytest.approx(0.0)
+        assert float(row["slippage_bps"]) == pytest.approx(0.0)

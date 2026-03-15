@@ -82,6 +82,7 @@ class OrderExecutionState:
     limit_orders_submitted: int = 0
     last_limit_price: float = 0.0
     filled_quantity: Quantity | None = None
+    fill_cost: float = 0.0  # Cumulative sum(fill_px * fill_qty) for VWAP calculation
 
     def __post_init__(self) -> None:
         if self.filled_quantity is None:

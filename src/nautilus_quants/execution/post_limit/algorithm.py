@@ -502,8 +502,10 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if state is None:
             return
 
-        # Update filled quantity
+        # Update filled quantity and cost
         fill_qty = event.last_qty
+        fill_px = float(event.last_px)
+        state.fill_cost += fill_px * float(fill_qty)
         state.filled_quantity = Quantity(
             state.filled_quantity + fill_qty,
             state.filled_quantity.precision,

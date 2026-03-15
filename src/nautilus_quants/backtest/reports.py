@@ -816,6 +816,8 @@ class ReportGenerator:
         if not states:
             return None
 
+        from nautilus_trader.model.enums import OrderSide
+
         rows: list[dict] = []
         for state in states.values():
             filled_qty = float(state.filled_quantity) if state.filled_quantity is not None else 0.0
@@ -827,6 +829,20 @@ class ReportGenerator:
                 else 0.0
             )
 
+            # Compute avg_fill_px (VWAP) and slippage (Implementation Shortfall)
+            fill_cost = getattr(state, "fill_cost", 0.0)
+            avg_fill_px = fill_cost / filled_qty if filled_qty > 0 else 0.0
+
+            if filled_qty > 0 and state.anchor_px > 0:
+                if state.side == OrderSide.BUY:
+                    slippage = avg_fill_px - state.anchor_px
+                else:  # SELL
+                    slippage = state.anchor_px - avg_fill_px
+                slippage_bps = (slippage / state.anchor_px) * 10000
+            else:
+                slippage = 0.0
+                slippage_bps = 0.0
+
             rows.append({
                 "primary_order_id": str(state.primary_order_id),
                 "instrument_id": str(state.instrument_id),
@@ -836,6 +852,9 @@ class ReportGenerator:
                 "fill_ratio": round(fill_ratio, 6),
                 "anchor_px": state.anchor_px,
                 "last_limit_price": state.last_limit_price,
+                "avg_fill_px": round(avg_fill_px, 8),
+                "slippage": round(slippage, 8),
+                "slippage_bps": round(slippage_bps, 4),
                 "reduce_only": state.reduce_only,
                 "final_state": state.state.value,
                 "chase_count": state.chase_count,

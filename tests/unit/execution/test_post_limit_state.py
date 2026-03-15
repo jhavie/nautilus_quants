@@ -242,6 +242,7 @@ class TestOrderExecutionStateProperties:
         assert s.timer_name == ""
         assert s.limit_orders_submitted == 0
         assert s.last_limit_price == 0.0
+        assert s.fill_cost == 0.0
         assert s.timeout_secs is None
         assert s.max_chase_attempts is None
         assert s.chase_step_ticks is None
