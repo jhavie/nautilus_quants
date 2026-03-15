@@ -95,7 +95,7 @@ engine:
         enable_short: false
         sma_period: 30
         exit_bars_below_sma: 3
-        bar_type: "ETHUSDT-PERP.BINANCE-1-MINUTE-LAST-INTERNAL"
+        bar_type: "ETHUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
 
 report:
   output_dir: "logs/backtest_runs"
