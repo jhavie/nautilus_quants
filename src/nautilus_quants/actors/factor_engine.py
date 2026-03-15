@@ -18,6 +18,7 @@ Constitution Compliance:
 
 from __future__ import annotations
 
+import pandas as pd
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
@@ -380,12 +381,12 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._cancel_flush_alert()
         # Use clock.timestamp_ns() (not bar ts_event) so the timeout is
         # relative to wall-clock in live and simulated time in backtest.
-        alert_time_ns = (
+        alert_time_ns = int(
             self.clock.timestamp_ns() + self._config.flush_timeout_secs * 1_000_000_000
         )
         self.clock.set_time_alert(
             name=self._flush_alert_name,
-            alert_time=alert_time_ns,
+            alert_time=pd.Timestamp(alert_time_ns, unit="ns"),
             callback=self._on_flush_timeout,
         )
 
