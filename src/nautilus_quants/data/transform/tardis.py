@@ -6,12 +6,14 @@ and writes to ParquetDataCatalog for backtesting.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from nautilus_trader.adapters.tardis.loaders import TardisCSVDataLoader
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
+from tqdm import tqdm
 
 from nautilus_quants.data.transform.parquet import _create_instrument
 
@@ -192,3 +194,88 @@ def transform_tardis_quotes(
         total_ticks=total_ticks,
         errors=errors,
     )
+
+
+def transform_all(
+    raw_data_dir: Path,
+    catalog_path: Path,
+    exchange: str,
+    symbols: list[str],
+    data_types: list[str],
+    maker_fee: str = "0.0002",
+    taker_fee: str = "0.0004",
+    margin_init: str = "0.05",
+    margin_maint: str = "0.025",
+    max_workers: int = 3,
+) -> list[TardisTransformResult]:
+    """Transform all (symbol, data_type) pairs with concurrent workers.
+
+    Each worker gets its own TardisCSVDataLoader and ParquetDataCatalog
+    instance.  Different symbols write to different Parquet partitions
+    so no locking is needed.
+
+    Args:
+        raw_data_dir: Root raw data directory (e.g., data/raw/tardis)
+        catalog_path: NautilusTrader Parquet catalog directory
+        exchange: Exchange identifier (e.g., "binance-futures")
+        symbols: List of symbols to transform
+        data_types: List of data types ("trades", "quotes")
+        maker_fee: Maker fee rate
+        taker_fee: Taker fee rate
+        margin_init: Initial margin rate
+        margin_maint: Maintenance margin rate
+        max_workers: Maximum concurrent transform threads
+
+    Returns:
+        List of TardisTransformResult, one per (symbol, data_type).
+    """
+    transform_map = {
+        "trades": transform_tardis_trades,
+        "quotes": transform_tardis_quotes,
+    }
+
+    work_units = [
+        (sym, dt) for sym in symbols for dt in data_types if dt in transform_map
+    ]
+
+    bar = tqdm(total=len(work_units), desc="Transforming", unit="task")
+    results: list[TardisTransformResult] = []
+
+    def _run(sym: str, data_type: str) -> TardisTransformResult:
+        input_dir = Path(raw_data_dir) / exchange / data_type
+        return transform_map[data_type](
+            input_dir=input_dir,
+            catalog_path=catalog_path,
+            symbol=sym,
+            maker_fee=maker_fee,
+            taker_fee=taker_fee,
+            margin_init=margin_init,
+            margin_maint=margin_maint,
+        )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_run, sym, dt): (sym, dt) for sym, dt in work_units
+        }
+
+        for future in as_completed(futures):
+            sym, dt = futures[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                result = TardisTransformResult(
+                    success=False,
+                    symbol=f"{sym}/{dt}",
+                    files_processed=0,
+                    total_ticks=0,
+                    errors=[str(e)],
+                )
+
+            results.append(result)
+            status = "\u2713" if result.success else "\u2717"
+            detail = f"{result.total_ticks} ticks" if result.success else result.errors
+            tqdm.write(f"  {status} {sym}/{dt}: {detail}")
+            bar.update(1)
+
+    bar.close()
+    return results

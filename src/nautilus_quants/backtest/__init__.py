@@ -20,6 +20,7 @@ from nautilus_quants.backtest.exceptions import (
 )
 from nautilus_quants.backtest.protocols import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
+    EXECUTION_STATES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
     BaseMetadataRenderer,
     ColumnConfig,
@@ -39,6 +40,7 @@ __all__ = [
     "QuantStatsConfig",
     # Protocols and Registry
     "EQUITY_SNAPSHOTS_CACHE_KEY",
+    "EXECUTION_STATES_CACHE_KEY",
     "POSITION_METADATA_CACHE_KEY",
     "PositionMetadataProvider",
     "MetadataRenderer",

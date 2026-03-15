@@ -7,6 +7,7 @@ Supports multi-symbol concurrent downloads with ThreadPoolExecutor.
 
 import logging
 import os
+import resource
 import shutil
 import socket
 import subprocess
@@ -164,6 +165,9 @@ class TardisDownloader:
         Returns:
             List of TardisDownloadResult, one per (symbol, data_type).
         """
+        # Raise fd limit to avoid "Too many open files" with concurrent downloads
+        _raise_fd_limit()
+
         proxy_url = self._config.proxy
         ctx = SocksProxy(proxy_url) if proxy_url else nullcontext()
 
@@ -253,3 +257,20 @@ class TardisDownloader:
         target = Path(self._paths.raw_data) / self._config.exchange
         if target.exists():
             shutil.rmtree(target)
+
+
+_MIN_FD_LIMIT = 10240
+
+
+def _raise_fd_limit(target: int = _MIN_FD_LIMIT) -> None:
+    """Raise the open file descriptor soft limit if below target.
+
+    Concurrent downloads with SOCKS proxy can easily exhaust the
+    macOS default of 256.  This is a no-op if already high enough.
+    """
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft >= target:
+        return
+    new_soft = min(target, hard)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+    logger.info("Raised fd limit: %d → %d (hard=%d)", soft, new_soft, hard)

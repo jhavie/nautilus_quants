@@ -36,6 +36,7 @@ from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
 )
+from nautilus_quants.common.limit_order_execution import LimitOrderExecutionMixin
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.cross_sectional.metadata import CrossSectionalMetadataProvider
 
@@ -86,10 +87,12 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
     buffer_ratio: float = 0.5
     target_leverage: float = 4.0
     monthly_position_update: bool = True
+    execution_mode: str = "anchor"  # "anchor" | "post_limit"
 
 
 class CrossSectionalFactorStrategy(
     AnchorPriceExecutionMixin,
+    LimitOrderExecutionMixin,
     EventTimePendingExecutionMixin[list[tuple[str, float]]],
     BarSubscriptionMixin,
     Strategy,
@@ -496,7 +499,10 @@ class CrossSectionalFactorStrategy(
             ts_event=ts_event or 0,
         )
 
-        self._submit_anchor_open(instrument_id, side, qty, exec_price)
+        if self.config.execution_mode == "post_limit":
+            self._submit_limit_open(instrument_id, side, qty, exec_price)
+        else:
+            self._submit_anchor_open(instrument_id, side, qty, exec_price)
 
         return True
 
@@ -531,7 +537,10 @@ class CrossSectionalFactorStrategy(
             hour_count=self._hour_count,
         )
 
-        self._close_instrument_positions(instrument_id, exec_price)
+        if self.config.execution_mode == "post_limit":
+            self._close_instrument_positions_limit(instrument_id, exec_price)
+        else:
+            self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
@@ -548,7 +557,10 @@ class CrossSectionalFactorStrategy(
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
             )
-            self._submit_anchor_close(position, latest_closes.get(inst_id))
+            if self.config.execution_mode == "post_limit":
+                self._submit_limit_close(position, latest_closes.get(inst_id))
+            else:
+                self._submit_anchor_close(position, latest_closes.get(inst_id))
             self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()

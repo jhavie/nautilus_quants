@@ -132,6 +132,7 @@ class TardisTransformConfig:
     taker_fee: str = "0.0004"
     margin_init: str = "0.05"
     margin_maint: str = "0.025"
+    max_workers: int = 3
 
 
 @dataclass(frozen=True)
@@ -326,6 +327,7 @@ def _parse_tardis_transform(data: dict) -> TardisTransformConfig:
         taker_fee=data.get("taker_fee", "0.0004"),
         margin_init=data.get("margin_init", "0.05"),
         margin_maint=data.get("margin_maint", "0.025"),
+        max_workers=data.get("max_workers", 3),
     )
 
 
@@ -424,5 +426,33 @@ def config_to_dict(config: PipelineConfig) -> dict:
             "processed_data": config.paths.processed_data,
             "catalog": config.paths.catalog,
             "logs": config.paths.logs,
+        },
+    }
+
+
+def tardis_config_to_dict(config: TardisPipelineConfig) -> dict:
+    """Convert TardisPipelineConfig to dictionary for serialization."""
+    return {
+        "download": {
+            "exchange": config.download.exchange,
+            "symbols": list(config.download.symbols),
+            "data_types": list(config.download.data_types),
+            "from_date": config.download.from_date,
+            "to_date": config.download.to_date,
+            "concurrency": config.download.concurrency,
+            "max_symbol_workers": config.download.max_symbol_workers,
+            "proxy": config.download.proxy,
+        },
+        "transform": {
+            "catalog_path": config.transform.catalog_path,
+            "maker_fee": config.transform.maker_fee,
+            "taker_fee": config.transform.taker_fee,
+            "margin_init": config.transform.margin_init,
+            "margin_maint": config.transform.margin_maint,
+            "max_workers": config.transform.max_workers,
+        },
+        "paths": {
+            "raw_data": config.paths.raw_data,
+            "catalog": config.paths.catalog,
         },
     }

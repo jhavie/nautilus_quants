@@ -36,6 +36,7 @@ from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
 )
+from nautilus_quants.common.limit_order_execution import LimitOrderExecutionMixin
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.fmz.metadata import FMZMetadataProvider
 
@@ -75,10 +76,12 @@ class FMZFactorStrategyConfig(StrategyConfig, frozen=True):
     rebalance_interval: int = 1
     composite_factor: str = "composite"
     bar_types: list[str] = []
+    execution_mode: str = "anchor"  # "anchor" | "post_limit"
 
 
 class FMZFactorStrategy(
     AnchorPriceExecutionMixin,
+    LimitOrderExecutionMixin,
     EventTimePendingExecutionMixin[dict[str, float]],
     BarSubscriptionMixin,
     Strategy,
@@ -423,7 +426,10 @@ class FMZFactorStrategy(
             ts_event=ts_event or 0,
         )
 
-        self._submit_anchor_open(instrument_id, side, qty, exec_price)
+        if self.config.execution_mode == "post_limit":
+            self._submit_limit_open(instrument_id, side, qty, exec_price)
+        else:
+            self._submit_anchor_open(instrument_id, side, qty, exec_price)
 
         return qty
 
@@ -440,7 +446,10 @@ class FMZFactorStrategy(
             reason=reason,
             hour_count=self._hour_count,
         )
-        self._close_instrument_positions(instrument_id, exec_price)
+        if self.config.execution_mode == "post_limit":
+            self._close_instrument_positions_limit(instrument_id, exec_price)
+        else:
+            self._close_instrument_positions(instrument_id, exec_price)
         self.log.debug(f"CLOSE {instrument_id_str}: {reason}")
 
     def _close_all_positions(self, reason: str) -> None:
@@ -457,7 +466,10 @@ class FMZFactorStrategy(
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
             )
-            self._submit_anchor_close(position, latest_closes.get(inst_id))
+            if self.config.execution_mode == "post_limit":
+                self._submit_limit_close(position, latest_closes.get(inst_id))
+            else:
+                self._submit_anchor_close(position, latest_closes.get(inst_id))
             self.log.debug(f"CLOSE {inst_id}: {reason}")
 
         self._long_positions.clear()
@@ -474,5 +486,8 @@ class FMZFactorStrategy(
 
         inst_id = str(position.instrument_id)
         latest_closes = self._price_book.get_latest_closes()
-        self._submit_anchor_close(position, latest_closes.get(inst_id))
+        if self.config.execution_mode == "post_limit":
+            self._submit_limit_close(position, latest_closes.get(inst_id))
+        else:
+            self._submit_anchor_close(position, latest_closes.get(inst_id))
         self.log.info(f"LATE_CLOSE {inst_id}: position opened after stop, closing immediately")

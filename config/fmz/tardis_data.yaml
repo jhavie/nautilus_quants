@@ -1,0 +1,99 @@
+# Tardis tick data download config for 60 selected coins (Binance Futures)
+# Source: strategy_research/14_exchange_token/output/selected_coins.json
+# Filter: rank 21-1000, 500+ days listed, daily volume > 5M USDT (excl. BOME)
+#
+# Date ranges (run in two phases):
+#   Phase 1: 2025-01-01 ~ 2025-04-12  (101 days)
+#   Phase 2: 2025-09-20 ~ 2025-12-31  (103 days, change dates after Phase 1)
+#
+# Estimated total: ~170 GB (200+ GB disk recommended)
+# Estimated time: 5-9 hours at workers=3, concurrency=3
+
+download:
+  exchange: "binance-futures"
+  api_key_env: "TARDIS_API_KEY"
+  data_types:
+    - quotes              # best bid/ask (L1) for BBO pegging
+    - trades              # tick data for bar aggregation + trade execution
+  symbols:
+    # --- 1000X contracts (Binance micro-denomination) ---
+    - 1000BONKUSDT        # BONK
+    - 1000FLOKIUSDT       # FLOKI
+    - 1000PEPEUSDT        # PEPE
+    - 1000SATSUSDT        # SATS
+    - 1000SHIBUSDT        # SHIB
+    # --- High activity (volume > 30M/day) ---
+    - AAVEUSDT
+    - APTUSDT
+    - ARBUSDT
+    - AVAXUSDT
+    - DOTUSDT
+    - ETCUSDT
+    - FILUSDT
+    - FLOWUSDT
+    - GALAUSDT
+    - GRTUSDT
+    - HBARUSDT
+    - ICPUSDT
+    - LTCUSDT
+    - NEARUSDT
+    - ONDOUSDT
+    - OPUSDT
+    - RENDERUSDT
+    - SUIUSDT
+    - TIAUSDT
+    - TONUSDT
+    - UNIUSDT
+    - WIFUSDT
+    - WLDUSDT
+    - WUSDT
+    - XLMUSDT
+    - ZROUSDT
+    # --- Medium activity (volume 5-30M/day) ---
+    - AGLDUSDT
+    - ALGOUSDT
+    - APEUSDT
+    - ARUSDT
+    - ATOMUSDT
+    - AXSUSDT
+    - CHZUSDT
+    - COMPUSDT
+    - CRVUSDT
+    - DYDXUSDT
+    - EIGENUSDT
+    - ENSUSDT
+    - ETHFIUSDT
+    - ICXUSDT
+    - INJUSDT
+    - JTOUSDT
+    - JUPUSDT
+    - LDOUSDT
+    - MANAUSDT
+    - MEMEUSDT
+    - PEOPLEUSDT
+    - POLUSDT              # formerly MATICUSDT (renamed 2024)
+    - PYTHUSDT
+    - SANDUSDT
+    - SNXUSDT
+    - STRKUSDT
+    - XTZUSDT
+    - ZKUSDT
+    # --- Ordinals / BRC-20 ---
+    - ORDIUSDT
+  from_date: "2025-02-01"
+  to_date: "2025-02-05"             # non-inclusive → covers 2025-01-01 ~ 2025-04-12 (101 days)
+  concurrency: 3                     # per-symbol file concurrency (tardis-dev internal)
+  max_symbol_workers: 3              # concurrent symbols (ThreadPoolExecutor)
+  proxy: "ssh://aliyun-sg-server"    # SSH SOCKS5 tunnel
+
+transform:
+  catalog_path: "data/transform/tardis"
+  maker_fee: "0.0002"       # 0.02%
+  taker_fee: "0.0004"       # 0.02%
+  margin_init: "0.05"       # 5% initial margin
+  margin_maint: "0.025"     # 2.5% maintenance margin
+  max_workers: 10
+
+paths:
+  raw_data: "data/raw/tardis"
+  catalog: "data/transform/tardis"
