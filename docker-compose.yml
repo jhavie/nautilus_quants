@@ -1,0 +1,34 @@
+services:
+  # === Live Trading ===
+  live-trader:
+    build: &app-build
+      context: .
+      dockerfile: Dockerfile
+    container_name: nautilus-live-trader
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+    command: ["run", "config/live/okx_fmz_demo.yaml"]
+
+  # === Backtest Verification ===
+  backtest:
+    build: *app-build
+    container_name: nautilus-backtest
+    profiles: ["backtest"]
+    env_file: .env
+    environment:
+      OPENBLAS_NUM_THREADS: 1
+      OMP_NUM_THREADS: 1
+      PYTHONPATH: /app/src
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - ./data:/app/data:ro
+    entrypoint: ["python", "-m", "nautilus_quants.backtest"]
+    command: ["run", "config/fmz/backtest.yaml"]
