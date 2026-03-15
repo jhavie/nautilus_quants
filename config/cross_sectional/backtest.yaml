@@ -9,6 +9,10 @@ venues:
     starting_balances:
       - "100000 USDT"
     default_leverage: 1
+    fill_model:
+      fill_model_path: "nautilus_quants.backtest.models.signal_close_fill:SignalCloseFillModel"
+      config_path: "nautilus_quants.backtest.models.signal_close_fill:SignalCloseFillModelConfig"
+      config: {}
 
 data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/pre_data/catalog"

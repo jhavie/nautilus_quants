@@ -27,10 +27,14 @@ metadata:
 #   vwap_dev_4h_raw: "-rank((close - vwap_4h) / vwap_4h)"
 
 factors:
-  new_alpha:
-    expression: "-(close - open) / ((high - low) + 0.001)"
-    description: "Alpha101: 1h K线收益体比率，正值为看多信号（均值回归，已取负）"
-    category: "worldquant"
+  # new_alpha:
+  #   expression: "-(close - open) / ((high - low) + 0.001)"
+  #   description: "Alpha101: 1h K线收益体比率，正值为看多信号（均值回归，已取负）"
+  #   category: "worldquant"
+  alpha044:
+    expression: "-correlation(high, rank(volume), 5)"
+    description: "Alpha#44: High-price vs volume rank correlation"
+    category: "volume"
   # alpha_101:
   #   expression: "alpha_101_raw"
   #   description: "Alpha101: 1h K线收益体比率，正值为看多信号（均值回归，已取负）"

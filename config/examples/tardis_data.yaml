@@ -1,0 +1,25 @@
+download:
+  exchange: "binance-futures"
+  api_key_env: "TD.Mk8--IHyqLK-AZM0.-tp3bnvb9U9bvQT.e5tc0QLA9KTxrNb.svjSiSYyCqQU588.eiNc7Gl9hrMVoWj.kcrj"        # env var name (no key = only 1st-of-month data)
+  data_types:
+    - quotes              # best bid/ask (L1) for PostLimitExecAlgorithm BBO pegging
+    - trades              # tick data for bar aggregation + trade execution
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+  from_date: "2026-02-28"
+  to_date: "2026-03-04"               # non-inclusive, 4 days
+  concurrency: 1                     # per-symbol file concurrency (tardis-dev internal)
+  max_symbol_workers: 1                # concurrent symbols (ThreadPoolExecutor)
+  proxy: "ssh://aliyun-sg-server"        # optional SSH SOCKS5 tunnel
+
+transform:
+  catalog_path: "data/transform/tardis"  # Parquet catalog output (same as paths.catalog)
+  maker_fee: "0.0002"       # 0.02%
+  taker_fee: "0.0002"       # 0.04%
+  margin_init: "0.05"       # 5% initial margin
+  margin_maint: "0.025"     # 2.5% maintenance margin
+
+paths:
+  raw_data: "data/raw/tardis"          # download output directory
+  catalog: "data/transform/tardis"       # Parquet catalog directory

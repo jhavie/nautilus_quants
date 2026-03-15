@@ -9,6 +9,8 @@ import pandas as pd
 from nautilus_quants.backtest.exceptions import BacktestReportError
 from nautilus_quants.backtest.protocols import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
+    EXECUTION_STATES_CACHE_KEY,
+    FACTOR_VALUES_CACHE_KEY,
     POSITION_MARKET_VALUES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
     BaseMetadataRenderer,
@@ -169,6 +171,16 @@ class ReportGenerator:
         if position_viz_path:
             reports["position_viz"] = position_viz_path
 
+        # Generate factor values CSV if data is available
+        factor_csv_path = self.generate_factor_values_csv()
+        if factor_csv_path:
+            reports["factor_values"] = factor_csv_path
+
+        # Generate execution report CSV if PostLimit data is available
+        execution_csv_path = self.generate_execution_report_csv()
+        if execution_csv_path:
+            reports["execution_report"] = execution_csv_path
+
         return reports
 
     def generate_csv_reports(self) -> dict[str, Path]:
@@ -323,6 +335,28 @@ class ReportGenerator:
                 TearsheetConfig as NautilusTearsheetConfig,
                 create_tearsheet_from_stats,
             )
+            from nautilus_trader.analysis.config import (
+                TearsheetChart,
+                TearsheetDistributionChart,
+                TearsheetDrawdownChart,
+                TearsheetEquityChart,
+                TearsheetMonthlyReturnsChart,
+                TearsheetRollingSharpeChart,
+                TearsheetRunInfoChart,
+                TearsheetStatsTableChart,
+                TearsheetYearlyReturnsChart,
+            )
+
+            chart_name_to_class: dict[str, type[TearsheetChart]] = {
+                "run_info": TearsheetRunInfoChart,
+                "stats_table": TearsheetStatsTableChart,
+                "equity": TearsheetEquityChart,
+                "drawdown": TearsheetDrawdownChart,
+                "monthly_returns": TearsheetMonthlyReturnsChart,
+                "distribution": TearsheetDistributionChart,
+                "rolling_sharpe": TearsheetRollingSharpeChart,
+                "yearly_returns": TearsheetYearlyReturnsChart,
+            }
 
             tearsheet_path = self.output_dir / "tearsheet.html"
 
@@ -354,6 +388,14 @@ class ReportGenerator:
                 for currency, balance in account.balances_total().items():
                     account_info[f"Ending Balance ({currency})"] = f"{balance.as_double():.2f} {currency}"
 
+            # Convert str chart names → TearsheetChart instances
+            chart_objects: list[TearsheetChart] = []
+            for name in tearsheet_config.charts:
+                chart_cls = chart_name_to_class.get(name)
+                if chart_cls is not None:
+                    chart_kwargs = tearsheet_config.chart_args.get(name, {})
+                    chart_objects.append(chart_cls(**chart_kwargs))
+
             # Create tearsheet config
             config = NautilusTearsheetConfig(
                 title=tearsheet_config.title,
@@ -361,7 +403,7 @@ class ReportGenerator:
                 height=tearsheet_config.height,
                 show_logo=tearsheet_config.show_logo,
                 include_benchmark=tearsheet_config.include_benchmark,
-                charts=tearsheet_config.charts,
+                charts=chart_objects,
             )
 
             # Use create_tearsheet_from_stats with our filtered returns
@@ -698,6 +740,140 @@ class ReportGenerator:
                 continue
 
         return reports
+
+    def generate_factor_values_csv(self) -> Path | None:
+        """Generate CSV of per-bar, per-instrument factor values.
+
+        Reads factor snapshots from engine cache (written by FactorEngineActor)
+        and writes a flat CSV with columns:
+        timestamp_ns, instrument_id, factor_name, value.
+
+        Returns:
+            Path to CSV file, or None if no factor data available.
+        """
+        import pickle
+
+        try:
+            data = self.engine.cache.get(FACTOR_VALUES_CACHE_KEY)
+        except Exception:
+            return None
+
+        if not data:
+            return None
+
+        try:
+            snapshots: list[tuple[int, dict[str, dict[str, float]]]] = pickle.loads(data)
+        except Exception:
+            return None
+
+        if not snapshots:
+            return None
+
+        rows: list[dict] = []
+        for ts_ns, factors in snapshots:
+            for factor_name, instrument_values in factors.items():
+                for instrument_id, value in instrument_values.items():
+                    rows.append({
+                        "timestamp_ns": ts_ns,
+                        "instrument_id": instrument_id,
+                        "factor_name": factor_name,
+                        "value": value,
+                    })
+
+        if not rows:
+            return None
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame(rows)
+        csv_path = self.output_dir / "factor_values_report.csv"
+        df.to_csv(csv_path, index=False)
+        return csv_path
+
+    def generate_execution_report_csv(self) -> Path | None:
+        """Generate CSV of per-order execution states from PostLimitExecAlgorithm.
+
+        Reads pickled OrderExecutionState dict from engine cache and writes a
+        flat CSV with one row per execution sequence.
+
+        Returns:
+            Path to CSV file, or None if no execution state data available.
+        """
+        import pickle
+
+        try:
+            data = self.engine.cache.get(EXECUTION_STATES_CACHE_KEY)
+        except Exception:
+            return None
+
+        if not data:
+            return None
+
+        try:
+            states: dict = pickle.loads(data)
+        except Exception:
+            return None
+
+        if not states:
+            return None
+
+        from nautilus_trader.model.enums import OrderSide
+
+        rows: list[dict] = []
+        for state in states.values():
+            filled_qty = float(state.filled_quantity) if state.filled_quantity is not None else 0.0
+            total_qty = float(state.total_quantity)
+            fill_ratio = filled_qty / total_qty if total_qty > 0 else 0.0
+            elapsed_ms = (
+                (state.completed_ns - state.created_ns) / 1_000_000
+                if state.completed_ns > 0 and state.created_ns > 0
+                else 0.0
+            )
+
+            # Compute avg_fill_px (VWAP) and slippage (Implementation Shortfall)
+            fill_cost = getattr(state, "fill_cost", 0.0)
+            avg_fill_px = fill_cost / filled_qty if filled_qty > 0 else 0.0
+
+            if filled_qty > 0 and state.anchor_px > 0:
+                if state.side == OrderSide.BUY:
+                    slippage = avg_fill_px - state.anchor_px
+                else:  # SELL
+                    slippage = state.anchor_px - avg_fill_px
+                slippage_bps = (slippage / state.anchor_px) * 10000
+            else:
+                slippage = 0.0
+                slippage_bps = 0.0
+
+            rows.append({
+                "primary_order_id": str(state.primary_order_id),
+                "instrument_id": str(state.instrument_id),
+                "side": state.side.name,
+                "total_quantity": total_qty,
+                "filled_quantity": filled_qty,
+                "fill_ratio": round(fill_ratio, 6),
+                "anchor_px": state.anchor_px,
+                "last_limit_price": state.last_limit_price,
+                "avg_fill_px": round(avg_fill_px, 8),
+                "slippage": round(slippage, 8),
+                "slippage_bps": round(slippage_bps, 4),
+                "reduce_only": state.reduce_only,
+                "final_state": state.state.value,
+                "chase_count": state.chase_count,
+                "limit_orders_submitted": state.limit_orders_submitted,
+                "used_market_fallback": state.used_market_fallback,
+                "created_ns": state.created_ns,
+                "completed_ns": state.completed_ns,
+                "elapsed_ms": round(elapsed_ms, 3),
+                "timeout_secs": state.timeout_secs,
+                "max_chase_attempts": state.max_chase_attempts,
+                "chase_step_ticks": state.chase_step_ticks,
+                "post_only": state.post_only,
+            })
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame(rows)
+        csv_path = self.output_dir / "execution_report.csv"
+        df.to_csv(csv_path, index=False)
+        return csv_path
 
     def generate_position_visualization(self) -> Path | None:
         """Generate ECharts position timeline visualization.

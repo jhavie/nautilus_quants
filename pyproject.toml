@@ -23,6 +23,9 @@ dependencies = [
     "python-binance>=1.0.19",  # Binance API client
     "click>=8.0.0",  # CLI framework
     "tenacity>=8.0.0",  # Retry logic with exponential backoff
+    # Tardis tick data pipeline
+    "tardis-dev>=2.1",  # Tardis.dev official data download client
+    "tqdm>=4.66",  # Progress bars for downloads
     # Factor framework dependencies
     "lark>=1.1.0",  # Expression parser for Alpha101-style factors
     # Report enhancement

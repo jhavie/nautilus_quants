@@ -231,9 +231,9 @@ class FactorEngine:
                 result_df = evaluator.evaluate(ast)
                 # Inject result into panel_fields so subsequent factors can
                 # reference it (e.g. momentum_3h_norm references momentum_3h).
-                # fillna(0): prevents NaN propagation in composite formulas.
+                # NaN propagates naturally: instruments with undefined values
+                # are excluded from cross-sectional ops and final output.
                 if isinstance(result_df, pd.DataFrame):
-                    result_df.fillna(0, inplace=True)
                     panel_fields[name] = result_df
                     # Extract last row via numpy — avoid Series creation
                     vals = result_df.values[-1]  # numpy array view, no copy

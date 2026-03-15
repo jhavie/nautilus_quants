@@ -1,0 +1,122 @@
+# Tardis Tick Data Backtest Configuration
+# Loads TradeTick data → Nautilus DataEngine aggregates to 1h Bar (INTERNAL)
+# Factor strategy uses breakout factor for BTCUSDT and ETHUSDT
+#
+# Run:
+#   python -m nautilus_quants.backtest run config/factor/tardis_backtest.yaml
+
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 5
+    bar_execution: true
+    trade_execution: true
+
+data:
+  # Load TradeTick directly — Nautilus DataEngine creates TimeBarAggregator
+  # to produce 1h INTERNAL bars automatically
+  - catalog_path: "/Users/joe/Sync/worktrees/feature-023-tardis-data-integration/data/transform/tardis"
+    data_cls: "nautilus_trader.model.data:TradeTick"
+    instrument_ids:
+      # - "BTCUSDT-PERP.BINANCE"
+      - "ETHUSDT-PERP.BINANCE"
+    start_time: "2026-02-28"
+    end_time: "2026-03-04"
+
+  # QuoteTick for BBO pegging — PostLimitExecAlgorithm uses best bid/ask
+  # to place limit orders at optimal prices
+  - catalog_path: "/Users/joe/Sync/worktrees/feature-023-tardis-data-integration/data/transform/tardis"
+    data_cls: "nautilus_trader.model.data:QuoteTick"
+    instrument_ids:
+      - "ETHUSDT-PERP.BINANCE"
+    start_time: "2026-02-28"
+    end_time: "2026-03-04"
+
+engine:
+  trader_id: "BACKTESTER-TARDIS-001"
+  logging:
+    log_level: "INFO"
+
+  exec_algorithms:
+    - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
+      config_path: "nautilus_quants.execution.post_limit.config:PostLimitExecAlgorithmConfig"
+      config:
+        exec_algorithm_id: "PostLimit"
+        offset_ticks: 0
+        timeout_secs: 15.0
+        max_chase_attempts: 3
+        chase_step_ticks: 1
+        fallback_to_market: true
+        post_only: true
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/factor/tardis_factors.yaml"
+        bar_spec: "1h"
+        max_history: 100
+        publish_signals: true
+        # Manually specify INTERNAL bar types — Nautilus DataEngine
+        # auto-aggregates TradeTick → 1h Bar when INTERNAL subscription detected
+        bar_types:
+          # - "BTCUSDT-PERP.BINANCE-1-HOUR-LAST-INTERNAL"
+          - "ETHUSDT-PERP.BINANCE-1-HOUR-LAST-INTERNAL"
+
+  strategies:
+    # - strategy_path: "nautilus_quants.strategies.factor.strategy:FactorStrategy"
+    #   config_path: "nautilus_quants.strategies.factor.strategy:FactorStrategyConfig"
+    #   config:
+    #     instrument_id: "BTCUSDT-PERP.BINANCE"
+    #     signal_name: "alpha_breakout"
+    #     entry_threshold: 1.0
+    #     stop_loss_pct: 0.01
+    #     order_amount: 10000.0
+    #     enable_long: true
+    #     enable_short: false
+    #     sma_period: 30
+    #     exit_bars_below_sma: 3
+    #     bar_type: "ETHUSDT-PERP.BINANCE-1-HOUR-LAST-INTERNAL"
+
+    - strategy_path: "nautilus_quants.strategies.factor.strategy:FactorStrategy"
+      config_path: "nautilus_quants.strategies.factor.strategy:FactorStrategyConfig"
+      config:
+        instrument_id: "ETHUSDT-PERP.BINANCE"
+        signal_name: "alpha_breakout"
+        execution_mode: "post_limit"
+        entry_threshold: 1.0
+        stop_loss_pct: 0.01
+        order_amount: 10000.0
+        enable_long: true
+        enable_short: false
+        sma_period: 30
+        exit_bars_below_sma: 3
+        bar_type: "ETHUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+
+report:
+  output_dir: "logs/backtest_runs"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Tardis Tick -> 1h Bar Backtest (Nautilus Native Aggregation)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+  quantstats:
+    enabled: true
+    title: "QuantStats Analysis"
+    output_format:
+      - html

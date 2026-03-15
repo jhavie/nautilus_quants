@@ -188,8 +188,8 @@ class TestTsOperators:
             {col: panel["close"][col].rolling(10).corr(panel["volume"][col]) for col in panel["close"].columns},
             index=panel["close"].index,
         )
-        # popbo-aligned: correlation does fillna(0).replace([inf,-inf], 0)
-        expected = expected.fillna(0).replace([np.inf, -np.inf], 0)
+        # NaN propagates naturally; only inf → NaN
+        expected = expected.replace([np.inf, -np.inf], np.nan)
         pd.testing.assert_frame_equal(result, expected)
 
 
@@ -236,8 +236,8 @@ class TestCsTsNesting:
             {col: rank_open[col].rolling(10).corr(rank_vol[col]) for col in panel["close"].columns},
             index=panel["close"].index,
         )
-        # popbo-aligned: correlation does fillna(0).replace([inf,-inf], 0)
-        expected = -1 * corr.fillna(0).replace([np.inf, -np.inf], 0)
+        # NaN propagates naturally; only inf → NaN
+        expected = -1 * corr.replace([np.inf, -np.inf], np.nan)
         pd.testing.assert_frame_equal(result, expected)
 
     def test_alpha013_cs_ts_cs(self) -> None:

@@ -23,8 +23,8 @@ factors:
   # ========== 原始因子 (Phase 1: Time-Series) ==========
 
   # 成交量因子
-  quote_volume:
-    expression: "quote_volume"
+  volume:
+    expression: "volume"
     description: "Quote volume (USDT turnover)"
 
   # 3小时动量因子 (factor_1 in FMZ)
@@ -46,7 +46,7 @@ factors:
   # 量价相关性因子 (factor_8 in FMZ)
   # FMZ: df_close.rolling(96).corr(df_volume)
   corr:
-    expression: "correlation(close, quote_volume, 96)"
+    expression: "correlation(close, volume, 96)"
     description: "96-hour price-volume correlation"
 
   # ========== 归一化因子 (Phase 2: Cross-Sectional) ==========
@@ -55,7 +55,7 @@ factors:
   #   factor_norm = factor_clip.add(-factor_clip.mean(axis=1), axis='index').div(factor_clip.std(axis=1), axis='index')
 
   volume_norm:
-    expression: "normalize(clip_quantile(quote_volume, 0.2, 0.8), true, 0)"
+    expression: "normalize(clip_quantile(volume, 0.2, 0.8), true, 0)"
     description: "Normalized volume (quantile clip + z-score)"
 
   momentum_3h_norm:
@@ -79,9 +79,12 @@ factors:
   composite:
     expression: "0.6 * volume_norm + 0.4 * momentum_3h_norm + 0.3 * volatility_norm + 0.4 * corr_norm"
     description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
-  composite_neg:
-    expression: "-0.6 * volume_norm - 0.4 * momentum_3h_norm - 0.3 * volatility_norm - 0.4 * corr_norm"
-    description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
+  # composite_neg:
+  #   expression: "-0.6 * volume_norm - 0.4 * momentum_3h_norm - 0.3 * volatility_norm - 0.4 * corr_norm"
+  #   description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
+  # composite:
+  #   expression: "volume_norm"
+  #   description: "4-factor composite: Volume(0.6) + Momentum_3h(0.4) + Volatility(0.3) + Corr(0.4)"
 performance:
   enable_timing: true
   warning_threshold_ms: 1.0

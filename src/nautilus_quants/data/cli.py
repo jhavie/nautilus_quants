@@ -16,8 +16,11 @@ import click
 from nautilus_quants.data.config import (
     ConfigurationError,
     PipelineConfig,
+    TardisPipelineConfig,
     config_to_dict,
     load_config,
+    load_tardis_config,
+    tardis_config_to_dict,
 )
 from nautilus_quants.data.download.binance import (
     BinanceDownloader,
@@ -949,6 +952,292 @@ def clean(
             click.echo("Removed checkpoints")
 
     click.echo("Clean complete.")
+
+
+@cli.command("tardis-download")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default="config/examples/tardis_data.yaml",
+    help="Tardis configuration file path",
+)
+@click.option("--symbol", "-s", help="Override symbols, comma-separated")
+@click.option("--from-date", help="Override start date (YYYY-MM-DD)")
+@click.option("--to-date", help="Override end date (YYYY-MM-DD, non-inclusive)")
+@click.option("--force", is_flag=True, help="Re-download all (delete existing first)")
+@click.pass_context
+def tardis_download(
+    ctx: click.Context,
+    config_path: str,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    force: bool,
+) -> None:
+    """Download tick-level trade data from Tardis.dev."""
+    overrides: dict[str, str] = {}
+    if symbol:
+        overrides["download.symbols"] = symbol
+    if from_date:
+        overrides["download.from_date"] = from_date
+    if to_date:
+        overrides["download.to_date"] = to_date
+
+    try:
+        config = load_tardis_config(config_path, overrides if overrides else None)
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if ctx.obj.get("dry_run"):
+        click.echo("DRY RUN: Would download Tardis data with config:")
+        click.echo(f"  Exchange: {config.download.exchange}")
+        click.echo(f"  Symbols: {list(config.download.symbols)}")
+        click.echo(f"  Data types: {list(config.download.data_types)}")
+        click.echo(f"  Date range: {config.download.from_date} to {config.download.to_date}")
+        click.echo(f"  Symbol workers: {config.download.max_symbol_workers}")
+        return
+
+    from nautilus_quants.data.download.tardis import TardisDownloader
+
+    run_id = generate_run_id()
+    log_dir = create_log_dir("logs/tardis_pipeline", run_id)
+    start_time = datetime.now()
+
+    click.echo("=" * 70)
+    click.echo(f"TARDIS DOWNLOAD: {run_id}")
+    click.echo("=" * 70)
+    click.echo(f"Exchange: {config.download.exchange}")
+    click.echo(f"Symbols: {len(config.download.symbols)}")
+    click.echo(f"Data types: {list(config.download.data_types)}")
+    click.echo(f"Date range: {config.download.from_date} to {config.download.to_date}")
+    click.echo(f"Workers: {config.download.max_symbol_workers}, Concurrency: {config.download.concurrency}")
+    click.echo(f"Log directory: {log_dir}")
+    click.echo()
+
+    downloader = TardisDownloader(config=config.download, paths=config.paths)
+
+    if force:
+        click.echo("Force mode: cleaning existing data...")
+        downloader.clean()
+
+    errors: list[str] = []
+    try:
+        results = downloader.download_all()
+    except Exception as e:
+        errors.append(f"Download crashed: {e}")
+        results = []
+
+    failed = [r for r in results if not r.success]
+    succeeded = [r for r in results if r.success]
+    for r in failed:
+        errors.append(f"{r.symbol}: {r.error}")
+
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+    all_success = len(failed) == 0 and not errors
+
+    # Write reports
+    writer = ReportWriter(log_dir)
+    writer.write_step_report(
+        step_name="download",
+        run_id=run_id,
+        summary={
+            "total_tasks": len(results),
+            "successful": len(succeeded),
+            "failed": len(failed),
+            "duration_seconds": round(duration, 1),
+        },
+        details_by_symbol=[
+            {
+                "symbol": r.symbol,
+                "success": r.success,
+                "files": 1,
+                "size_mb": 0.0,
+                "time_seconds": 0.0,
+            }
+            for r in results
+        ],
+        errors=errors if errors else None,
+    )
+    writer.write_details_json(
+        run_id=run_id,
+        start_time=start_time,
+        end_time=end_time,
+        config=tardis_config_to_dict(config),
+        steps=[
+            {
+                "step_name": "download",
+                "success": all_success,
+                "duration_seconds": round(duration, 1),
+                "summary": {
+                    "total_tasks": len(results),
+                    "successful": len(succeeded),
+                    "failed": len(failed),
+                },
+            }
+        ],
+        errors=errors if errors else None,
+    )
+
+    # Terminal summary
+    click.echo()
+    click.echo("=" * 70)
+    duration_str = f"{duration / 60:.1f} minutes" if duration >= 60 else f"{duration:.1f} seconds"
+    status = "SUCCESS" if all_success else "FAILED"
+    click.echo(f"TARDIS DOWNLOAD {status} in {duration_str}")
+    click.echo(f"  Successful: {len(succeeded)}, Failed: {len(failed)}")
+    click.echo(f"  Reports: {log_dir}")
+    click.echo("=" * 70)
+
+    if not all_success:
+        ctx.exit(EXIT_DOWNLOAD_ERROR)
+
+
+@cli.command("tardis-transform")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default="config/examples/tardis_data.yaml",
+    help="Tardis configuration file path",
+)
+@click.option("--symbol", "-s", help="Override symbols, comma-separated")
+@click.option("--workers", "-w", type=int, default=None, help="Max concurrent transform threads (default: from config)")
+@click.pass_context
+def tardis_transform(
+    ctx: click.Context,
+    config_path: str,
+    symbol: Optional[str],
+    workers: int,
+) -> None:
+    """Transform Tardis CSV data to NautilusTrader Parquet format."""
+    overrides: dict[str, str] = {}
+    if symbol:
+        overrides["download.symbols"] = symbol
+
+    try:
+        config = load_tardis_config(config_path, overrides if overrides else None)
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    data_types = list(config.download.data_types)
+    if workers is None:
+        workers = config.transform.max_workers
+
+    if ctx.obj.get("dry_run"):
+        click.echo("DRY RUN: Would transform Tardis data:")
+        click.echo(f"  Symbols: {list(config.download.symbols)}")
+        click.echo(f"  Data types: {data_types}")
+        click.echo(f"  Catalog: {config.paths.catalog}")
+        click.echo(f"  Workers: {workers}")
+        return
+
+    from nautilus_quants.data.transform.tardis import transform_all
+
+    run_id = generate_run_id()
+    log_dir = create_log_dir("logs/tardis_pipeline", run_id)
+    start_time = datetime.now()
+
+    catalog_path = Path(config.transform.catalog_path or config.paths.catalog)
+
+    click.echo("=" * 70)
+    click.echo(f"TARDIS TRANSFORM: {run_id}")
+    click.echo("=" * 70)
+    click.echo(f"Symbols: {len(config.download.symbols)}")
+    click.echo(f"Data types: {data_types}")
+    click.echo(f"Workers: {workers}")
+    click.echo(f"Catalog: {catalog_path}")
+    click.echo(f"Log directory: {log_dir}")
+    click.echo()
+
+    results = transform_all(
+        raw_data_dir=Path(config.paths.raw_data),
+        catalog_path=catalog_path,
+        exchange=config.download.exchange,
+        symbols=list(config.download.symbols),
+        data_types=data_types,
+        maker_fee=config.transform.maker_fee,
+        taker_fee=config.transform.taker_fee,
+        margin_init=config.transform.margin_init,
+        margin_maint=config.transform.margin_maint,
+        max_workers=workers,
+    )
+
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+
+    succeeded = [r for r in results if r.success]
+    failed = [r for r in results if not r.success]
+    total_ticks = sum(r.total_ticks for r in succeeded)
+    total_files = sum(r.files_processed for r in succeeded)
+    errors = [err for r in failed for err in r.errors]
+    all_success = len(failed) == 0
+
+    # Write reports
+    writer = ReportWriter(log_dir)
+    transform_details = [
+        {
+            "symbol": r.symbol,
+            "success": r.success,
+            "files": r.files_processed,
+            "size_mb": 0.0,
+            "time_seconds": 0.0,
+        }
+        for r in results
+    ]
+    writer.write_step_report(
+        step_name="transform",
+        run_id=run_id,
+        summary={
+            "total_tasks": len(results),
+            "successful": len(succeeded),
+            "failed": len(failed),
+            "total_ticks": total_ticks,
+            "total_files_processed": total_files,
+            "duration_seconds": round(duration, 1),
+        },
+        details_by_symbol=transform_details,
+        errors=errors if errors else None,
+    )
+    writer.write_details_json(
+        run_id=run_id,
+        start_time=start_time,
+        end_time=end_time,
+        config=tardis_config_to_dict(config),
+        steps=[
+            {
+                "step_name": "transform",
+                "success": all_success,
+                "duration_seconds": round(duration, 1),
+                "summary": {
+                    "total_tasks": len(results),
+                    "successful": len(succeeded),
+                    "failed": len(failed),
+                    "total_ticks": total_ticks,
+                    "total_files_processed": total_files,
+                },
+            }
+        ],
+        errors=errors if errors else None,
+    )
+
+    # Terminal summary
+    click.echo()
+    click.echo("=" * 70)
+    duration_str = f"{duration / 60:.1f} minutes" if duration >= 60 else f"{duration:.1f} seconds"
+    status = "SUCCESS" if all_success else "FAILED"
+    click.echo(f"TARDIS TRANSFORM {status} in {duration_str}")
+    click.echo(f"  Total ticks: {total_ticks}, Files: {total_files}")
+    click.echo(f"  Reports: {log_dir}")
+    click.echo("=" * 70)
+
+    if not all_success:
+        ctx.exit(EXIT_TRANSFORM_ERROR)
 
 
 def _load_config_with_overrides(
