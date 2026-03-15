@@ -87,7 +87,7 @@ class CrossSectionalFactorStrategyConfig(StrategyConfig, frozen=True):
     buffer_ratio: float = 0.5
     target_leverage: float = 4.0
     monthly_position_update: bool = True
-    execution_mode: str = "anchor"  # "anchor" | "limit"
+    execution_mode: str = "anchor"  # "anchor" | "post_limit"
 
 
 class CrossSectionalFactorStrategy(
@@ -499,7 +499,7 @@ class CrossSectionalFactorStrategy(
             ts_event=ts_event or 0,
         )
 
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._submit_limit_open(instrument_id, side, qty, exec_price)
         else:
             self._submit_anchor_open(instrument_id, side, qty, exec_price)
@@ -537,7 +537,7 @@ class CrossSectionalFactorStrategy(
             hour_count=self._hour_count,
         )
 
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._close_instrument_positions_limit(instrument_id, exec_price)
         else:
             self._close_instrument_positions(instrument_id, exec_price)
@@ -557,7 +557,7 @@ class CrossSectionalFactorStrategy(
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
             )
-            if self.config.execution_mode == "limit":
+            if self.config.execution_mode == "post_limit":
                 self._submit_limit_close(position, latest_closes.get(inst_id))
             else:
                 self._submit_anchor_close(position, latest_closes.get(inst_id))

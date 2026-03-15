@@ -76,7 +76,7 @@ class FMZFactorStrategyConfig(StrategyConfig, frozen=True):
     rebalance_interval: int = 1
     composite_factor: str = "composite"
     bar_types: list[str] = []
-    execution_mode: str = "anchor"  # "anchor" | "limit"
+    execution_mode: str = "anchor"  # "anchor" | "post_limit"
 
 
 class FMZFactorStrategy(
@@ -426,7 +426,7 @@ class FMZFactorStrategy(
             ts_event=ts_event or 0,
         )
 
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._submit_limit_open(instrument_id, side, qty, exec_price)
         else:
             self._submit_anchor_open(instrument_id, side, qty, exec_price)
@@ -446,7 +446,7 @@ class FMZFactorStrategy(
             reason=reason,
             hour_count=self._hour_count,
         )
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._close_instrument_positions_limit(instrument_id, exec_price)
         else:
             self._close_instrument_positions(instrument_id, exec_price)
@@ -466,7 +466,7 @@ class FMZFactorStrategy(
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, hour_count=self._hour_count,
             )
-            if self.config.execution_mode == "limit":
+            if self.config.execution_mode == "post_limit":
                 self._submit_limit_close(position, latest_closes.get(inst_id))
             else:
                 self._submit_anchor_close(position, latest_closes.get(inst_id))
@@ -486,7 +486,7 @@ class FMZFactorStrategy(
 
         inst_id = str(position.instrument_id)
         latest_closes = self._price_book.get_latest_closes()
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._submit_limit_close(position, latest_closes.get(inst_id))
         else:
             self._submit_anchor_close(position, latest_closes.get(inst_id))

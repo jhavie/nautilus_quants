@@ -93,7 +93,7 @@ class WorldQuantAlphaConfig(StrategyConfig, frozen=True):
     enable_long: bool = True
     enable_short: bool = True
     bar_types: list[str] = []
-    execution_mode: str = "anchor"  # "anchor" | "limit"
+    execution_mode: str = "anchor"  # "anchor" | "post_limit"
 
 
 @dataclass
@@ -716,7 +716,7 @@ class WorldQuantAlphaStrategy(
         except ValueError:
             return False
 
-        use_limit = self.config.execution_mode == "limit"
+        use_limit = self.config.execution_mode == "post_limit"
         if use_limit:
             from nautilus_trader.model.identifiers import ExecAlgorithmId
             algo_id = ExecAlgorithmId("PostLimit")
@@ -783,7 +783,7 @@ class WorldQuantAlphaStrategy(
             # Quantity rounds to zero (e.g. high-priced instruments with integer lot size)
             return False
 
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._submit_limit_open(instrument_id, side, qty, exec_price, position_id)
         else:
             self._submit_anchor_open(instrument_id, side, qty, exec_price, position_id)
@@ -801,7 +801,7 @@ class WorldQuantAlphaStrategy(
         """Close all positions for an instrument with deterministic anchor pricing."""
         instrument_id = InstrumentId.from_str(instrument_id_str)
         self._metadata_provider.record_close(instrument_id_str, reason, self._signal_count)
-        if self.config.execution_mode == "limit":
+        if self.config.execution_mode == "post_limit":
             self._close_instrument_positions_limit(instrument_id, exec_price)
         else:
             self._close_instrument_positions(instrument_id, exec_price)
@@ -821,7 +821,7 @@ class WorldQuantAlphaStrategy(
             self._metadata_provider.record_close(
                 instrument_id=inst_id, reason=reason, signal_count=self._signal_count,
             )
-            if self.config.execution_mode == "limit":
+            if self.config.execution_mode == "post_limit":
                 self._submit_limit_close(position, latest_closes.get(inst_id))
             else:
                 self._submit_anchor_close(position, latest_closes.get(inst_id))
