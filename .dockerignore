@@ -19,6 +19,7 @@ openspec/
 scripts/data/
 tests/
 *.md
+!README.md
 .idea/
 .vscode/
 .specify/

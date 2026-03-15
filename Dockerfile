@@ -10,12 +10,12 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 # Layer cache: install dependencies first
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-install-project
 
 # Install project
 COPY src/ ./src/
-RUN uv sync --frozen
+RUN uv sync --frozen --no-editable
 
 # === Runtime stage ===
 FROM python:3.12-slim
@@ -32,6 +32,7 @@ ENV OPENBLAS_NUM_THREADS=1
 ENV OMP_NUM_THREADS=1
 ENV MKL_NUM_THREADS=1
 
+COPY src/ ./src/
 COPY config/ ./config/
 RUN mkdir -p /app/logs /app/data
 
