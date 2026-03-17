@@ -19,7 +19,6 @@ Constitution Compliance:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -153,9 +152,35 @@ class FMZFactorStrategy(
 
         self._subscribe_bar_types(self.config.bar_types)
 
+        # Subscribe to QuoteTick for real-time BBO (used by PostLimit exec algorithm)
+        if self.config.execution_mode == "post_limit":
+            for instrument_id in self._instruments:
+                self.subscribe_quote_ticks(instrument_id)
+            self.log.info(
+                f"Subscribed QuoteTicks for {len(self._instruments)} instruments "
+                f"(PostLimit BBO)"
+            )
+
         # Subscribe to factor data
         self.subscribe_data(DataType(FactorValues))
         self.log.info("Subscribed to FactorValues Data")
+
+        # Reconcile internal state with actual exchange positions
+        open_positions = self.cache.positions_open(strategy_id=self.id)
+        for position in open_positions:
+            inst_id = str(position.instrument_id)
+            if position.is_long:
+                self._long_positions[inst_id] = position.quantity
+                self.log.info(f"Restored LONG {inst_id}: qty={position.quantity}")
+            elif position.is_short:
+                self._short_positions[inst_id] = position.quantity
+                self.log.info(f"Restored SHORT {inst_id}: qty={position.quantity}")
+
+        if self._long_positions or self._short_positions:
+            self.log.info(
+                f"Reconciled positions: {len(self._long_positions)} long, "
+                f"{len(self._short_positions)} short"
+            )
 
         self.log.info(
             f"Strategy started: n_long={self.config.n_long}, n_short={self.config.n_short}, "
@@ -241,17 +266,6 @@ class FMZFactorStrategy(
             return
 
         self._bars_until_rebalance = self.config.rebalance_interval - 1
-        ts_dt = datetime.fromtimestamp(signal_ts / 1e9, tz=timezone.utc)
-        if not self._long_positions and not self._short_positions:
-            sorted_composite = sorted(payload.items(), key=lambda x: (x[1], x[0]))
-            self.log.info(f"FIRST REBALANCE at {ts_dt} - Composite factor rankings:")
-            self.log.info(
-                f"  Bottom 5 (LONG): {[(k, f'{v:.4f}') for k, v in sorted_composite[:5]]}"
-            )
-            self.log.info(
-                f"  Top 5 (SHORT): {[(k, f'{v:.4f}') for k, v in sorted_composite[-5:]]}"
-            )
-
         self._rebalance(
             composite=payload,
             execution_prices=execution_prices,
@@ -325,12 +339,16 @@ class FMZFactorStrategy(
             )
             self._short_positions.pop(inst_id, None)
 
-        if self._hour_count <= 10 or self._hour_count % 24 == 0:
-            self.log.info(
-                f"Rebalance #{self._hour_count}: "
-                f"long={len(long_targets)}, short={len(short_targets)}, "
-                f"current_long={len(self._long_positions)}, current_short={len(self._short_positions)}"
-            )
+        rankings = " | ".join(f"{i+1}.{s}({v:+.4f})" for i, (s, v) in enumerate(sorted_symbols))
+        self.log.info(
+            f"Rebalance #{self._hour_count}: "
+            f"long={len(long_targets)}, short={len(short_targets)}, "
+            f"current_long={len(self._long_positions)}, current_short={len(self._short_positions)}"
+        )
+        self.log.info(f"  Rankings(low→high): {rankings}")
+        self.log.info(
+            f"  LONG targets: {sorted(long_targets)} | SHORT targets: {sorted(short_targets)}"
+        )
 
         # === FMZ Logic adapted for HEDGING mode ===
         for inst_id in sorted(composite.keys()):
@@ -414,7 +432,8 @@ class FMZFactorStrategy(
         if exec_price <= 0:
             return None
 
-        raw_qty = Decimal(str(self.config.position_value / exec_price))
+        multiplier = float(instrument.multiplier)
+        raw_qty = Decimal(str(self.config.position_value / (exec_price * multiplier)))
         qty = instrument.make_qty(raw_qty)
 
         # Record position metadata

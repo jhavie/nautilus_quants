@@ -1,6 +1,7 @@
 """Common utilities for nautilus_quants."""
 
 from nautilus_quants.common.anchor_price_execution import AnchorPriceExecutionMixin
+from nautilus_quants.common.bar_spec import format_bar_spec, parse_bar_spec
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (
     EventTimePendingExecutionMixin,
@@ -14,4 +15,6 @@ __all__ = [
     "EventTimePendingExecutionMixin",
     "EventTimePriceBook",
     "LimitOrderExecutionMixin",
+    "format_bar_spec",
+    "parse_bar_spec",
 ]

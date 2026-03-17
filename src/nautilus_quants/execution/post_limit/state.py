@@ -78,6 +78,9 @@ class OrderExecutionState:
     chase_step_ticks: int | None = None
     post_only: bool | None = None
 
+    # POST_ONLY rejection retry tracking
+    post_only_retreat_ticks: int = 0
+
     # Metrics
     limit_orders_submitted: int = 0
     last_limit_price: float = 0.0

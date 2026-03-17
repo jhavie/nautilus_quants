@@ -1,0 +1,18 @@
+# Alpha101 Single Factor Configuration
+#
+# Single factor: K-line body-to-range ratio
+# Used for testnet verification of factor computation pipeline
+
+metadata:
+  name: alpha101_body_range
+  version: "1.0"
+  description: "Single factor: K-line body-to-range ratio"
+
+factors:
+  alpha101:
+    expression: "(close - open) / ((high - low) + 0.001)"
+    description: "Alpha#101: K-line body-to-range ratio"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

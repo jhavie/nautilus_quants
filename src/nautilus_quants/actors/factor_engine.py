@@ -359,6 +359,13 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 diag_parts.append(f"{fname}={len(fvals)}")
             self.log.info(f"Factor compute #{compute_count} [{', '.join(diag_parts)}]")
 
+        # Log actual factor values sorted by value (ascending) for ranking visibility
+        for fname, fvals in results.items():
+            if fvals:
+                sorted_vals = sorted(fvals.items(), key=lambda x: x[1])
+                vals_str = ", ".join(f"{inst}={v:.6f}" for inst, v in sorted_vals)
+                self.log.info(f"[{fname}] {vals_str}")
+
         # Create and publish FactorValues
         factor_values = FactorValues.create(
             ts_event=ts,

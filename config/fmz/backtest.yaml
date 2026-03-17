@@ -30,7 +30,7 @@ venues:
 
 data:
   # Standard Bar (Nautilus native, for Instrument registration and price data)
-  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+  - catalog_path: "data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "4h"
     instrument_ids:
@@ -319,7 +319,7 @@ engine:
         n_short: 40
         position_value: 300
         rebalance_interval: 1
-        composite_factor: "volume_norm"
+        composite_factor: "alpha044"
 
 report:
   output_dir: "logs/performance"
@@ -347,7 +347,7 @@ report:
       - html
       - png
   position_viz:
-    enabled: true
+    enabled: false
     title: "FMZ 4-Factor Position Timeline"
     output_subdir: "echarts"
     chart_height: 500
