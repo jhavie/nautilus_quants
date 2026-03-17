@@ -16,7 +16,10 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import ClientOrderId, InstrumentId
 from nautilus_trader.model.objects import Quantity
 
-from nautilus_quants.execution.post_limit.algorithm import compute_limit_price
+from nautilus_quants.execution.post_limit.algorithm import (
+    _spawn_linkage_fields,
+    compute_limit_price,
+)
 from nautilus_quants.execution.post_limit.config import PostLimitExecAlgorithmConfig
 from nautilus_quants.execution.post_limit.state import OrderExecutionState, OrderState
 
@@ -198,6 +201,23 @@ class TestComputeLimitPrice:
             post_only=False, best_bid=100.0, best_ask=102.0,
         )
         assert price == 105.0
+
+
+class TestSpawnLinkageFields:
+    """Test linkage field extraction for spawned orders."""
+
+    class _PrimaryStub:
+        contingency_type = "contingency"
+        order_list_id = "order-list"
+        linked_order_ids = ["A", "B"]
+        parent_order_id = "parent-id"
+
+    def test_extracts_contingent_linkage_fields(self) -> None:
+        fields = _spawn_linkage_fields(self._PrimaryStub())
+        assert fields["contingency_type"] == "contingency"
+        assert fields["order_list_id"] == "order-list"
+        assert fields["linked_order_ids"] == ["A", "B"]
+        assert fields["parent_order_id"] == "parent-id"
 
 
 # ---------------------------------------------------------------------------

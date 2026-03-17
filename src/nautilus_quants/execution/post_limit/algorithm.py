@@ -61,6 +61,16 @@ def compute_limit_price(
     return max(price, tick)
 
 
+def _spawn_linkage_fields(primary: Order) -> dict[str, object]:
+    """Fields that preserve parent contingent/list linkage on spawned orders."""
+    return {
+        "contingency_type": primary.contingency_type,
+        "order_list_id": primary.order_list_id,
+        "linked_order_ids": primary.linked_order_ids,
+        "parent_order_id": primary.parent_order_id,
+    }
+
+
 class PostLimitExecAlgorithm(ExecAlgorithm):
     """Execution algorithm that converts MarketOrders into post-only limit orders.
 
@@ -247,6 +257,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             reduce_only=reduce_only,
             exec_algorithm_id=self.id,
             exec_spawn_id=primary.client_order_id,
+            **_spawn_linkage_fields(primary),
         )
 
     def _create_spawned_market(
@@ -271,6 +282,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             ts_init=self.clock.timestamp_ns(),
             exec_algorithm_id=self.id,
             exec_spawn_id=primary.client_order_id,
+            **_spawn_linkage_fields(primary),
         )
 
     # ------------------------------------------------------------------
