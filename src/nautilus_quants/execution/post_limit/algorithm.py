@@ -8,9 +8,12 @@ import pickle
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from nautilus_trader.core.uuid import UUID4
 from nautilus_trader.execution.algorithm import ExecAlgorithm
 from nautilus_trader.model.enums import OrderSide, OrderType, TimeInForce
+from nautilus_trader.model.identifiers import ClientOrderId, InstrumentId
 from nautilus_trader.model.objects import Price, Quantity
+from nautilus_trader.model.orders import LimitOrder, MarketOrder
 
 from nautilus_quants.backtest.protocols import EXECUTION_STATES_CACHE_KEY
 from nautilus_quants.execution.post_limit.config import PostLimitExecAlgorithmConfig
@@ -18,7 +21,6 @@ from nautilus_quants.execution.post_limit.state import OrderExecutionState, Orde
 
 if TYPE_CHECKING:
     from nautilus_trader.model.events import OrderCanceled, OrderFilled, OrderRejected
-    from nautilus_trader.model.identifiers import ClientOrderId
     from nautilus_trader.model.instruments import Instrument
     from nautilus_trader.model.orders import Order
 
@@ -81,6 +83,10 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self._states: dict[ClientOrderId, OrderExecutionState] = {}
         # spawned_order_id -> primary_order_id (reverse lookup)
         self._spawned_to_primary: dict[ClientOrderId, ClientOrderId] = {}
+        # primary_order_id -> spawn sequence counter (for hyphen-free spawn IDs)
+        self._spawn_sequence: dict[ClientOrderId, int] = {}
+        # Instruments with active QuoteTick subscriptions
+        self._subscribed_instruments: set[InstrumentId] = set()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -94,7 +100,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"max_chase={self._config.max_chase_attempts}, "
             f"chase_step_ticks={self._config.chase_step_ticks}, "
             f"fallback_to_market={self._config.fallback_to_market}, "
-            f"post_only={self._config.post_only}"
+            f"post_only={self._config.post_only}, "
+            f"max_post_only_retries={self._config.max_post_only_retries}"
         )
 
     def on_stop(self) -> None:
@@ -185,6 +192,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
 
         self._states[order.client_order_id] = exec_state
 
+        # Subscribe to QuoteTick for real-time BBO (once per instrument)
+        if exec_state.instrument_id not in self._subscribed_instruments:
+            self.subscribe_quote_ticks(exec_state.instrument_id)
+            self._subscribed_instruments.add(exec_state.instrument_id)
+            self.log.info(f"PostLimit subscribed QuoteTick: {exec_state.instrument_id}")
+
         self.log.info(
             f"PostLimit on_order: {order.client_order_id} "
             f"{order.side.name} {order.quantity} {order.instrument_id} "
@@ -192,6 +205,73 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         )
 
         self._spawn_and_submit_limit(exec_state)
+
+    # ------------------------------------------------------------------
+    # Spawn ID generation (hyphen-free for OKX compatibility)
+    # ------------------------------------------------------------------
+
+    def _generate_spawn_id(self, primary: Order) -> ClientOrderId:
+        """Generate a hyphen-free spawn order ID.
+
+        OKX rejects clOrdId values containing hyphens. The base ExecAlgorithm's
+        ``spawn_limit``/``spawn_market`` append ``-E{n}`` which introduces a
+        hyphen. This method produces ``{base}E{n}`` instead.
+        """
+        seq = self._spawn_sequence.get(primary.client_order_id, 0) + 1
+        self._spawn_sequence[primary.client_order_id] = seq
+        return ClientOrderId(f"{primary.client_order_id.value}E{seq}")
+
+    def _create_spawned_limit(
+        self,
+        primary: Order,
+        quantity: Quantity,
+        price: Price,
+        time_in_force: TimeInForce,
+        post_only: bool,
+        reduce_only: bool,
+    ) -> LimitOrder:
+        """Create a spawned LimitOrder with a hyphen-free client order ID."""
+        spawn_id = self._generate_spawn_id(primary)
+        return LimitOrder(
+            trader_id=primary.trader_id,
+            strategy_id=primary.strategy_id,
+            instrument_id=primary.instrument_id,
+            client_order_id=spawn_id,
+            order_side=primary.side,
+            quantity=quantity,
+            price=price,
+            init_id=UUID4(),
+            ts_init=self.clock.timestamp_ns(),
+            time_in_force=time_in_force,
+            post_only=post_only,
+            reduce_only=reduce_only,
+            exec_algorithm_id=self.id,
+            exec_spawn_id=primary.client_order_id,
+        )
+
+    def _create_spawned_market(
+        self,
+        primary: Order,
+        quantity: Quantity,
+        time_in_force: TimeInForce,
+        reduce_only: bool,
+    ) -> MarketOrder:
+        """Create a spawned MarketOrder with a hyphen-free client order ID."""
+        spawn_id = self._generate_spawn_id(primary)
+        return MarketOrder(
+            trader_id=primary.trader_id,
+            strategy_id=primary.strategy_id,
+            instrument_id=primary.instrument_id,
+            client_order_id=spawn_id,
+            order_side=primary.side,
+            quantity=quantity,
+            time_in_force=time_in_force,
+            reduce_only=reduce_only,
+            init_id=UUID4(),
+            ts_init=self.clock.timestamp_ns(),
+            exec_algorithm_id=self.id,
+            exec_spawn_id=primary.client_order_id,
+        )
 
     # ------------------------------------------------------------------
     # Core operations
@@ -271,14 +351,17 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
                     if ask_price is not None:
                         best_ask = float(ask_price)
 
+        effective_offset = self._config.offset_ticks - state.post_only_retreat_ticks
+        post_only = self._get_post_only(state)
+
         raw_price = compute_limit_price(
             tick=tick,
             side=side,
             anchor_px=anchor_px,
-            offset_ticks=self._config.offset_ticks,
-            chase_count=chase_count,
+            offset_ticks=effective_offset,
+            chase_count=0 if post_only else chase_count,  # post_only: re-peg only
             chase_step_ticks=self._get_chase_step_ticks(state),
-            post_only=self._get_post_only(state),
+            post_only=post_only,
             best_bid=best_bid,
             best_ask=best_ask,
         )
@@ -319,14 +402,13 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             state=state,
         )
 
-        spawned = self.spawn_limit(
+        spawned = self._create_spawned_limit(
             primary=primary,
             quantity=remaining,
             price=limit_price,
             time_in_force=TimeInForce.GTC,
             post_only=self._get_post_only(state),
             reduce_only=state.reduce_only,
-            reduce_primary=False,
         )
 
         # Track the spawned order
@@ -425,6 +507,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
     def _chase_order(self, state: OrderExecutionState) -> None:
         """Cancel current limit and prepare to re-post at a more aggressive price."""
         state.chase_count += 1
+        state.post_only_retreat_ticks = 0  # Reset retreat on chase (new pricing round)
         state.transition_to(OrderState.CHASING)
 
         if state.current_limit_order_id is not None:
@@ -474,12 +557,11 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             self._complete_order(state)
             return
 
-        spawned = self.spawn_market(
+        spawned = self._create_spawned_market(
             primary=primary,
             quantity=remaining,
             time_in_force=TimeInForce.GTC,
             reduce_only=state.reduce_only,
-            reduce_primary=False,
         )
 
         self._spawned_to_primary[spawned.client_order_id] = state.primary_order_id
@@ -560,7 +642,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             self._fallback_to_market(state)
 
     def on_order_rejected(self, event: OrderRejected) -> None:
-        """Handle rejection - fall back to market order."""
+        """Handle rejection - retry on POST_ONLY or fall back to market order."""
         state = self._lookup_state_by_spawned(event.client_order_id)
         if state is None:
             return
@@ -573,6 +655,21 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
 
         self._cancel_timer(state)
 
+        # POST_ONLY rejection: retreat 1 more tick and retry
+        if (
+            event.due_post_only
+            and state.post_only_retreat_ticks < self._config.max_post_only_retries
+            and state.state in (OrderState.ACTIVE, OrderState.PENDING, OrderState.CHASING)
+        ):
+            state.post_only_retreat_ticks += 1
+            self.log.info(
+                f"PostLimit POST_ONLY retry: {state.primary_order_id} "
+                f"retreat +{state.post_only_retreat_ticks} ticks"
+            )
+            self._spawn_and_submit_limit(state)
+            return
+
+        # Non-POST_ONLY rejection, or retries exhausted → market fallback
         if state.state in (OrderState.ACTIVE, OrderState.PENDING, OrderState.CHASING):
             self._fallback_to_market(state)
         elif state.state == OrderState.MARKET_FALLBACK:
@@ -628,6 +725,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"filled={state.filled_quantity}/{state.total_quantity} "
             f"limit_orders={state.limit_orders_submitted} "
             f"chases={state.chase_count} "
+            f"post_only_retries={state.post_only_retreat_ticks} "
             f"elapsed={elapsed_ms:.0f}ms"
         )
 

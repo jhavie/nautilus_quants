@@ -33,6 +33,10 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
         When True the algorithm clamps the price so it never crosses the
         opposite BBO (prevents taker fills on exchanges that reject post-only
         cross orders).
+    max_post_only_retries : int, default 3
+        Maximum number of retries after a POST_ONLY rejection (due_post_only).
+        Each retry retreats an additional tick from BBO.
+        Set to 0 to disable retries (immediate market fallback, legacy behavior).
     """
 
     exec_algorithm_id: ExecAlgorithmId | None = ExecAlgorithmId("PostLimit")
@@ -42,3 +46,4 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     chase_step_ticks: int = 1
     fallback_to_market: bool = True
     post_only: bool = True
+    max_post_only_retries: int = 3

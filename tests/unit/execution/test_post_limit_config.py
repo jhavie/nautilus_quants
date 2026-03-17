@@ -68,3 +68,18 @@ class TestPostLimitExecAlgorithmConfig:
         """Zero max chase means no chasing, immediate market fallback."""
         config = PostLimitExecAlgorithmConfig(max_chase_attempts=0)
         assert config.max_chase_attempts == 0
+
+    def test_default_max_post_only_retries(self) -> None:
+        """Default max_post_only_retries should be 3."""
+        config = PostLimitExecAlgorithmConfig()
+        assert config.max_post_only_retries == 3
+
+    def test_zero_max_post_only_retries(self) -> None:
+        """Zero disables POST_ONLY retry (immediate market fallback)."""
+        config = PostLimitExecAlgorithmConfig(max_post_only_retries=0)
+        assert config.max_post_only_retries == 0
+
+    def test_custom_max_post_only_retries(self) -> None:
+        """Custom max_post_only_retries value."""
+        config = PostLimitExecAlgorithmConfig(max_post_only_retries=5)
+        assert config.max_post_only_retries == 5

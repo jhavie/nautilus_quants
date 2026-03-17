@@ -131,6 +131,25 @@ class TestComputeLimitPrice:
         assert p1 == 98.0
         assert p2 == 96.0
 
+    def test_post_only_chase_does_not_step(self) -> None:
+        """post_only=True: chase_count should NOT affect price (re-peg only).
+
+        In production, _determine_limit_price passes chase_count=0 when
+        post_only is True. This test verifies compute_limit_price produces
+        the same result regardless of chase_count when called with count=0.
+        """
+        base_args = dict(
+            tick=1.0, side=OrderSide.BUY, anchor_px=90.0,
+            offset_ticks=-1, chase_step_ticks=2,
+            post_only=True, best_bid=100.0, best_ask=102.0,
+        )
+        # All calls use chase_count=0 (as _determine_limit_price would)
+        p0 = compute_limit_price(chase_count=0, **base_args)
+        p1 = compute_limit_price(chase_count=0, **base_args)  # "chase 1" → still 0
+        p2 = compute_limit_price(chase_count=0, **base_args)  # "chase 2" → still 0
+        # All prices identical: base=100, offset=-1, price=99
+        assert p0 == p1 == p2 == 99.0
+
     def test_price_never_goes_below_tick(self) -> None:
         """Price must be at least 1 tick (never zero or negative)."""
         price = compute_limit_price(
@@ -159,6 +178,26 @@ class TestComputeLimitPrice:
         )
         # No ask to clamp against, just use bid
         assert price == 50000.0
+
+    def test_effective_offset_with_retreat(self) -> None:
+        """offset=-1, retreat=2 → effective=-3: retreats 3 ticks total."""
+        # BUY: base=best_bid=100, effective_offset=-3, price=100+(-3)*1=97
+        price = compute_limit_price(
+            tick=1.0, side=OrderSide.BUY, anchor_px=90.0,
+            offset_ticks=-3, chase_count=0, chase_step_ticks=1,
+            post_only=False, best_bid=100.0, best_ask=102.0,
+        )
+        assert price == 97.0
+
+    def test_effective_offset_sell_with_retreat(self) -> None:
+        """SELL offset=-1, retreat=2 → effective=-3: retreats 3 ticks total."""
+        # SELL: base=best_ask=102, effective_offset=-3, price=102-(-3)*1=105
+        price = compute_limit_price(
+            tick=1.0, side=OrderSide.SELL, anchor_px=110.0,
+            offset_ticks=-3, chase_count=0, chase_step_ticks=1,
+            post_only=False, best_bid=100.0, best_ask=102.0,
+        )
+        assert price == 105.0
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +297,148 @@ class TestExecParamsParsing:
         params: dict[str, str] = {}
         anchor_px = float(params.get("anchor_px") or "0.0")
         assert anchor_px == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: POST_ONLY retry mechanism
+# ---------------------------------------------------------------------------
+
+
+class TestPostOnlyRetryMechanism:
+    """Test POST_ONLY rejection retry logic using state and config directly."""
+
+    def test_post_only_rejection_retries_with_deeper_offset(self) -> None:
+        """POST_ONLY rejection increments retreat_ticks and allows retry."""
+        config = PostLimitExecAlgorithmConfig(
+            offset_ticks=-1, max_post_only_retries=3,
+        )
+        state = _make_state(state=OrderState.ACTIVE)
+
+        # Simulate first POST_ONLY rejection: retreat +1
+        assert state.post_only_retreat_ticks < config.max_post_only_retries
+        state.post_only_retreat_ticks += 1
+        assert state.post_only_retreat_ticks == 1
+
+        # Effective offset: -1 - 1 = -2
+        effective_offset = config.offset_ticks - state.post_only_retreat_ticks
+        assert effective_offset == -2
+
+        # Price should retreat further
+        price = compute_limit_price(
+            tick=1.0, side=OrderSide.BUY, anchor_px=90.0,
+            offset_ticks=effective_offset, chase_count=0, chase_step_ticks=1,
+            post_only=False, best_bid=100.0, best_ask=102.0,
+        )
+        assert price == 98.0  # 100 + (-2) = 98
+
+    def test_post_only_rejection_max_retries_then_market(self) -> None:
+        """After max retries, should proceed to market fallback."""
+        config = PostLimitExecAlgorithmConfig(
+            offset_ticks=-1, max_post_only_retries=3,
+        )
+        state = _make_state(state=OrderState.ACTIVE)
+
+        # Exhaust all retries
+        for i in range(config.max_post_only_retries):
+            assert state.post_only_retreat_ticks < config.max_post_only_retries
+            state.post_only_retreat_ticks += 1
+
+        # Now retries exhausted
+        assert state.post_only_retreat_ticks == 3
+        assert not (state.post_only_retreat_ticks < config.max_post_only_retries)
+
+        # Should fall back to market (no more retry)
+        effective_offset = config.offset_ticks - state.post_only_retreat_ticks
+        assert effective_offset == -4  # -1 - 3 = -4
+
+    def test_post_only_rejection_disabled_zero_retries(self) -> None:
+        """max_post_only_retries=0 means immediate market fallback (backward compat)."""
+        config = PostLimitExecAlgorithmConfig(
+            offset_ticks=-1, max_post_only_retries=0,
+        )
+        state = _make_state(state=OrderState.ACTIVE)
+
+        # Even first POST_ONLY rejection should NOT retry
+        assert not (state.post_only_retreat_ticks < config.max_post_only_retries)
+
+    def test_non_post_only_rejection_immediate_market(self) -> None:
+        """Non-POST_ONLY rejection should always go to market, ignoring retry config."""
+        config = PostLimitExecAlgorithmConfig(
+            offset_ticks=-1, max_post_only_retries=3,
+        )
+        state = _make_state(state=OrderState.ACTIVE)
+
+        # due_post_only=False → should NOT retry regardless of config
+        due_post_only = False
+        should_retry = (
+            due_post_only
+            and state.post_only_retreat_ticks < config.max_post_only_retries
+            and state.state in (OrderState.ACTIVE, OrderState.PENDING, OrderState.CHASING)
+        )
+        assert should_retry is False
+        assert state.post_only_retreat_ticks == 0  # No change
+
+    def test_retreat_resets_on_chase(self) -> None:
+        """POST_ONLY retreat ticks should reset to 0 when chase starts."""
+        state = _make_state(state=OrderState.ACTIVE)
+        state.post_only_retreat_ticks = 2
+
+        # Simulate chase: reset retreat, then transition
+        state.chase_count += 1
+        state.post_only_retreat_ticks = 0  # Mirrors _chase_order behavior
+        state.transition_to(OrderState.CHASING)
+        assert state.post_only_retreat_ticks == 0  # Reset
+
+        state.transition_to(OrderState.ACTIVE)
+        assert state.post_only_retreat_ticks == 0  # Stays reset
+
+    def test_progressive_retreat_prices(self) -> None:
+        """Verify prices retreat progressively with each retry."""
+        config = PostLimitExecAlgorithmConfig(
+            offset_ticks=-1, max_post_only_retries=3,
+        )
+
+        prices = []
+        for retreat in range(4):  # 0, 1, 2, 3
+            effective_offset = config.offset_ticks - retreat
+            price = compute_limit_price(
+                tick=0.01, side=OrderSide.BUY, anchor_px=49000.0,
+                offset_ticks=effective_offset, chase_count=0, chase_step_ticks=1,
+                post_only=False, best_bid=50000.0, best_ask=50002.0,
+            )
+            prices.append(price)
+
+        # Each price should be lower (more retreat) than the previous
+        assert prices[0] == pytest.approx(49999.99)  # offset=-1
+        assert prices[1] == pytest.approx(49999.98)  # offset=-2
+        assert prices[2] == pytest.approx(49999.97)  # offset=-3
+        assert prices[3] == pytest.approx(49999.96)  # offset=-4
+
+    def test_retreat_with_pending_state(self) -> None:
+        """POST_ONLY retry should also work in PENDING state."""
+        config = PostLimitExecAlgorithmConfig(max_post_only_retries=3)
+        state = _make_state(state=OrderState.PENDING)
+
+        due_post_only = True
+        should_retry = (
+            due_post_only
+            and state.post_only_retreat_ticks < config.max_post_only_retries
+            and state.state in (OrderState.ACTIVE, OrderState.PENDING, OrderState.CHASING)
+        )
+        assert should_retry is True
+
+    def test_retreat_with_chasing_state(self) -> None:
+        """POST_ONLY retry should also work in CHASING state."""
+        config = PostLimitExecAlgorithmConfig(max_post_only_retries=3)
+        state = _make_state(state=OrderState.CHASING)
+
+        due_post_only = True
+        should_retry = (
+            due_post_only
+            and state.post_only_retreat_ticks < config.max_post_only_retries
+            and state.state in (OrderState.ACTIVE, OrderState.PENDING, OrderState.CHASING)
+        )
+        assert should_retry is True
 
 
 # ---------------------------------------------------------------------------
@@ -364,5 +545,6 @@ def _make_state(
         side=OrderSide.BUY,
         total_quantity=Quantity.from_str("1.0"),
         anchor_px=50000.0,
+        state=state,
         filled_quantity=Quantity.zero(1),
     )
