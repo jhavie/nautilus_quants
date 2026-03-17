@@ -24,8 +24,8 @@ from nautilus_trader.model.objects import Currency
 from nautilus_trader.trading.controller import Controller
 from nautilus_trader.trading.trader import Trader
 
-from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
-from nautilus_quants.backtest.utils.equity import compute_mtm_equity
+from nautilus_quants.utils.bar_spec import parse_interval_to_timedelta
+from nautilus_quants.utils.equity import compute_mtm_equity
 
 
 class EquityGuardControllerConfig(ControllerConfig, kw_only=True, frozen=True):

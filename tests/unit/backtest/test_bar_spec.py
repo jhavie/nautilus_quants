@@ -3,7 +3,7 @@
 import pytest
 from nautilus_trader.model.enums import BarAggregation, PriceType
 
-from nautilus_quants.backtest.utils.bar_spec import format_bar_spec, parse_bar_spec
+from nautilus_quants.utils.bar_spec import format_bar_spec, parse_bar_spec
 
 
 class TestParseBarSpec:

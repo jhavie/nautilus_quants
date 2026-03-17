@@ -1177,24 +1177,44 @@ name = "nautilus-quants"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alphalens-reloaded" },
     { name = "click" },
     { name = "lark" },
     { name = "nautilus-trader" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "alphalens-reloaded" },
+    { name = "black" },
+    { name = "isort" },
+    { name = "mypy" },
     { name = "plotly" },
     { name = "pysocks" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "python-binance" },
-    { name = "pyyaml" },
     { name = "quantstats" },
     { name = "scipy" },
     { name = "tardis-dev" },
     { name = "tenacity" },
     { name = "tqdm" },
 ]
-
-[package.optional-dependencies]
+backtest = [
+    { name = "alphalens-reloaded" },
+    { name = "plotly" },
+    { name = "quantstats" },
+    { name = "scipy" },
+]
+data = [
+    { name = "pysocks" },
+    { name = "python-binance" },
+    { name = "tardis-dev" },
+    { name = "tenacity" },
+    { name = "tqdm" },
+]
 dev = [
     { name = "black" },
     { name = "isort" },
@@ -1205,28 +1225,29 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alphalens-reloaded", specifier = ">=0.0.12" },
+    { name = "alphalens-reloaded", marker = "extra == 'backtest'", specifier = ">=0.0.12" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "lark", specifier = ">=1.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "nautilus-quants", extras = ["data", "backtest", "dev"], marker = "extra == 'all'" },
     { name = "nautilus-trader", specifier = "==1.224.0" },
     { name = "numpy", specifier = ">=1.26.4" },
     { name = "pandas", specifier = ">=2.3.3,<3.0.0" },
-    { name = "plotly", specifier = ">=5.18.0" },
-    { name = "pysocks", specifier = ">=1.7.1" },
+    { name = "plotly", marker = "extra == 'backtest'", specifier = ">=5.18.0" },
+    { name = "pysocks", marker = "extra == 'data'", specifier = ">=1.7.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "python-binance", specifier = ">=1.0.19" },
+    { name = "python-binance", marker = "extra == 'data'", specifier = ">=1.0.19" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "quantstats", specifier = ">=0.0.64" },
-    { name = "scipy", specifier = ">=1.11.0" },
-    { name = "tardis-dev", specifier = ">=2.1" },
-    { name = "tenacity", specifier = ">=8.0.0" },
-    { name = "tqdm", specifier = ">=4.66" },
+    { name = "quantstats", marker = "extra == 'backtest'", specifier = ">=0.0.64" },
+    { name = "scipy", marker = "extra == 'backtest'", specifier = ">=1.11.0" },
+    { name = "tardis-dev", marker = "extra == 'data'", specifier = ">=2.1" },
+    { name = "tenacity", marker = "extra == 'data'", specifier = ">=8.0.0" },
+    { name = "tqdm", marker = "extra == 'data'", specifier = ">=4.66" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["data", "backtest", "dev", "all"]
 
 [[package]]
 name = "nautilus-trader"

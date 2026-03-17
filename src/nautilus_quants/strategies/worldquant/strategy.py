@@ -32,7 +32,7 @@ from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId, PositionId
 from nautilus_trader.trading.strategy import Strategy
 
-from nautilus_quants.backtest.protocols import POSITION_METADATA_CACHE_KEY
+from nautilus_quants.utils.cache_keys import POSITION_METADATA_CACHE_KEY
 from nautilus_quants.common.anchor_price_execution import AnchorPriceExecutionMixin
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.common.event_time_pending_execution import (

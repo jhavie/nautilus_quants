@@ -1,6 +1,6 @@
 """Backtest utilities."""
 
-from nautilus_quants.backtest.utils.bar_spec import format_bar_spec, parse_bar_spec
+from nautilus_quants.utils.bar_spec import format_bar_spec, parse_bar_spec
 from nautilus_quants.backtest.utils.config_parser import (
     extract_data_configs,
     get_nautilus_config_dict,

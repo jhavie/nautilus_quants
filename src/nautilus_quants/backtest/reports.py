@@ -7,12 +7,14 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from nautilus_quants.backtest.exceptions import BacktestReportError
-from nautilus_quants.backtest.protocols import (
+from nautilus_quants.utils.cache_keys import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
     EXECUTION_STATES_CACHE_KEY,
     FACTOR_VALUES_CACHE_KEY,
     POSITION_MARKET_VALUES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
+)
+from nautilus_quants.utils.protocols import (
     BaseMetadataRenderer,
     MetadataRenderer,
 )

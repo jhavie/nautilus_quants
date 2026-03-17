@@ -14,35 +14,38 @@ authors = [
 ]
 
 dependencies = [
+    # Core: live trading runtime
     "nautilus_trader==1.224.0",
     "numpy>=1.26.4",
     "pandas>=2.3.3,<3.0.0",
     "pyyaml>=6.0",
-    "plotly>=5.18.0",  # For Nautilus native visualization
-    # Data pipeline dependencies
-    "python-binance>=1.0.19",  # Binance API client
-    "click>=8.0.0",  # CLI framework
-    "tenacity>=8.0.0",  # Retry logic with exponential backoff
-    # Tardis tick data pipeline
-    "tardis-dev>=2.1",  # Tardis.dev official data download client
-    "tqdm>=4.66",  # Progress bars for downloads
-    "PySocks>=1.7.1",  # SOCKS5 proxy support for Tardis downloads
-    # Factor framework dependencies
-    "lark>=1.1.0",  # Expression parser for Alpha101-style factors
-    # Report enhancement
-    "quantstats>=0.0.64",  # QuantStats for enhanced backtest reports
-    # Alpha factor analysis
-    "alphalens-reloaded>=0.0.12",  # Factor quality evaluation (IC/ICIR/quantile returns)
-    "scipy>=1.11.0",  # Statistical distributions for cross-sectional quantile operator
+    "click>=8.0.0",
+    "lark>=1.1.0",
 ]
 
 [project.optional-dependencies]
+data = [
+    "tardis-dev>=2.1",
+    "tqdm>=4.66",
+    "PySocks>=1.7.1",
+    "python-binance>=1.0.19",
+    "tenacity>=8.0.0",
+]
+backtest = [
+    "quantstats>=0.0.64",
+    "alphalens-reloaded>=0.0.12",
+    "scipy>=1.11.0",
+    "plotly>=5.18.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
     "isort>=5.12.0",
     "mypy>=1.0.0",
+]
+all = [
+    "nautilus-quants[data,backtest,dev]",
 ]
 
 [tool.hatch.build.targets.wheel]

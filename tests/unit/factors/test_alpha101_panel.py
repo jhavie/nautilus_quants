@@ -123,8 +123,8 @@ class TestAlpha006Correctness:
              for col in panel["open"].columns},
             index=panel["open"].index,
         )
-        # Popbo-aligned: correlation does fillna(0).replace([inf,-inf], 0)
-        expected = -1 * corr.fillna(0).replace([np.inf, -np.inf], 0)
+        # NaN propagates naturally through warmup period; only inf → NaN
+        expected = -1 * corr.replace([np.inf, -np.inf], np.nan)
         pd.testing.assert_frame_equal(result, expected)
 
 
@@ -145,8 +145,8 @@ class TestAlpha003Correctness:
              for col in panel["open"].columns},
             index=panel["open"].index,
         )
-        # Popbo-aligned: correlation does fillna(0).replace([inf,-inf], 0)
-        expected = -1 * corr.fillna(0).replace([np.inf, -np.inf], 0)
+        # NaN propagates naturally through warmup period; only inf → NaN
+        expected = -1 * corr.replace([np.inf, -np.inf], np.nan)
         pd.testing.assert_frame_equal(result, expected)
 
 

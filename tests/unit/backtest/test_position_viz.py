@@ -8,11 +8,11 @@ import pandas as pd
 import pytest
 
 from nautilus_quants.backtest.config import PositionVisualizationConfig, ReportConfig
-from nautilus_quants.backtest.protocols import (
+from nautilus_quants.utils.cache_keys import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
-    BaseMetadataRenderer,
 )
+from nautilus_quants.utils.protocols import BaseMetadataRenderer
 from nautilus_quants.backtest.reports import ReportGenerator
 
 

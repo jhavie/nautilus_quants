@@ -123,7 +123,7 @@ def run_backtest(
 
     if report_config and output_dir:
         # Get metadata renderer from config (explicit) or use default
-        from nautilus_quants.backtest.registry import RendererRegistry
+        from nautilus_quants.utils.registry import RendererRegistry
 
         renderer_name = None
         if report_config.position_viz:

@@ -39,7 +39,7 @@ class TestModuleIndependence:
     def test_utilities_import_independently(self) -> None:
         """Verify utility modules can be imported independently."""
         # Import utilities directly
-        from nautilus_quants.backtest.utils.bar_spec import parse_bar_spec
+        from nautilus_quants.utils.bar_spec import parse_bar_spec
         from nautilus_quants.backtest.utils.reporting import generate_run_id
 
         assert parse_bar_spec is not None

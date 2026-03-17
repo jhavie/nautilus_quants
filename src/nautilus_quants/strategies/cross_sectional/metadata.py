@@ -16,8 +16,8 @@ from __future__ import annotations
 import pickle
 from typing import Any
 
-from nautilus_quants.backtest.protocols import ColumnConfig
-from nautilus_quants.backtest.registry import RendererRegistry
+from nautilus_quants.utils.protocols import ColumnConfig
+from nautilus_quants.utils.registry import RendererRegistry
 
 
 class CrossSectionalMetadataProvider:

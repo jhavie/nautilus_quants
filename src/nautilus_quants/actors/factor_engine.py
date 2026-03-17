@@ -23,7 +23,7 @@ from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.model.data import Bar, BarType, DataType
 
-from nautilus_quants.backtest.protocols import FACTOR_VALUES_CACHE_KEY
+from nautilus_quants.utils.cache_keys import FACTOR_VALUES_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.factors.config import load_factor_config
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
