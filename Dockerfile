@@ -24,7 +24,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 procps && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/.venv /app/.venv
+RUN useradd -m -u 1000 trader && mkdir -p /app/logs /app/data && chown -R trader:trader /app
+
+COPY --from=builder --chown=trader:trader /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Deterministic floating-point: force OpenBLAS single-thread
@@ -32,11 +34,9 @@ ENV OPENBLAS_NUM_THREADS=1
 ENV OMP_NUM_THREADS=1
 ENV MKL_NUM_THREADS=1
 
-COPY src/ ./src/
-COPY config/ ./config/
-RUN mkdir -p /app/logs /app/data
+COPY --chown=trader:trader src/ ./src/
+COPY --chown=trader:trader config/ ./config/
 
-RUN useradd -m -u 1000 trader && chown -R trader:trader /app
 USER trader
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
