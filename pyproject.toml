@@ -26,6 +26,7 @@ dependencies = [
     # Tardis tick data pipeline
     "tardis-dev>=2.1",  # Tardis.dev official data download client
     "tqdm>=4.66",  # Progress bars for downloads
+    "PySocks>=1.7.1",  # SOCKS5 proxy support for Tardis downloads
     # Factor framework dependencies
     "lark>=1.1.0",  # Expression parser for Alpha101-style factors
     # Report enhancement
