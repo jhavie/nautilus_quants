@@ -160,7 +160,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-03-31"
+    end_time: "2022-12-31"
 
 engine:
   trader_id: "BACKTESTER-FMZ-4F-001"

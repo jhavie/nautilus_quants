@@ -14,7 +14,7 @@ services:
       - ./config:/app/config:ro
       - ./logs:/app/logs
       - ./data:/app/data
-    command: ["run", "config/live/okx_fmz_demo.yaml"]
+    command: ["run", "config/live/okx_testnet_15m.yaml"]
 
   # === Backtest Verification ===
   backtest:
