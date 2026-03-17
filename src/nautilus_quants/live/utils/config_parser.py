@@ -92,10 +92,16 @@ def extract_data_configs(config_dict: dict[str, Any]) -> list[dict[str, str]]:
 
     result = []
     for inst_id in instrument_ids:
-        bar_type = f"{inst_id}.{venue_name}-{native_spec}-EXTERNAL"
+        # Support both "BTC-USDT-SWAP" and "BTC-USDT-SWAP.OKX" formats
+        if "." in inst_id:
+            # Already has venue suffix (e.g. "BTC-USDT-SWAP.OKX")
+            nautilus_id = inst_id
+        else:
+            nautilus_id = f"{inst_id}.{venue_name}"
+        bar_type = f"{nautilus_id}-{native_spec}-EXTERNAL"
         result.append(
             {
-                "instrument_id": inst_id,
+                "instrument_id": nautilus_id,
                 "bar_spec": native_spec,
                 "bar_type": bar_type,
             }

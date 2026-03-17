@@ -118,11 +118,19 @@ class TestExtractDataConfigs:
         result = extract_data_configs(config_dict)
 
         assert len(result) == 2
-        assert result[0]["instrument_id"] == "BTC-USDT-SWAP"
+        assert result[0]["instrument_id"] == "BTC-USDT-SWAP.OKX"
         assert result[0]["bar_type"] == "BTC-USDT-SWAP.OKX-1-HOUR-LAST-EXTERNAL"
         assert result[0]["bar_spec"] == "1-HOUR-LAST"
-        assert result[1]["instrument_id"] == "ETH-USDT-SWAP"
+        assert result[1]["instrument_id"] == "ETH-USDT-SWAP.OKX"
         assert result[1]["bar_type"] == "ETH-USDT-SWAP.OKX-1-HOUR-LAST-EXTERNAL"
+
+    def test_extract_okx_with_suffixed_ids(self) -> None:
+        config_dict = _make_config_dict("OKX", ["BTC-USDT-SWAP.OKX"], "1h")
+        result = extract_data_configs(config_dict)
+
+        assert len(result) == 1
+        assert result[0]["instrument_id"] == "BTC-USDT-SWAP.OKX"
+        assert result[0]["bar_type"] == "BTC-USDT-SWAP.OKX-1-HOUR-LAST-EXTERNAL"
 
     def test_extract_binance(self) -> None:
         config_dict = _make_config_dict("BINANCE", ["BTCUSDT", "ETHUSDT"], "4h")
@@ -163,7 +171,7 @@ class TestInjectDataConfigs:
         strategy_config = result["engine"]["strategies"][0]["config"]
         assert len(strategy_config["bar_types"]) == 2
         assert len(strategy_config["instrument_ids"]) == 2
-        assert "BTC-USDT-SWAP" in strategy_config["instrument_ids"]
+        assert "BTC-USDT-SWAP.OKX" in strategy_config["instrument_ids"]
 
     def test_inject_preserves_existing_bar_types(self) -> None:
         config_dict = _make_config_dict()

@@ -9,9 +9,11 @@ from typing import Any
 
 import yaml
 
-from nautilus_trader.config import LoggingConfig
+from nautilus_trader.common.config import ImportableActorConfig
+from nautilus_trader.config import ImportableExecAlgorithmConfig, LoggingConfig
 from nautilus_trader.live.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
+from nautilus_trader.trading.config import ImportableStrategyConfig
 
 from nautilus_quants.live.exceptions import LiveConfigError
 from nautilus_quants.live.utils.config_parser import (
@@ -127,24 +129,44 @@ def run_live(
 
     trader_id = engine_dict.get("trader_id", "LIVE-001")
 
-    # Build risk engine config
+    # Build risk engine config (live requires LiveRiskEngineConfig)
+    risk_engine_config = None
     risk_engine_dict = engine_dict.get("risk_engine")
+    if risk_engine_dict:
+        from nautilus_trader.config import LiveRiskEngineConfig
 
-    # Build exec engine config
+        risk_engine_config = LiveRiskEngineConfig(**risk_engine_dict)
+
+    # Build exec engine config (live requires LiveExecEngineConfig)
+    exec_engine_config = None
     exec_engine_dict = engine_dict.get("exec_engine")
+    if exec_engine_dict:
+        from nautilus_trader.config import LiveExecEngineConfig
 
-    node_config = TradingNodeConfig(
-        trader_id=trader_id,
-        logging=logging_config,
-        data_clients={venue_name: data_client_config},
-        exec_clients={venue_name: exec_client_config},
-        actors=[
-            a for a in engine_dict.get("actors", [])
-        ],
-        strategies=[
-            s for s in engine_dict.get("strategies", [])
-        ],
-    )
+        exec_engine_config = LiveExecEngineConfig(**exec_engine_dict)
+
+    # Build exec algorithms from config
+    exec_algorithms = [
+        ImportableExecAlgorithmConfig(**ea)
+        for ea in engine_dict.get("exec_algorithms", [])
+    ]
+
+    # Build node config kwargs, only include non-None engine configs
+    node_kwargs: dict[str, Any] = {
+        "trader_id": trader_id,
+        "logging": logging_config,
+        "data_clients": {venue_name: data_client_config},
+        "exec_clients": {venue_name: exec_client_config},
+        "actors": [ImportableActorConfig(**a) for a in engine_dict.get("actors", [])],
+        "strategies": [ImportableStrategyConfig(**s) for s in engine_dict.get("strategies", [])],
+        "exec_algorithms": exec_algorithms,
+    }
+    if risk_engine_config is not None:
+        node_kwargs["risk_engine"] = risk_engine_config
+    if exec_engine_config is not None:
+        node_kwargs["exec_engine"] = exec_engine_config
+
+    node_config = TradingNodeConfig(**node_kwargs)
 
     if dry_run:
         # Validate config without actually connecting

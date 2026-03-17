@@ -27,20 +27,20 @@ DATA_FACTORY = OKXLiveDataClientFactory
 EXEC_FACTORY = OKXLiveExecClientFactory
 
 _INSTRUMENT_TYPE_MAP: dict[str, OKXInstrumentType] = {
-    "SWAP": OKXInstrumentType.Swap,
-    "SPOT": OKXInstrumentType.Spot,
-    "FUTURES": OKXInstrumentType.Futures,
-    "MARGIN": OKXInstrumentType.Margin,
+    "SWAP": OKXInstrumentType.SWAP,
+    "SPOT": OKXInstrumentType.SPOT,
+    "FUTURES": OKXInstrumentType.FUTURES,
+    "MARGIN": OKXInstrumentType.MARGIN,
 }
 
 _CONTRACT_TYPE_MAP: dict[str, OKXContractType] = {
-    "LINEAR": OKXContractType.Linear,
-    "INVERSE": OKXContractType.Inverse,
+    "LINEAR": OKXContractType.LINEAR,
+    "INVERSE": OKXContractType.INVERSE,
 }
 
 _MARGIN_MODE_MAP: dict[str, OKXMarginMode] = {
-    "CROSS": OKXMarginMode.Cross,
-    "ISOLATED": OKXMarginMode.Isolated,
+    "CROSS": OKXMarginMode.CROSS,
+    "ISOLATED": OKXMarginMode.ISOLATED,
 }
 
 
@@ -100,8 +100,10 @@ def build_okx_data_config(
     # Build instrument provider config
     load_ids = None
     if instrument_ids:
-        # Format: "BTC-USDT-SWAP" → load via provider
-        load_ids = frozenset(f"{iid}.OKX" for iid in instrument_ids)
+        # Support both "BTC-USDT-SWAP" and "BTC-USDT-SWAP.OKX" formats
+        load_ids = frozenset(
+            iid if ".OKX" in iid else f"{iid}.OKX" for iid in instrument_ids
+        )
 
     provider_config = InstrumentProviderConfig(
         load_all=load_ids is None,
@@ -146,7 +148,9 @@ def build_okx_exec_config(
 
     load_ids = None
     if instrument_ids:
-        load_ids = frozenset(f"{iid}.OKX" for iid in instrument_ids)
+        load_ids = frozenset(
+            iid if ".OKX" in iid else f"{iid}.OKX" for iid in instrument_ids
+        )
 
     provider_config = InstrumentProviderConfig(
         load_all=load_ids is None,

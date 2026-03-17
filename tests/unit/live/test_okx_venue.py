@@ -54,6 +54,17 @@ class TestBuildOkxDataConfig:
         assert config.instrument_provider.load_ids is not None
         assert "BTC-USDT-SWAP.OKX" in config.instrument_provider.load_ids
 
+    def test_suffixed_instrument_ids_loaded_without_double_suffix(
+        self,
+        okx_env,
+        okx_venue,
+    ) -> None:
+        config = build_okx_data_config(
+            okx_venue,
+            instrument_ids=["BTC-USDT-SWAP.OKX"],
+        )
+        assert config.instrument_provider.load_ids == frozenset({"BTC-USDT-SWAP.OKX"})
+
     def test_load_all_when_no_ids(self, okx_env, okx_venue) -> None:
         config = build_okx_data_config(okx_venue)
         assert config.instrument_provider.load_all is True
@@ -80,13 +91,24 @@ class TestBuildOkxExecConfig:
     def test_margin_mode_set(self, okx_env, okx_venue) -> None:
         config = build_okx_exec_config(okx_venue)
         from nautilus_trader.core.nautilus_pyo3.okx import OKXMarginMode
-        assert config.margin_mode == OKXMarginMode.Cross
+        assert config.margin_mode == OKXMarginMode.CROSS
 
     def test_isolated_margin(self, okx_env) -> None:
         venue = VenueConfig(name="OKX", margin_mode="ISOLATED")
         config = build_okx_exec_config(venue)
         from nautilus_trader.core.nautilus_pyo3.okx import OKXMarginMode
-        assert config.margin_mode == OKXMarginMode.Isolated
+        assert config.margin_mode == OKXMarginMode.ISOLATED
+
+    def test_exec_suffixed_instrument_ids_loaded_without_double_suffix(
+        self,
+        okx_env,
+        okx_venue,
+    ) -> None:
+        config = build_okx_exec_config(
+            okx_venue,
+            instrument_ids=["ETH-USDT-SWAP.OKX"],
+        )
+        assert config.instrument_provider.load_ids == frozenset({"ETH-USDT-SWAP.OKX"})
 
     def test_use_fills_channel(self, okx_env) -> None:
         venue = VenueConfig(name="OKX", use_fills_channel=True)
