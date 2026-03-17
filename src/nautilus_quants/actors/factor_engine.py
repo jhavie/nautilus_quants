@@ -70,27 +70,6 @@ def _extract_bar_data(bar: Bar) -> dict[str, float]:
     return data
 
 
-def _format_factor_values_preview(
-    values: dict[str, float],
-    max_symbols: int = 12,
-) -> str:
-    """Format sorted factor values with truncation for log safety."""
-    sorted_vals = sorted(values.items(), key=lambda x: x[1])
-    if len(sorted_vals) <= max_symbols:
-        sample = sorted_vals
-        omitted = 0
-    else:
-        head = max_symbols // 2
-        tail = max_symbols - head
-        sample = sorted_vals[:head] + sorted_vals[-tail:]
-        omitted = len(sorted_vals) - len(sample)
-
-    vals_str = ", ".join(f"{inst}={v:.6f}" for inst, v in sample)
-    if omitted > 0:
-        vals_str += f", ... (+{omitted} more)"
-    return vals_str
-
-
 class FactorEngineActorConfig(ActorConfig, frozen=True):
     """
     Configuration for FactorEngineActor.
@@ -380,12 +359,12 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 diag_parts.append(f"{fname}={len(fvals)}")
             self.log.info(f"Factor compute #{compute_count} [{', '.join(diag_parts)}]")
 
-        # Debug-level sampled preview to avoid large per-flush hot-path logs.
-        if compute_count <= 5 or compute_count % 50 == 0:
-            for fname, fvals in results.items():
-                if fvals:
-                    vals_str = _format_factor_values_preview(fvals)
-                    self.log.debug(f"[{fname}] {vals_str}")
+        # Log actual factor values sorted by value (ascending) for ranking visibility
+        for fname, fvals in results.items():
+            if fvals:
+                sorted_vals = sorted(fvals.items(), key=lambda x: x[1])
+                vals_str = ", ".join(f"{inst}={v:.6f}" for inst, v in sorted_vals)
+                self.log.info(f"[{fname}] {vals_str}")
 
         # Create and publish FactorValues
         factor_values = FactorValues.create(
