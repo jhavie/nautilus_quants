@@ -1,0 +1,98 @@
+# Backtest Configuration: Factor Framework Actor 解耦架构
+# 使用 Nautilus 原生 BacktestRunConfig 格式
+#
+# 运行方式:
+#   python -m nautilus_quants.backtest run config/backtest_factor.yaml
+#
+# 架构:
+#   - FactorEngineActor: 直接订阅 BinanceBar 1h（含 quote_volume 等字段），计算因子，发布 CustomData
+#   - FactorStrategy: 订阅 1m 标准 Bars (stop loss)，接收 CustomData (trading signals)
+
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "100000 USDT"
+    default_leverage: 5
+
+data:
+  - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
+    data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
+    instrument_ids:
+      - "ETHUSDT.BINANCE"
+    bar_spec: "1h"
+    start_time: "2025-01-01"
+    end_time: "2025-12-31"
+
+  - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    instrument_ids:
+      - "ETHUSDT.BINANCE"
+    bar_spec: "1m"
+    start_time: "2025-01-01"
+    end_time: "2025-12-31"
+
+engine:
+  trader_id: "BACKTESTER-001"
+  logging:
+    log_level: "INFO"
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/factors.yaml"
+        data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
+        bar_spec: "1h"
+        signal_prefix: "factor"
+        max_history: 500
+        publish_signals: true
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.factor.strategy:FactorStrategy"
+      config_path: "nautilus_quants.strategies.factor.strategy:FactorStrategyConfig"
+      config:
+        instrument_id: "ETHUSDT.BINANCE"
+        signal_name: "alpha_breakout"  # 因子名：+1=做多, -1=做空
+        entry_threshold: 1.0
+        stop_loss_pct: 0.02
+        order_amount: 10000.0
+        enable_long: true
+        enable_short: true
+
+# Project-specific configuration (parsed separately from Nautilus config)
+report:
+  output_dir: "logs/backtest_runs"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Factor Strategy Backtest Results"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "QuantStats Analysis"
+    output_format:
+      - html
+      - png
+    charts:
+      - returns
+      - log_returns
+      - yearly_returns
+      - monthly_heatmap
+      - drawdown
+      - rolling_sharpe
+      - rolling_volatility

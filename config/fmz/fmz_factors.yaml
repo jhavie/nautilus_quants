@@ -1,0 +1,73 @@
+# FMZ Multi-Factor Strategy Configuration
+# https://www.fmz.com/digest-topic/9647
+#
+# 三因子合成 (cell 31b):
+#   - momentum_24h: 24小时动量因子 (权重 0.6)
+#   - volume: 成交量因子 (权重 0.2)
+#   - corr: 量价相关性因子 (权重 0.2)
+#
+# 时间周期: 1h K线
+# 调仓周期: 8小时
+# 窗口参数: 24h/96h
+#
+# 归一化方法: FMZ原版使用 quantile(0.2, 0.8) clip + z-score
+
+metadata:
+  name: fmz_factors
+  version: "2.0"
+  description: "FMZ 3-factor composite (24h Momentum + Volume + Price-Vol Corr)"
+
+# 因子参数 (1h周期)
+parameters:
+  # 动量回溯期 (24小时)
+  momentum_period: 24
+  # 相关性窗口 (96小时 = 4天)
+  correlation_window: 96
+
+# 因子权重 (三因子合成)
+weights:
+  momentum_24h: 0.6
+  volume: 0.2
+  corr: 0.2
+
+# 因子定义
+factors:
+  # ========== 原始因子 ==========
+
+  # 成交量因子 (USDT turnover)
+  volume:
+    expression: "volume"
+    description: "Quote volume (USDT turnover)"
+
+  # 24小时动量因子
+  momentum_24h:
+    expression: "(close - delay(close, 24)) / delay(close, 24)"
+    description: "24-hour momentum"
+
+  # 量价相关性因子
+  corr:
+    expression: "correlation(close, volume, 96)"
+    description: "96-hour price-volume correlation"
+
+  # ========== FMZ原版归一化因子 (quantile clip + z-score) ==========
+
+  volume_norm:
+    expression: "normalize(clip_quantile(volume, 0.2, 0.8), true, 0)"
+    description: "FMZ normalized volume (quantile clip + z-score)"
+
+  momentum_24h_norm:
+    expression: "normalize(clip_quantile(momentum_24h, 0.2, 0.8), true, 0)"
+    description: "FMZ normalized 24h momentum (quantile clip + z-score)"
+
+  corr_norm:
+    expression: "normalize(clip_quantile(corr, 0.2, 0.8), true, 0)"
+    description: "FMZ normalized correlation (quantile clip + z-score)"
+
+  # ========== 三因子合成 (cell 31b) ==========
+  composite:
+    expression: "0.6 * momentum_24h_norm + 0.2 * volume_norm + 0.2 * corr_norm"
+    description: "3-factor composite: 24h Momentum(0.6) + Volume(0.2) + Price-Vol Corr(0.2)"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

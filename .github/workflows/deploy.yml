@@ -1,0 +1,62 @@
+name: Build & Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --frozen --extra dev
+      - run: uv run pytest tests/ --ignore=tests/unit/data --ignore=tests/unit/alpha --ignore=tests/unit/backtest --ignore=tests/integration/data --ignore=tests/integration/backtest -m "not network and not slow" -x -q
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker login ghcr.io -u jhavie -p ${{ secrets.GHCR_PAT }}
+            docker pull ghcr.io/${{ github.repository }}:latest
+            docker rm -f nautilus-testnet-15m || true
+            docker run -d \
+              --name nautilus-testnet-15m \
+              --restart unless-stopped \
+              --env-file /root/workspace/nautilus_quants/.env \
+              -e OPENBLAS_NUM_THREADS=1 \
+              -e OMP_NUM_THREADS=1 \
+              -v /root/workspace/nautilus_quants/config:/app/config:ro \
+              -v /root/workspace/nautilus_quants/logs:/app/logs \
+              -v /root/workspace/nautilus_quants/data:/app/data \
+              ghcr.io/${{ github.repository }}:latest \
+              run config/live/okx_testnet_15m.yaml
+            sleep 5
+            docker logs nautilus-testnet-15m --tail 20

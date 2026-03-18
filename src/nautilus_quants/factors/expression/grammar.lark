@@ -1,0 +1,55 @@
+// Alpha101-style Expression Grammar for Factor Framework
+// Supports: arithmetic, comparisons, ternary operator, function calls
+
+// Entry point
+?start: expr
+
+// Expression precedence (lowest to highest)
+?expr: ternary
+
+// Ternary operator: condition ? true_expr : false_expr
+?ternary: or_expr ("?" or_expr ":" ternary)?
+
+// Logical operators
+?or_expr: and_expr ("||" and_expr)*
+?and_expr: not_expr ("&&" not_expr)*
+?not_expr: "!" not_expr -> logical_not
+         | comparison
+
+// Comparison operators
+?comparison: add_expr (COMP_OP add_expr)?
+COMP_OP: "==" | "!=" | "<=" | ">=" | "<" | ">"
+
+// Arithmetic operators - capture operators explicitly
+?add_expr: mul_expr (ADD_OP mul_expr)*
+ADD_OP: "+" | "-"
+
+?mul_expr: pow_expr (MUL_OP pow_expr)*
+MUL_OP: "*" | "/"
+
+?pow_expr: unary_expr ("^" unary_expr)?
+
+// Unary operators
+?unary_expr: "-" unary_expr -> neg
+           | "+" unary_expr -> pos
+           | atom
+
+// Atomic expressions
+?atom: NUMBER -> number
+     | STRING -> string
+     | "(" expr ")"
+     | function_call
+     | IDENTIFIER -> variable
+
+// Function call: func_name(arg1, arg2, ...)
+function_call: IDENTIFIER "(" [arguments] ")"
+arguments: expr ("," expr)*
+
+// Terminals
+IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
+NUMBER: /[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?/
+STRING: /"[^"]*"/ | /'[^']*'/
+
+// Whitespace handling
+%import common.WS
+%ignore WS

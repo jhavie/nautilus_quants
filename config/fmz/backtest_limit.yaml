@@ -1,0 +1,318 @@
+# FMZ Alpha101 8-Factor Strategy - Limit Order Execution (60 Tardis Coins)
+#
+# Uses PostLimitExecAlgorithm (BBO-pegged limit orders) with Tardis tick data.
+# Factor config: factors_alpha3.yaml (8-factor composite, ICIR ~0.40+)
+#
+# Data source: Tardis tick data (TradeTick + QuoteTick)
+#   - TradeTick: aggregated to 4h INTERNAL bars for factor signals,
+#                and 1s INTERNAL bars for strategy execution
+#   - QuoteTick: BBO pegging for limit order placement
+#
+# bar_types are manually specified because TradeTick has no bar_spec,
+# so inject_data_configs cannot auto-generate them.
+# DataEngine auto-creates TimeBarAggregator for INTERNAL subscriptions.
+#
+# Available Tardis data date ranges (60 coins, trades + quotes):
+#   2025-01-01 ~ 2025-01-02  (2 days)
+#   2025-02-01 ~ 2025-02-04  (4 days)
+#   2025-04-09 ~ 2025-05-09  (31 days)  <-- recommended
+#   2025-10-09 ~ 2025-10-11  (3 days)
+#
+# Run:
+#   python -m nautilus_quants.backtest run config/fmz/backtest_limit.yaml
+
+venues:
+  - name: "BINANCE"
+    oms_type: "HEDGING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 5
+    bar_execution: true
+    trade_execution: true
+
+data:
+  # TradeTick data — DataEngine auto-aggregates to INTERNAL bars
+  # when actors/strategies subscribe to *-LAST-INTERNAL bar types
+  - catalog_path: "data/transform/tardis"
+    data_cls: "nautilus_trader.model.data:TradeTick"
+    start_time: "2025-10-09"
+    end_time: "2025-10-12"
+    instrument_ids: &instrument_ids
+      # --- 1000X contracts (Binance micro-denomination) ---
+      - "1000BONKUSDT-PERP.BINANCE"
+      - "1000FLOKIUSDT-PERP.BINANCE"
+      - "1000PEPEUSDT-PERP.BINANCE"
+      - "1000SATSUSDT-PERP.BINANCE"
+      - "1000SHIBUSDT-PERP.BINANCE"
+      # --- High activity (volume > 30M/day) ---
+      - "AAVEUSDT-PERP.BINANCE"
+      - "APTUSDT-PERP.BINANCE"
+      - "ARBUSDT-PERP.BINANCE"
+      - "AVAXUSDT-PERP.BINANCE"
+      - "DOTUSDT-PERP.BINANCE"
+      - "ETCUSDT-PERP.BINANCE"
+      - "FILUSDT-PERP.BINANCE"
+      - "FLOWUSDT-PERP.BINANCE"
+      - "GALAUSDT-PERP.BINANCE"
+      - "GRTUSDT-PERP.BINANCE"
+      - "HBARUSDT-PERP.BINANCE"
+      - "ICPUSDT-PERP.BINANCE"
+      - "LTCUSDT-PERP.BINANCE"
+      - "NEARUSDT-PERP.BINANCE"
+      - "ONDOUSDT-PERP.BINANCE"
+      - "OPUSDT-PERP.BINANCE"
+      - "RENDERUSDT-PERP.BINANCE"
+      - "SUIUSDT-PERP.BINANCE"
+      - "TIAUSDT-PERP.BINANCE"
+      - "TONUSDT-PERP.BINANCE"
+      - "UNIUSDT-PERP.BINANCE"
+      - "WIFUSDT-PERP.BINANCE"
+      - "WLDUSDT-PERP.BINANCE"
+      - "WUSDT-PERP.BINANCE"
+      - "XLMUSDT-PERP.BINANCE"
+      - "ZROUSDT-PERP.BINANCE"
+      # --- Medium activity (volume 5-30M/day) ---
+      - "AGLDUSDT-PERP.BINANCE"
+      - "ALGOUSDT-PERP.BINANCE"
+      - "APEUSDT-PERP.BINANCE"
+      - "ARUSDT-PERP.BINANCE"
+      - "ATOMUSDT-PERP.BINANCE"
+      - "AXSUSDT-PERP.BINANCE"
+      - "CHZUSDT-PERP.BINANCE"
+      - "COMPUSDT-PERP.BINANCE"
+      - "CRVUSDT-PERP.BINANCE"
+      - "DYDXUSDT-PERP.BINANCE"
+      - "EIGENUSDT-PERP.BINANCE"
+      - "ENSUSDT-PERP.BINANCE"
+      - "ETHFIUSDT-PERP.BINANCE"
+      - "ICXUSDT-PERP.BINANCE"
+      - "INJUSDT-PERP.BINANCE"
+      - "JTOUSDT-PERP.BINANCE"
+      - "JUPUSDT-PERP.BINANCE"
+      - "LDOUSDT-PERP.BINANCE"
+      - "MANAUSDT-PERP.BINANCE"
+      - "MEMEUSDT-PERP.BINANCE"
+      - "PEOPLEUSDT-PERP.BINANCE"
+      - "POLUSDT-PERP.BINANCE"
+      - "PYTHUSDT-PERP.BINANCE"
+      - "SANDUSDT-PERP.BINANCE"
+      - "SNXUSDT-PERP.BINANCE"
+      - "STRKUSDT-PERP.BINANCE"
+      - "XTZUSDT-PERP.BINANCE"
+      - "ZKUSDT-PERP.BINANCE"
+      # --- Ordinals / BRC-20 ---
+      - "ORDIUSDT-PERP.BINANCE"
+
+  # QuoteTick data — BBO pegging for PostLimitExecAlgorithm
+  - catalog_path: "data/transform/tardis"
+    data_cls: "nautilus_trader.model.data:QuoteTick"
+    start_time: "2025-10-09"
+    end_time: "2025-10-12"
+    instrument_ids: *instrument_ids
+
+engine:
+  trader_id: "BACKTESTER-FMZ-LIMIT-001"
+  logging:
+    log_level: "INFO"
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors_alpha3.yaml"
+        # NOTE: FactorEngineActorConfig has NO interval field.
+        # Use bar_types to explicitly specify INTERNAL bars.
+        signal_prefix: "factor"
+        max_history: 0
+        publish_signals: true
+        instrument_ids: *instrument_ids
+        # 60 x 4-HOUR-LAST-INTERNAL — DataEngine aggregates TradeTick → 4h bars
+        bar_types:
+          - "1000BONKUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "1000FLOKIUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "1000PEPEUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "1000SATSUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "1000SHIBUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "AAVEUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "APTUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ARBUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "AVAXUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "DOTUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ETCUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "FILUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "FLOWUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "GALAUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "GRTUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "HBARUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ICPUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "LTCUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "NEARUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ONDOUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "OPUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "RENDERUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "SUIUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "TIAUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "TONUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "UNIUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "WIFUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "WLDUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "WUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "XLMUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ZROUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "AGLDUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ALGOUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "APEUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ARUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ATOMUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "AXSUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "CHZUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "COMPUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "CRVUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "DYDXUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "EIGENUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ENSUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ETHFIUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ICXUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "INJUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "JTOUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "JUPUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "LDOUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "MANAUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "MEMEUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "PEOPLEUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "POLUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "PYTHUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "SANDUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "SNXUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "STRKUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "XTZUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ZKUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+          - "ORDIUSDT-PERP.BINANCE-4-HOUR-LAST-INTERNAL"
+
+    - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
+      config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
+      config:
+        interval: "4h"  # EquitySnapshotActorConfig HAS interval field (timer-based)
+        venue_name: "BINANCE"
+        currency: "USDT"
+
+  # PostLimitExecAlgorithm - BBO-pegged limit orders with chase + market fallback
+  exec_algorithms:
+    - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
+      config_path: "nautilus_quants.execution.post_limit.config:PostLimitExecAlgorithmConfig"
+      config:
+        exec_algorithm_id: "PostLimit"
+        offset_ticks: 0           # 0=BBO pegging, 1=improve 1 tick
+        timeout_secs: 15.0        # Cancel and re-post after 15s
+        max_chase_attempts: 3     # Max chase iterations
+        chase_step_ticks: 1       # Move 1 tick per chase
+        fallback_to_market: true  # Market order after max chase
+        post_only: true           # Maker-only (save fees)
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
+      config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
+      config:
+        execution_mode: "post_limit"  # Use PostLimitExecAlgorithm
+        instrument_ids: *instrument_ids
+        n_long: 20
+        n_short: 20
+        position_value: 250
+        rebalance_interval: 1
+        composite_factor: "alpha044"
+        # 60 x 1-SECOND-LAST-INTERNAL — DataEngine aggregates TradeTick → 1s bars
+        bar_types:
+          - "1000BONKUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "1000FLOKIUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "1000PEPEUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "1000SATSUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "1000SHIBUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "AAVEUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "APTUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ARBUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "AVAXUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "DOTUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ETCUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "FILUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "FLOWUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "GALAUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "GRTUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "HBARUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ICPUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "LTCUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "NEARUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ONDOUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "OPUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "RENDERUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "SUIUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "TIAUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "TONUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "UNIUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "WIFUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "WLDUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "WUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "XLMUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ZROUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "AGLDUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ALGOUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "APEUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ARUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ATOMUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "AXSUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "CHZUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "COMPUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "CRVUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "DYDXUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "EIGENUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ENSUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ETHFIUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ICXUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "INJUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "JTOUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "JUPUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "LDOUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "MANAUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "MEMEUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "PEOPLEUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "POLUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "PYTHUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "SANDUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "SNXUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "STRKUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "XTZUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ZKUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+          - "ORDIUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL"
+
+report:
+  output_dir: "logs/performance_limit"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "FMZ Alpha101 8-Factor - Limit Order Execution (60 Coins)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "FMZ Alpha101 8-Factor - Limit Order Execution (60 Coins)"
+    output_format:
+      - html
+      - png
+  position_viz:
+    enabled: false
+    title: "FMZ 4-Factor Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "8h"

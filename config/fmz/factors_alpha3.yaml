@@ -1,0 +1,52 @@
+# Alpha101 8-Factor Composite Strategy Configuration (方案 A)
+# Based on Evaluator alpha analysis scoring (20260301_113217)
+#
+# Composite formula:
+#   0.20 * alpha044 + 0.15 * alpha033 + 0.15 * alpha017
+#   + 0.12 * alpha026 + 0.12 * alpha055
+#   + 0.10 * alpha002 + 0.10 * alpha039 + 0.06 * alpha003
+#
+# Factor selection rationale:
+#   - alpha044: ICIR=0.265, IC(1d)=0.046 — 全局最强
+#   - alpha033: ICIR=0.236, 4h IC=0.047 — 最高短期 IC
+#   - alpha017: ICIR=0.260 — 趋势×加速×成交量三维信号
+#   - alpha026: ICIR=0.179 — 慢速因子，IC 持续增长
+#   - alpha055: ICIR=0.174 — 慢速因子，IC 逆向增强
+#   - alpha002: ICIR=0.179 — 量价变化率，持久慢因子
+#   - alpha039: ICIR=0.168 — 最正交因子 (max ρ=0.20)
+#   - alpha003: ICIR=0.127, 3d IC=0.041 — 最慢因子 (IC 增长 115%)
+#
+# 两两最大相关性: 0.41 (alpha033 vs alpha017), 平均相关性 ≈ 0.12
+# 预期组合 ICIR ≈ 0.40+
+#
+# Normalization: z-score only (no quantile clip — FMZ is rank-based, clipping hurts tail discrimination)
+#
+# Sign convention: FMZ longs bottom N (smallest) / shorts top N (largest).
+#   Alpha analysis shows -1*expr has positive IC (higher → better returns).
+#   For FMZ we REMOVE the -1* so lowest values = best returns = longed.
+#
+# Composite weights sum to 1.0
+
+metadata:
+  name: alpha101
+  version: "2.0"
+  description: "Alpha101 8-factor composite based on Evaluator alpha analysis (方案A)"
+
+variables:
+  returns: "delta(close, 1) / delay(close, 1)"
+
+factors:
+  # ==========================================================================
+  # Phase 1: 原始因子 (Time-Series + Cross-Sectional via Evaluator)
+  # ==========================================================================
+
+  # 量价rank相关因子 — 全局最高 ICIR=0.265
+  alpha044:
+    expression: "correlation(high, rank(volume), 5)"
+    description: "Alpha#44: High-price vs volume rank correlation"
+    category: "volume"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0
+

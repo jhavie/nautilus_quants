@@ -1,0 +1,182 @@
+# 多因子截面选币策略回测配置
+# https://www.fmz.com/digest-topic/9647
+
+venues:
+  - name: "BINANCE"
+    oms_type: "HEDGING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "100000 USDT"
+    default_leverage: 1
+    fill_model:
+      fill_model_path: "nautilus_quants.backtest.models.signal_close_fill:SignalCloseFillModel"
+      config_path: "nautilus_quants.backtest.models.signal_close_fill:SignalCloseFillModelConfig"
+      config: {}
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/pre_data/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "1h"
+    instrument_ids:
+      - "1000PEPEUSDT.BINANCE"
+      - "1000SHIBUSDT.BINANCE"
+      - "1000BONKUSDT.BINANCE"
+      - "SUIUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "WLDUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "ICPUSDT.BINANCE"
+      - "ARBUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "APTUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "OPUSDT.BINANCE"
+      - "TONUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "GALAUSDT.BINANCE"
+      - "ONDOUSDT.BINANCE"
+      - "JUPUSDT.BINANCE"
+      - "SANDUSDT.BINANCE"
+      - "LDOUSDT.BINANCE"
+      - "POLUSDT.BINANCE"
+      - "PENGUUSDT.BINANCE"
+      - "PYTHUSDT.BINANCE"
+      - "RENDERUSDT.BINANCE"
+      - "TIAUSDT.BINANCE"
+      - "INJUSDT.BINANCE"
+      # - "TRUMPUSDT.BINANCE"
+      - "WIFUSDT.BINANCE"
+      - "ZROUSDT.BINANCE"
+      - "VIRTUALUSDT.BINANCE"
+      - "JTOUSDT.BINANCE"
+      - "DYDXUSDT.BINANCE"
+      - "FLOWUSDT.BINANCE"
+      - "ARKMUSDT.BINANCE"
+    start_time: "2025-01-01"
+    end_time: "2025-12-31"
+
+engine:
+  trader_id: "BACKTESTER-CS-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true  # Bypass max trade size checks
+  
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cross_sectional_factors.yaml"
+        interval: "1h"
+        signal_prefix: "factor"
+        max_history: 200
+        publish_signals: true
+  
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cross_sectional.strategy:CrossSectionalFactorStrategy"
+      config_path: "nautilus_quants.strategies.cross_sectional.strategy:CrossSectionalFactorStrategyConfig"
+      config:
+        instrument_ids:
+          - "1000PEPEUSDT.BINANCE"
+          - "1000SHIBUSDT.BINANCE"
+          - "1000BONKUSDT.BINANCE"
+          - "SUIUSDT.BINANCE"
+          - "LTCUSDT.BINANCE"
+          - "AVAXUSDT.BINANCE"
+          - "WLDUSDT.BINANCE"
+          - "DOTUSDT.BINANCE"
+          - "AAVEUSDT.BINANCE"
+          - "HBARUSDT.BINANCE"
+          - "NEARUSDT.BINANCE"
+          - "UNIUSDT.BINANCE"
+          - "ICPUSDT.BINANCE"
+          - "ARBUSDT.BINANCE"
+          - "ETCUSDT.BINANCE"
+          - "FILUSDT.BINANCE"
+          - "APTUSDT.BINANCE"
+          - "ALGOUSDT.BINANCE"
+          - "CHZUSDT.BINANCE"
+          - "ATOMUSDT.BINANCE"
+          - "OPUSDT.BINANCE"
+          - "TONUSDT.BINANCE"
+          - "CRVUSDT.BINANCE"
+          - "AXSUSDT.BINANCE"
+          - "GALAUSDT.BINANCE"
+          - "ONDOUSDT.BINANCE"
+          - "JUPUSDT.BINANCE"
+          - "SANDUSDT.BINANCE"
+          - "LDOUSDT.BINANCE"
+          - "POLUSDT.BINANCE"
+          - "PENGUUSDT.BINANCE"
+          - "PYTHUSDT.BINANCE"
+          - "RENDERUSDT.BINANCE"
+          - "TIAUSDT.BINANCE"
+          - "INJUSDT.BINANCE"
+          # - "TRUMPUSDT.BINANCE"
+          - "WIFUSDT.BINANCE"
+          - "ZROUSDT.BINANCE"
+          - "VIRTUALUSDT.BINANCE"
+          - "JTOUSDT.BINANCE"
+          - "DYDXUSDT.BINANCE"
+          - "FLOWUSDT.BINANCE"
+          - "ARKMUSDT.BINANCE"
+        n_positions: 10
+        target_leverage: 1
+        monthly_position_update: true
+        rebalance_period: 4
+        enable_long: true
+        enable_short: true
+        buffer_ratio: 0.5
+        composite_factor: "composite"
+
+# Project-specific configuration
+report:
+  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-007/logs/backtest_runs"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Cross-Sectional Factor Strategy Backtest (FMZ Aligned)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "QuantStats Analysis"
+    output_format:
+      - html
+      - png
+    charts:
+      - returns
+      - log_returns
+      - yearly_returns
+      - monthly_heatmap
+      - drawdown
+      - rolling_sharpe
+      - rolling_volatility
+  position_viz:
+    enabled: true
+    title: "Cross-Sectional Strategy Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "4h"
+    metadata_renderer: "cross_sectional"

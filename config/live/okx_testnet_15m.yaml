@@ -1,0 +1,74 @@
+# OKX Testnet 15m Alpha101 Factor Strategy
+#
+# Usage:
+#   python -m nautilus_quants.live run config/live/okx_testnet_15m.yaml --dry-run
+#   python -m nautilus_quants.live run config/live/okx_testnet_15m.yaml
+#
+# Required environment variables:
+#   OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
+#   (Use testnet API keys from OKX)
+
+venue:
+  name: "OKX"
+  instrument_type: "SWAP"
+  contract_type: "LINEAR"
+  margin_mode: "CROSS"
+  is_demo: true
+
+instruments:
+  bar_spec: "15m"
+  instrument_ids:
+    - "BTC-USDT-SWAP.OKX"
+    - "ETH-USDT-SWAP.OKX"
+    - "SOL-USDT-SWAP.OKX"
+    - "DOGE-USDT-SWAP.OKX"
+    - "ADA-USDT-SWAP.OKX"
+    - "LINK-USDT-SWAP.OKX"
+    - "AAVE-USDT-SWAP.OKX"
+    - "OP-USDT-SWAP.OKX"
+    - "ARB-USDT-SWAP.OKX"
+    - "BNB-USDT-SWAP.OKX"
+    - "BCH-USDT-SWAP.OKX"
+    - "ETC-USDT-SWAP.OKX"
+
+engine:
+  trader_id: "TESTNET-ALPHA101-001"
+  logging:
+    log_level: "INFO"
+    log_level_file: "DEBUG"
+    log_directory: "logs/testnet_15m"
+    use_pyo3: true
+  risk_engine:
+    bypass: false
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors_alpha101.yaml"
+        max_history: 0
+        publish_signals: true
+        flush_timeout_secs: 60
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
+      config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
+      config:
+        instrument_ids: []  # Auto-injected
+        n_long: 4
+        n_short: 4
+        position_value: 1000
+        rebalance_interval: 1
+        composite_factor: "alpha101"
+        execution_mode: "post_limit"
+        use_hyphens_in_client_order_ids: false  # OKX doesn't allow hyphens in clOrdId
+
+  # PostLimitExecAlgorithm - BBO-pegged limit orders with chase + market fallback
+  exec_algorithms:
+    - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
+      config_path: "nautilus_quants.execution.post_limit.config:PostLimitExecAlgorithmConfig"
+      config:
+        exec_algorithm_id: "PostLimit"
+        offset_ticks: 0
+        timeout_secs: 15.0
+        max_chase_attempts: 3

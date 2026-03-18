@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nautilus-quants"
+version = "0.1.0"
+description = "Quantitative trading framework built on Nautilus Trader"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "Joe" }
+]
+
+dependencies = [
+    # Core: live trading runtime
+    "nautilus_trader==1.224.0",
+    "numpy>=1.26.4",
+    "pandas>=2.3.3,<3.0.0",
+    "pyyaml>=6.0",
+    "click>=8.0.0",
+    "lark>=1.1.0",
+    "scipy>=1.11.0",  # Used by factors/operators/cross_sectional.py
+]
+
+[project.optional-dependencies]
+data = [
+    "tardis-dev>=2.1",
+    "tqdm>=4.66",
+    "PySocks>=1.7.1",
+    "python-binance>=1.0.19",
+    "tenacity>=8.0.0",
+]
+backtest = [
+    "quantstats>=0.0.64",
+    "alphalens-reloaded>=0.0.12",
+    "plotly>=5.18.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "nautilus-quants[data,backtest,dev]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nautilus_quants"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "network: marks tests as requiring network access (deselect with '-m \"not network\"')",
+]

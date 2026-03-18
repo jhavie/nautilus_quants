@@ -1,0 +1,63 @@
+# Backtest Configuration
+# Supports bar aggregation: loads 1m data, aggregates to 1h in strategy
+# Uses @ syntax per nautilus_trader example_03_bar_aggregation
+
+strategy:
+  type: "breakout"
+  instrument_id: "ETHUSDT"  # Primary instrument (required by config parser)
+  interval: "1h"  # Strategy signal timeframe (aggregated from bar_spec)
+  params:
+    sma_period: 200
+    breakout_period: 30
+    stop_loss_pct: 0.02
+    exit_bars_below_sma: 5
+    order_amount: 10000.0
+    enable_long: true
+    enable_short: true
+
+backtest:
+  catalog_path: "/Users/joe/Sync/nautilus_quants2/data/catalog"
+  instruments:
+    - "ETHUSDT"
+  bar_spec: "1m"  # Data source: load 1-minute bars, aggregate to interval
+  start_date: "2024-01-01"
+  end_date: "2025-12-23"  # Match verify_breakout.py time range
+  warmup_days: 0  # Data starts from 2024-01-01, no extra warmup needed
+
+venue:
+  name: "BINANCE"
+  oms_type: "NETTING"
+  account_type: "MARGIN"
+  base_currency: "USDT"
+  starting_balance: "100000 USDT"
+  default_leverage: 5
+
+  # Optional: Fee structure
+  fee_model:
+    type: "maker_taker"
+    maker_fee: 0.0002
+    taker_fee: 0.0004
+
+report:
+  output_dir: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-002/logs/backtest_runs"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Backtest Results"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+logging:
+  level: "INFO"
+  log_to_file: true
+  bypass_logging: false

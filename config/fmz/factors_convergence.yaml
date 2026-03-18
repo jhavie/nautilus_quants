@@ -1,0 +1,145 @@
+# Mean Convergence Factor Configuration (均值收敛因子)
+# Reference: https://mp.weixin.qq.com/s/qq_gVUSgVYA0Siil2SxmtQ
+#
+# Article factors:
+#   PCF, VCF, ACF, TRCF, PVCF
+#
+# Core formula (all convergence factors):
+#   factor = -ln(1 + std(MA_1, MA_5, MA_10, MA_20, MA_60, MA_120))
+#
+# Crypto 1h adaptation:
+#   MA windows: 1h, 5h, 10h, 20h, 60h, 120h
+#
+# Field mapping in this repo:
+#   - PCF  uses close
+#   - VCF  uses volume
+#   - ACF  uses amount_proxy = close * volume (成交额近似)
+#   - TRCF uses turnover_proxy = volume / ts_mean(volume, 168) (换手率近似)
+#
+# Notes:
+#   - Engine only exposes open/high/low/close/volume.
+#   - We provide crypto-compatible proxies for ACF/TRCF via expressions only.
+#   - All intermediate MAs and sums go in `variables:` (engine resolves them
+#     before factor evaluation). Only final factors go in `factors:`.
+
+metadata:
+  name: convergence_factors
+  version: "1.2"
+  description: "PCF/VCF/ACF/TRCF/PVCF mean convergence factors adapted for crypto 1h bars"
+
+# ============================================================================
+# Intermediate variables (resolved before factor expressions)
+# ============================================================================
+variables:
+  # --- Price MAs ---
+  p_ma1:   "close"
+  p_ma5:   "ts_mean(close, 5)"
+  p_ma10:  "ts_mean(close, 10)"
+  p_ma20:  "ts_mean(close, 20)"
+  p_ma60:  "ts_mean(close, 60)"
+  p_ma120: "ts_mean(close, 120)"
+
+  # --- Volume MAs ---
+  v_ma1:   "volume"
+  v_ma5:   "ts_mean(volume, 5)"
+  v_ma10:  "ts_mean(volume, 10)"
+  v_ma20:  "ts_mean(volume, 20)"
+  v_ma60:  "ts_mean(volume, 60)"
+  v_ma120: "ts_mean(volume, 120)"
+
+  # --- Amount proxy MAs (close * volume) ---
+  # a_ma1:   "close * volume"
+  # a_ma5:   "ts_mean(close * volume, 5)"
+  # a_ma10:  "ts_mean(close * volume, 10)"
+  # a_ma20:  "ts_mean(close * volume, 20)"
+  # a_ma60:  "ts_mean(close * volume, 60)"
+  # a_ma120: "ts_mean(close * volume, 120)"
+
+  # --- Turnover-rate proxy MAs ---
+  # Reuse v_ma* to avoid duplicate ts_mean calls
+  t_baseline: "ts_mean(volume, 168) + 0.000000000001"
+  t_ma1:   "v_ma1 / t_baseline"
+  t_ma5:   "v_ma5 / t_baseline"
+  t_ma10:  "v_ma10 / t_baseline"
+  t_ma20:  "v_ma20 / t_baseline"
+  t_ma60:  "v_ma60 / t_baseline"
+  t_ma120: "v_ma120 / t_baseline"
+
+  # --- Sums for variance decomposition ---
+  # std(MA1..MA6) = sqrt( sum(MA²)/6 - (sum(MA)/6)² )
+
+  # Price sums
+  p_sum6:   "p_ma1 + p_ma5 + p_ma10 + p_ma20 + p_ma60 + p_ma120"
+  p_sum6sq: "power(p_ma1, 2) + power(p_ma5, 2) + power(p_ma10, 2) + power(p_ma20, 2) + power(p_ma60, 2) + power(p_ma120, 2)"
+
+  # Volume sums
+  v_sum6:   "v_ma1 + v_ma5 + v_ma10 + v_ma20 + v_ma60 + v_ma120"
+  v_sum6sq: "power(v_ma1, 2) + power(v_ma5, 2) + power(v_ma10, 2) + power(v_ma20, 2) + power(v_ma60, 2) + power(v_ma120, 2)"
+
+  # Amount sums
+  # a_sum6:   "a_ma1 + a_ma5 + a_ma10 + a_ma20 + a_ma60 + a_ma120"
+  # a_sum6sq: "power(a_ma1, 2) + power(a_ma5, 2) + power(a_ma10, 2) + power(a_ma20, 2) + power(a_ma60, 2) + power(a_ma120, 2)"
+
+  # Turnover sums
+  t_sum6:   "t_ma1 + t_ma5 + t_ma10 + t_ma20 + t_ma60 + t_ma120"
+  t_sum6sq: "power(t_ma1, 2) + power(t_ma5, 2) + power(t_ma10, 2) + power(t_ma20, 2) + power(t_ma60, 2) + power(t_ma120, 2)"
+
+factors:
+  # ========================================================================
+  # Convergence Factors: -ln(1 + std(MAs))
+  # ========================================================================
+
+  pcf:
+    expression: "-1 * log(1 + sqrt(max(p_sum6sq / 6 - power(p_sum6 / 6, 2), 0)))"
+    description: "Price Convergence Factor: -ln(1 + std(price MAs))"
+
+  vcf:
+    expression: "-1 * log(1 + sqrt(max(v_sum6sq / 6 - power(v_sum6 / 6, 2), 0)))"
+    description: "Volume Convergence Factor: -ln(1 + std(volume MAs))"
+
+  # acf:
+  #   expression: "-1 * log(1 + sqrt(max(a_sum6sq / 6 - power(a_sum6 / 6, 2), 0)))"
+  #   description: "Amount Convergence Factor: -ln(1 + std(amount-proxy MAs))"
+
+  trcf:
+    expression: "-1 * log(1 + sqrt(max(t_sum6sq / 6 - power(t_sum6 / 6, 2), 0)))"
+    description: "Turnover-Rate Convergence Factor: -ln(1 + std(turnover-proxy MAs))"
+
+  # ========================================================================
+  # Normalization (Cross-Sectional)
+  # FMZ style: quantile clip (0.2, 0.8) + z-score
+  # ========================================================================
+
+  pcf_norm:
+    expression: "normalize(clip_quantile(pcf, 0.2, 0.8), true, 0)"
+    description: "Normalized PCF (quantile clip + z-score)"
+
+  vcf_norm:
+    expression: "normalize(clip_quantile(vcf, 0.2, 0.8), true, 0)"
+    description: "Normalized VCF (quantile clip + z-score)"
+
+  # acf_norm:
+  #   expression: "normalize(clip_quantile(acf, 0.2, 0.8), true, 0)"
+  #   description: "Normalized ACF (quantile clip + z-score)"
+
+  trcf_norm:
+    expression: "normalize(clip_quantile(trcf, 0.2, 0.8), true, 0)"
+    description: "Normalized TRCF (quantile clip + z-score)"
+
+  # ========================================================================
+  # Composite Factor (PVCF)
+  # Article: equal-weight Z-score sum of PCF + VCF
+  # ========================================================================
+
+  composite:
+    expression: "- 0.5 * vcf_norm - 0.5 * trcf_norm"
+    description: "PVCF: Price-Volume Convergence Factor (equal weight)"
+
+  # Alias used by FMZ strategy config (composite_factor field)
+  # composite:
+  #   expression: "pvcf"
+  #   description: "Alias of PVCF for strategy compatibility"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

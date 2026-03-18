@@ -1,0 +1,17 @@
+# Tardis Tick Data Factor Configuration
+# 10-bar channel breakout for 4-day tick data backtest (2026-02-28 ~ 03-03)
+
+metadata:
+  name: "tardis_breakout"
+  version: "1.0"
+  description: "10-bar channel breakout for 4-day tick data backtest"
+
+factors:
+  alpha_breakout:
+    expression: "if_else(close > delay(ts_max(high, 30), 1), 1, if_else(close < delay(ts_min(low, 30), 1), -1, 0))"
+    description: "+1 close breaks above prior bar's 30-bar high, -1 breaks below 30-bar low, 0 neutral"
+    category: "momentum"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0
