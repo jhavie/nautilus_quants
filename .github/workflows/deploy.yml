@@ -2,6 +2,18 @@ name: Build & Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy environment'
+        required: true
+        default: 'testnet'
+        type: choice
+        options:
+          - testnet
+          - prod
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   test:
@@ -37,6 +49,19 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Set environment variables
+        id: env
+        run: |
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            echo "container=nautilus-prod" >> $GITHUB_OUTPUT
+            echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
+            echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
+          else
+            echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
+            echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
+            echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         with:
@@ -45,18 +70,18 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             docker login ghcr.io -u jhavie -p ${{ secrets.GHCR_PAT }}
-            docker pull ghcr.io/${{ github.repository }}:latest
-            docker rm -f nautilus-testnet-15m || true
+            docker pull ${{ env.IMAGE }}:latest
+            docker rm -f ${{ steps.env.outputs.container }} || true
             docker run -d \
-              --name nautilus-testnet-15m \
+              --name ${{ steps.env.outputs.container }} \
               --restart unless-stopped \
-              --env-file /root/workspace/nautilus_quants/.env \
+              --env-file ${{ steps.env.outputs.env_file }} \
               -e OPENBLAS_NUM_THREADS=1 \
               -e OMP_NUM_THREADS=1 \
               -v /root/workspace/nautilus_quants/config:/app/config:ro \
               -v /root/workspace/nautilus_quants/logs:/app/logs \
               -v /root/workspace/nautilus_quants/data:/app/data \
-              ghcr.io/${{ github.repository }}:latest \
-              run config/live/okx_testnet_15m.yaml
+              ${{ env.IMAGE }}:latest \
+              run ${{ steps.env.outputs.config }}
             sleep 5
-            docker logs nautilus-testnet-15m --tail 20
+            docker logs ${{ steps.env.outputs.container }} --tail 20
