@@ -97,6 +97,44 @@ gh run watch <id>
 - **Nautilus 集成**: Actor/Strategy 用 frozen config（`ActorConfig, frozen=True`）
 - **类型注解**: 公开 API 必须
 
+## 开发约束 (Constitution)
+
+### I. Nautilus-Native First
+所有交易逻辑必须优先使用 NautilusTrader 原生组件（Actor/Strategy/Indicator 扩展基类，数据类型用 InstrumentId/Bar/QuoteTick，事件用 MessageBus）。仅在 Nautilus 缺少所需功能时才自定义。
+
+### II. Configuration-Driven
+所有运行时参数必须外化到 YAML 配置文件，源码中禁止可调参数的数值字面量。
+
+### III. Test-First (NON-NEGOTIABLE)
+TDD：先写失败测试，再实现到测试通过。PR 不通过测试不可合并。
+
+### IV. Type Safety
+所有函数签名和类属性必须有类型注解。Optional 类型必须显式处理。
+
+### V. Separation of Concerns
+- Indicators：纯计算，无副作用
+- Actors：管理状态/筛选，不直接下单
+- Strategies：接收信号做决策，不计算信号
+- Execution：订单生命周期管理，独立于策略
+
+### 禁止事项
+- 自定义事件系统（用 Nautilus MessageBus）
+- 热路径中的同步阻塞 I/O
+- Actor/Strategy 实例外的全局可变状态
+- 未经 Nautilus adapter 封装的第三方交易 API
+
+## 本地参考目录
+
+NautilusTrader 源码和文档在本地可供参考：
+
+| 目录 | 内容 |
+|------|------|
+| `/Users/joe/Sync/nautilus_trader/docs/` | NautilusTrader 官方文档 |
+| `/Users/joe/Sync/nautilus_trader/examples/` | 官方示例策略和 Actor |
+| `/Users/joe/Sync/nautilus_trader/crates/` | Rust 核心引擎源码 |
+
+查阅 adapter 实现、OrderBook API、Position 模型等以 `nautilus_trader` 源码为准。
+
 ## 调试协议
 
 - 先读取日志文件（logs/），不要仅凭代码推断根因
