@@ -1183,6 +1183,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pyyaml" },
+    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -1197,7 +1198,6 @@ all = [
     { name = "pytest-asyncio" },
     { name = "python-binance" },
     { name = "quantstats" },
-    { name = "scipy" },
     { name = "tardis-dev" },
     { name = "tenacity" },
     { name = "tqdm" },
@@ -1206,7 +1206,6 @@ backtest = [
     { name = "alphalens-reloaded" },
     { name = "plotly" },
     { name = "quantstats" },
-    { name = "scipy" },
 ]
 data = [
     { name = "pysocks" },
@@ -1242,7 +1241,7 @@ requires-dist = [
     { name = "python-binance", marker = "extra == 'data'", specifier = ">=1.0.19" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "quantstats", marker = "extra == 'backtest'", specifier = ">=0.0.64" },
-    { name = "scipy", marker = "extra == 'backtest'", specifier = ">=1.11.0" },
+    { name = "scipy", specifier = ">=1.11.0" },
     { name = "tardis-dev", marker = "extra == 'data'", specifier = ">=2.1" },
     { name = "tenacity", marker = "extra == 'data'", specifier = ">=8.0.0" },
     { name = "tqdm", marker = "extra == 'data'", specifier = ">=4.66" },
