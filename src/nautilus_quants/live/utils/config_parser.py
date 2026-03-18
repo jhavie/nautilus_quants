@@ -6,7 +6,7 @@ import copy
 import os
 from typing import Any
 
-from nautilus_quants.common.bar_spec import format_bar_spec
+from nautilus_quants.utils.bar_spec import format_bar_spec
 from nautilus_quants.live.config import InstrumentsConfig, LiveConfig, VenueConfig
 from nautilus_quants.live.exceptions import LiveConfigError
 

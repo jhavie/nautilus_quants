@@ -22,9 +22,9 @@ from nautilus_trader.config import ActorConfig
 from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.model.objects import Currency
 
-from nautilus_quants.backtest.protocols import EQUITY_SNAPSHOTS_CACHE_KEY, POSITION_MARKET_VALUES_CACHE_KEY
-from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
-from nautilus_quants.backtest.utils.equity import compute_mtm_equity
+from nautilus_quants.utils.cache_keys import EQUITY_SNAPSHOTS_CACHE_KEY, POSITION_MARKET_VALUES_CACHE_KEY
+from nautilus_quants.utils.bar_spec import parse_interval_to_timedelta
+from nautilus_quants.utils.equity import compute_mtm_equity
 
 
 class EquitySnapshotActorConfig(ActorConfig, frozen=True):

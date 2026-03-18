@@ -2,8 +2,8 @@
 
 import pytest
 
-from nautilus_quants.backtest.protocols import BaseMetadataRenderer
-from nautilus_quants.backtest.registry import RendererRegistry
+from nautilus_quants.utils.protocols import BaseMetadataRenderer
+from nautilus_quants.utils.registry import RendererRegistry
 from nautilus_quants.strategies.cross_sectional.metadata import (  # noqa: F401 - triggers self-registration
     CrossSectionalMetadataRenderer,
 )

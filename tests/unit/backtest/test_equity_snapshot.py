@@ -12,7 +12,7 @@ from nautilus_quants.actors.equity_snapshot import (
     EquitySnapshotActorConfig,
 )
 from nautilus_quants.backtest.config import ReportConfig, TearsheetConfig
-from nautilus_quants.backtest.protocols import EQUITY_SNAPSHOTS_CACHE_KEY
+from nautilus_quants.utils.cache_keys import EQUITY_SNAPSHOTS_CACHE_KEY
 from nautilus_quants.backtest.reports import ReportGenerator
 
 
@@ -47,26 +47,26 @@ class TestParseIntervalToTimedelta:
     def test_parse_hours(self) -> None:
         from datetime import timedelta
 
-        from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
+        from nautilus_quants.utils.bar_spec import parse_interval_to_timedelta
 
         assert parse_interval_to_timedelta("8h") == timedelta(hours=8)
 
     def test_parse_minutes(self) -> None:
         from datetime import timedelta
 
-        from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
+        from nautilus_quants.utils.bar_spec import parse_interval_to_timedelta
 
         assert parse_interval_to_timedelta("30m") == timedelta(minutes=30)
 
     def test_parse_days(self) -> None:
         from datetime import timedelta
 
-        from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
+        from nautilus_quants.utils.bar_spec import parse_interval_to_timedelta
 
         assert parse_interval_to_timedelta("1d") == timedelta(days=1)
 
     def test_parse_invalid_raises(self) -> None:
-        from nautilus_quants.backtest.utils.bar_spec import parse_interval_to_timedelta
+        from nautilus_quants.utils.bar_spec import parse_interval_to_timedelta
 
         with pytest.raises(ValueError):
             parse_interval_to_timedelta("invalid")
@@ -377,7 +377,7 @@ class TestComputeMtmEquity:
     """Tests for compute_mtm_equity shared utility."""
 
     def test_returns_balance_plus_unrealized(self) -> None:
-        from nautilus_quants.backtest.utils.equity import compute_mtm_equity
+        from nautilus_quants.utils.equity import compute_mtm_equity
 
         portfolio = MagicMock()
         venue = MagicMock()
@@ -397,7 +397,7 @@ class TestComputeMtmEquity:
         assert result == 9500.0
 
     def test_returns_none_when_no_account(self) -> None:
-        from nautilus_quants.backtest.utils.equity import compute_mtm_equity
+        from nautilus_quants.utils.equity import compute_mtm_equity
 
         portfolio = MagicMock()
         portfolio.account.return_value = None
@@ -406,7 +406,7 @@ class TestComputeMtmEquity:
         assert result is None
 
     def test_returns_none_when_no_balance(self) -> None:
-        from nautilus_quants.backtest.utils.equity import compute_mtm_equity
+        from nautilus_quants.utils.equity import compute_mtm_equity
 
         portfolio = MagicMock()
         portfolio.account.return_value = MagicMock()
@@ -416,7 +416,7 @@ class TestComputeMtmEquity:
         assert result is None
 
     def test_returns_balance_when_no_unrealized(self) -> None:
-        from nautilus_quants.backtest.utils.equity import compute_mtm_equity
+        from nautilus_quants.utils.equity import compute_mtm_equity
 
         portfolio = MagicMock()
         mock_balance = MagicMock()

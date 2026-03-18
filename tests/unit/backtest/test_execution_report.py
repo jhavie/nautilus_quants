@@ -15,7 +15,7 @@ from nautilus_trader.model.identifiers import ClientOrderId, InstrumentId
 from nautilus_trader.model.objects import Quantity
 
 from nautilus_quants.backtest.config import ReportConfig, TearsheetConfig
-from nautilus_quants.backtest.protocols import EXECUTION_STATES_CACHE_KEY
+from nautilus_quants.utils.cache_keys import EXECUTION_STATES_CACHE_KEY
 from nautilus_quants.backtest.reports import ReportGenerator
 from nautilus_quants.execution.post_limit.state import OrderExecutionState, OrderState
 

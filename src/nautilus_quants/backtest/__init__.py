@@ -18,16 +18,18 @@ from nautilus_quants.backtest.exceptions import (
     BacktestReportError,
     BacktestStrategyError,
 )
-from nautilus_quants.backtest.protocols import (
+from nautilus_quants.utils.cache_keys import (
     EQUITY_SNAPSHOTS_CACHE_KEY,
     EXECUTION_STATES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
+)
+from nautilus_quants.utils.protocols import (
     BaseMetadataRenderer,
     ColumnConfig,
     MetadataRenderer,
     PositionMetadataProvider,
 )
-from nautilus_quants.backtest.registry import RendererRegistry
+from nautilus_quants.utils.registry import RendererRegistry
 from nautilus_quants.backtest.reports import ReportGenerator
 
 __all__ = [

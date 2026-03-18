@@ -10,7 +10,7 @@ from nautilus_quants.backtest.config import (
     ReportConfig,
     TearsheetConfig,
 )
-from nautilus_quants.backtest.utils.bar_spec import format_bar_spec
+from nautilus_quants.utils.bar_spec import format_bar_spec
 
 # Standard Bar class path used to distinguish from BinanceBar in injection logic
 _STANDARD_BAR_CLS = "nautilus_trader.model.data:Bar"

@@ -1,3 +1,5 @@
+# Copyright (c) 2025 nautilus_quants
+# SPDX-License-Identifier: MIT
 """Shared equity computation utilities."""
 
 from nautilus_trader.model.identifiers import Venue
