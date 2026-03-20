@@ -97,7 +97,7 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
 
         self.subscribe_data(DataType(RebalanceOrders))
         self.log.info(
-            f"CSStrategy started: execution_mode={self.config.execution_mode}, "
+            f"CSStrategy started: execution_policy={self.config.execution_policy}, "
             f"exposure_policy={self.config.exposure_policy}"
         )
 
