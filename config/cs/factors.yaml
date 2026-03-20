@@ -1,0 +1,21 @@
+# CS Strategy Factor Configuration
+# Single factor: alpha044 — correlation(high, rank(volume), 5)
+# ICIR=0.265, IC(1d)=0.046 — 全局最强因子
+
+metadata:
+  name: alpha101
+  version: "1.0"
+  description: "Single alpha044 factor for CS strategy"
+
+variables:
+  returns: "delta(close, 1) / delay(close, 1)"
+
+factors:
+  alpha044:
+    expression: "correlation(high, rank(volume), 5)"
+    description: "Alpha#44: High-price vs volume rank correlation"
+    category: "volume"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

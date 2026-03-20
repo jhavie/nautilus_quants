@@ -723,7 +723,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         state.transition_to(OrderState.FAILED)
 
     def _complete_order(self, state: OrderExecutionState) -> None:
-        """Mark execution sequence as complete and clean up."""
+        """Mark execution sequence as complete and sweep residual positions."""
         self._cancel_timer(state)
         state.completed_ns = self.clock.timestamp_ns()
 
@@ -740,6 +740,66 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"post_only_retries={state.post_only_retreat_ticks} "
             f"elapsed={elapsed_ms:.0f}ms"
         )
+
+        # Sweep residual positions after reduce_only (close) orders
+        if state.reduce_only:
+            self._sweep_residual_position(state)
+
+    def _sweep_residual_position(self, state: OrderExecutionState) -> None:
+        """Detect and sweep residual positions below min notional value.
+
+        After a reduce_only order completes, precision loss from multiple
+        partial fills can leave a tiny residual position (e.g., 0.09 ETC ≈ 0.79
+        USDT). This prevents ``on_position_closed`` from firing, blocking the
+        ExposureManager. A market sweep order brings the position to zero.
+        """
+        positions = self.cache.positions_open(instrument_id=state.instrument_id)
+        if not positions:
+            return
+
+        instrument = self.cache.instrument(state.instrument_id)
+        if instrument is None:
+            return
+
+        primary = self.cache.order(state.primary_order_id)
+        if primary is None or primary.is_closed:
+            return
+
+        for position in positions:
+            if position.is_closed:
+                continue
+
+            # Estimate residual value
+            quote = self.cache.quote_tick(state.instrument_id)
+            if quote is not None:
+                mid_price = (float(quote.bid_price) + float(quote.ask_price)) / 2
+            else:
+                mid_price = state.anchor_px
+
+            if mid_price <= 0:
+                continue
+
+            remaining_value = float(position.quantity) * mid_price
+            min_notional = (
+                float(instrument.min_notional) if instrument.min_notional else 5.0
+            )
+
+            if remaining_value < min_notional:
+                self.log.warning(
+                    f"PostLimit sweep residual: {state.instrument_id} "
+                    f"qty={position.quantity} value={remaining_value:.2f} "
+                    f"< min_notional={min_notional}"
+                )
+                sweep = self._create_spawned_market(
+                    primary=primary,
+                    quantity=position.quantity,
+                    time_in_force=TimeInForce.GTC,
+                    reduce_only=True,
+                )
+                self._spawned_to_primary[sweep.client_order_id] = (
+                    state.primary_order_id
+                )
+                self.submit_order(sweep)
 
     # ------------------------------------------------------------------
     # Helpers
