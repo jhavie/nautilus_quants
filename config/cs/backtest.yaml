@@ -176,7 +176,7 @@ engine:
       config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
       config:
         instrument_ids: *instrument_ids
-        execution_mode: "market"
+        execution_policy: "MarketExecutionPolicy"
         exposure_policy: "close_first"
 
 report:

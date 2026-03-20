@@ -30,12 +30,19 @@ from nautilus_quants.strategies.cs.config import CSStrategyConfig
 from nautilus_quants.strategies.cs.execution_policy import (
     ExecutionPolicy,
     MarketExecutionPolicy,
+    PostLimitExecutionPolicy,
 )
 from nautilus_quants.strategies.cs.exposure_manager import ExposureManager, ExposurePolicy
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 
 if TYPE_CHECKING:
     from nautilus_trader.model.instruments import Instrument
+
+
+_EXECUTION_POLICIES: dict[str, type] = {
+    "MarketExecutionPolicy": MarketExecutionPolicy,
+    "PostLimitExecutionPolicy": PostLimitExecutionPolicy,
+}
 
 
 class CSStrategy(BarSubscriptionMixin, Strategy):
@@ -56,9 +63,13 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         self._instruments: dict[InstrumentId, Instrument] = {}
 
     def _create_execution_policy(self, config: CSStrategyConfig) -> ExecutionPolicy:
-        if config.execution_mode == "market":
-            return MarketExecutionPolicy(self)
-        raise ValueError(f"Unknown execution_mode: {config.execution_mode}")
+        policy_cls = _EXECUTION_POLICIES.get(config.execution_policy)
+        if policy_cls is None:
+            raise ValueError(
+                f"Unknown execution_policy: {config.execution_policy}. "
+                f"Available: {list(_EXECUTION_POLICIES)}"
+            )
+        return policy_cls(self)
 
     # -------------------------------------------------------------------------
     # Lifecycle
