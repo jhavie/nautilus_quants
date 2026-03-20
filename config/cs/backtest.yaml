@@ -1,0 +1,206 @@
+# CS Strategy Backtest Configuration
+# FMZ 逻辑 via DecisionEngineActor + ExposureManager
+#
+# 125 Symbols
+# 时间范围: 2022-01-01 ~ 2022-03-31
+# 初始资金: 10000 USDT
+# 持仓数量: 多空各40个
+# 单品种仓位: 300 USDT
+# 调仓周期: 每根 bar (4h)
+# 因子: alpha044 (correlation(high, rank(volume), 5))
+
+venues:
+  - name: "BINANCE"
+    oms_type: "HEDGING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "4h"
+    instrument_ids: &instrument_ids
+      - "1000SHIBUSDT.BINANCE"
+      - "1000XECUSDT.BINANCE"
+      - "1INCHUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "ALICEUSDT.BINANCE"
+      - "ALPHAUSDT.BINANCE"
+      - "ANKRUSDT.BINANCE"
+      - "ANTUSDT.BINANCE"
+      - "ARPAUSDT.BINANCE"
+      - "ARUSDT.BINANCE"
+      - "ATAUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "AUDIOUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "BAKEUSDT.BINANCE"
+      - "BALUSDT.BINANCE"
+      - "BANDUSDT.BINANCE"
+      - "BATUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+      - "BELUSDT.BINANCE"
+      - "BLZUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "C98USDT.BINANCE"
+      - "CELOUSDT.BINANCE"
+      - "CELRUSDT.BINANCE"
+      - "CHRUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "COMPUSDT.BINANCE"
+      - "COTIUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "CTSIUSDT.BINANCE"
+      - "DASHUSDT.BINANCE"
+      - "DEFIUSDT.BINANCE"
+      - "DENTUSDT.BINANCE"
+      - "DGBUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "DUSKUSDT.BINANCE"
+      - "DYDXUSDT.BINANCE"
+      - "EGLDUSDT.BINANCE"
+      - "ENJUSDT.BINANCE"
+      - "ENSUSDT.BINANCE"
+      - "EOSUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "FLMUSDT.BINANCE"
+      - "FTMUSDT.BINANCE"
+      - "GALAUSDT.BINANCE"
+      - "GRTUSDT.BINANCE"
+      - "GTCUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "HNTUSDT.BINANCE"
+      - "HOTUSDT.BINANCE"
+      - "ICXUSDT.BINANCE"
+      - "IOSTUSDT.BINANCE"
+      - "IOTAUSDT.BINANCE"
+      - "IOTXUSDT.BINANCE"
+      - "KAVAUSDT.BINANCE"
+      - "KLAYUSDT.BINANCE"
+      - "KNCUSDT.BINANCE"
+      - "KSMUSDT.BINANCE"
+      - "LINAUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "LPTUSDT.BINANCE"
+      - "LRCUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "MANAUSDT.BINANCE"
+      - "MASKUSDT.BINANCE"
+      - "MATICUSDT.BINANCE"
+      - "MKRUSDT.BINANCE"
+      - "MTLUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "NEOUSDT.BINANCE"
+      - "NKNUSDT.BINANCE"
+      - "OCEANUSDT.BINANCE"
+      - "OGNUSDT.BINANCE"
+      - "OMGUSDT.BINANCE"
+      - "ONEUSDT.BINANCE"
+      - "ONTUSDT.BINANCE"
+      - "PEOPLEUSDT.BINANCE"
+      - "QTUMUSDT.BINANCE"
+      - "REEFUSDT.BINANCE"
+      - "RENUSDT.BINANCE"
+      - "RLCUSDT.BINANCE"
+      - "ROSEUSDT.BINANCE"
+      - "RSRUSDT.BINANCE"
+      - "RUNEUSDT.BINANCE"
+      - "RVNUSDT.BINANCE"
+      - "SANDUSDT.BINANCE"
+      - "SFPUSDT.BINANCE"
+      - "SKLUSDT.BINANCE"
+      - "SNXUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "STMXUSDT.BINANCE"
+      - "STORJUSDT.BINANCE"
+      - "SUSHIUSDT.BINANCE"
+      - "SXPUSDT.BINANCE"
+      - "THETAUSDT.BINANCE"
+      - "TOMOUSDT.BINANCE"
+      - "TRBUSDT.BINANCE"
+      - "TRXUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "VETUSDT.BINANCE"
+      - "WAVESUSDT.BINANCE"
+      - "XEMUSDT.BINANCE"
+      - "XLMUSDT.BINANCE"
+      - "XMRUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "XTZUSDT.BINANCE"
+      - "YFIUSDT.BINANCE"
+      - "ZECUSDT.BINANCE"
+      - "ZENUSDT.BINANCE"
+      - "ZILUSDT.BINANCE"
+      - "ZRXUSDT.BINANCE"
+    start_time: "2022-01-01"
+    end_time: "2022-12-31"
+
+engine:
+  trader_id: "BACKTESTER-CS-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cs/factors.yaml"
+        interval: "4h"
+        signal_prefix: "factor"
+        max_history: 0
+        publish_signals: true
+
+    - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
+      config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
+      config:
+        n_long: 40
+        n_short: 40
+        position_value: 300
+        composite_factor: "alpha044"
+        rebalance_interval: 1
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: *instrument_ids
+        execution_mode: "market"
+        exposure_policy: "close_first"
+
+report:
+  output_dir: "logs/performance"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "CS Strategy Backtest (2022-01 to 2022-03)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "CS Strategy QuantStats Analysis"
+    output_format:
+      - html
+      - png
