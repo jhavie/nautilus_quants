@@ -29,6 +29,7 @@ class RebalanceOrders(Data):
     - ``reduce_only`` — matches ``Order.reduce_only``
     - ``quote_quantity`` — matches ``Order.quote_quantity`` (USDT amount)
     - ``tags`` — matches ``Order.tags``
+    - ``action`` — "CLOSE", "OPEN", or "FLIP"
 
     Attributes
     ----------
@@ -56,9 +57,9 @@ class RebalanceOrders(Data):
 
         - ``instrument_id`` : str — e.g. "BTCUSDT.BINANCE"
         - ``order_side`` : str — "BUY" or "SELL"
-        - ``action`` : str — "CLOSE" or "OPEN"
+        - ``action`` : str — "CLOSE", "OPEN", or "FLIP"
         - ``reduce_only`` : bool — True for close orders
-        - ``quote_quantity`` : float — USDT amount (0 for closes)
+        - ``quote_quantity`` : float — USDT amount (0 for closes, position_value for opens/flips)
         - ``tags`` : list[str] — e.g. ["FLIP_TO_LONG", "rank:15"]
         - ``rank`` : int — factor rank (metadata)
         - ``composite`` : float | None — composite factor value (metadata)
@@ -96,3 +97,8 @@ class RebalanceOrders(Data):
     def opens(self) -> List[Dict[str, Any]]:
         """Get open orders only."""
         return [o for o in self.orders if o["action"] == "OPEN"]
+
+    @property
+    def flips(self) -> List[Dict[str, Any]]:
+        """Get flip orders only (one-shot direction reversals)."""
+        return [o for o in self.orders if o["action"] == "FLIP"]

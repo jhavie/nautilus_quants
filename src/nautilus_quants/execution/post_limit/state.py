@@ -81,6 +81,12 @@ class OrderExecutionState:
     # POST_ONLY rejection retry tracking
     post_only_retreat_ticks: int = 0
 
+    # Quote-value target for chase-time quantity recalculation
+    # When set, remaining qty is recalculated from remaining USDT value / BBO price
+    target_quote_value: float | None = None
+    filled_quote_value: float = 0.0
+    contract_multiplier: float = 1.0
+
     # Metrics
     limit_orders_submitted: int = 0
     last_limit_price: float = 0.0
