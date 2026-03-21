@@ -1,5 +1,5 @@
 # CS Strategy Backtest Configuration
-# FMZ 逻辑 via DecisionEngineActor + ExposureManager
+# FMZ 逻辑 via DecisionEngineActor (NETTING mode, one-shot flip)
 #
 # 125 Symbols
 # 时间范围: 2022-01-01 ~ 2022-03-31
@@ -177,7 +177,6 @@ engine:
       config:
         instrument_ids: *instrument_ids
         execution_policy: "MarketExecutionPolicy"
-        exposure_policy: "close_first"
 
 report:
   output_dir: "logs/performance"

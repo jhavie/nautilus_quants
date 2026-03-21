@@ -155,6 +155,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         - ``max_chase_attempts``: per-order chase limit override
         - ``chase_step_ticks``: per-order chase step override
         - ``post_only``: per-order post_only override ("true"/"false")
+        - ``target_quote_value``: target USDT value for qty recalculation on chase
+        - ``contract_multiplier``: instrument contract multiplier (default 1.0)
         """
         if order.order_type != OrderType.MARKET:
             self.log.warning(
@@ -199,6 +201,10 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             exec_state.chase_step_ticks = int(params["chase_step_ticks"])
         if "post_only" in params:
             exec_state.post_only = params["post_only"].lower() == "true"
+        if "target_quote_value" in params:
+            exec_state.target_quote_value = float(params["target_quote_value"])
+        if "contract_multiplier" in params:
+            exec_state.contract_multiplier = float(params["contract_multiplier"])
 
         self._states[order.client_order_id] = exec_state
 
@@ -310,12 +316,39 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         return state.post_only if state.post_only is not None else self._config.post_only
 
     def _remaining_quantity(self, state: OrderExecutionState) -> Quantity:
-        """Calculate unfilled quantity."""
+        """Calculate unfilled quantity.
+
+        When target_quote_value is set, recalculates remaining quantity from
+        remaining USDT value / current BBO price. This ensures chase iterations
+        always target the correct USDT value regardless of price drift.
+        """
         instrument = self.cache.instrument(state.instrument_id)
         if instrument is None:
             return state.total_quantity
+
+        if state.target_quote_value is not None:
+            remaining_value = state.target_quote_value - state.filled_quote_value
+            if remaining_value <= 0:
+                return Quantity.zero(state.total_quantity.precision)
+
+            # Get current BBO for recalculation
+            exec_price = self._get_bbo_price(state)
+            if exec_price is not None and exec_price > 0:
+                raw_qty = remaining_value / (exec_price * state.contract_multiplier)
+                return instrument.make_qty(raw_qty)
+
+        # Fallback: fixed quantity arithmetic
         remaining = state.total_quantity - state.filled_quantity
         return instrument.make_qty(remaining)
+
+    def _get_bbo_price(self, state: OrderExecutionState) -> float | None:
+        """Get best available execution price for quantity recalculation."""
+        quote = self.cache.quote_tick(state.instrument_id)
+        if quote is not None:
+            if state.side == OrderSide.BUY:
+                return float(quote.ask_price) if quote.ask_price else None
+            return float(quote.bid_price) if quote.bid_price else None
+        return state.anchor_px if state.anchor_px > 0 else None
 
     def _determine_limit_price(
         self,
@@ -604,6 +637,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             state.filled_quantity + fill_qty,
             state.filled_quantity.precision,
         )
+
+        # Track filled quote value for target_quote_value recalculation
+        if state.target_quote_value is not None:
+            state.filled_quote_value += (
+                fill_px * float(fill_qty) * state.contract_multiplier
+            )
 
         remaining = self._remaining_quantity(state)
         is_fully_filled = remaining <= Quantity.zero(remaining.precision)
