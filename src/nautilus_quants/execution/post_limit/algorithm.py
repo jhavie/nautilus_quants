@@ -394,15 +394,6 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             return float(quote.bid_price) if quote.bid_price else None
         return state.anchor_px if state.anchor_px > 0 else None
 
-    def _get_bbo_price(self, state: OrderExecutionState) -> float | None:
-        """Get best available execution price for quantity recalculation."""
-        quote = self.cache.quote_tick(state.instrument_id)
-        if quote is not None:
-            if state.side == OrderSide.BUY:
-                return float(quote.ask_price) if quote.ask_price else None
-            return float(quote.bid_price) if quote.bid_price else None
-        return state.anchor_px if state.anchor_px > 0 else None
-
     def _determine_limit_price(
         self,
         instrument: Instrument,
