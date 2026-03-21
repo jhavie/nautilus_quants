@@ -17,6 +17,7 @@ from nautilus_trader.model.identifiers import ClientOrderId, InstrumentId
 from nautilus_trader.model.objects import Quantity
 
 from nautilus_quants.execution.post_limit.algorithm import (
+    _normalize_qty_or_zero,
     _spawn_linkage_fields,
     compute_limit_price,
 )
@@ -218,6 +219,93 @@ class TestSpawnLinkageFields:
         assert fields["order_list_id"] == "order-list"
         assert fields["linked_order_ids"] == ["A", "B"]
         assert fields["parent_order_id"] == "parent-id"
+
+
+class TestNormalizeQtyOrZero:
+    """Test quantity normalization for sub-increment residual handling."""
+
+    class _FakeInstrument:
+        size_increment = Quantity.from_str("0.01")
+        size_precision = 2
+
+        def make_qty(self, value: float, round_down: bool = False) -> Quantity:
+            if value <= 0:
+                return Quantity.zero(2)
+            if value < 0.01:
+                raise ValueError(
+                    "Invalid `value` for quantity: rounded to zero due to size increment 0.01",
+                )
+            if round_down:
+                # Floor to 2 decimals for deterministic assertions in tests
+                floored = int(value * 100) / 100
+                return Quantity.from_str(f"{floored:.2f}")
+            return Quantity.from_str(f"{value:.2f}")
+
+    class _FakeLogger:
+        def __init__(self) -> None:
+            self.warning_messages: list[str] = []
+
+        def warning(self, message: str) -> None:
+            self.warning_messages.append(message)
+
+    def test_returns_zero_for_non_positive_qty(self) -> None:
+        instrument = self._FakeInstrument()
+        logger = self._FakeLogger()
+        qty = _normalize_qty_or_zero(
+            instrument=instrument,
+            raw_qty=0.0,
+            precision=2,
+            instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
+            primary_order_id=ClientOrderId("O-001"),
+            logger=logger,
+        )
+        assert qty == Quantity.zero(2)
+        assert logger.warning_messages == []
+
+    def test_rounds_down_to_valid_increment_when_tradable(self) -> None:
+        instrument = self._FakeInstrument()
+        logger = self._FakeLogger()
+        qty = _normalize_qty_or_zero(
+            instrument=instrument,
+            raw_qty=1.239,
+            precision=2,
+            instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
+            primary_order_id=ClientOrderId("O-001"),
+            logger=logger,
+        )
+        assert qty == Quantity.from_str("1.23")
+        assert logger.warning_messages == []
+
+    def test_returns_zero_and_logs_on_rounded_to_zero_valueerror(self) -> None:
+        instrument = self._FakeInstrument()
+        logger = self._FakeLogger()
+        qty = _normalize_qty_or_zero(
+            instrument=instrument,
+            raw_qty=0.0037,
+            precision=2,
+            instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
+            primary_order_id=ClientOrderId("O-001"),
+            logger=logger,
+        )
+        assert qty == Quantity.zero(2)
+        assert len(logger.warning_messages) == 1
+        assert "raw_qty=0.0037" in logger.warning_messages[0]
+
+    def test_reraises_unexpected_valueerror(self) -> None:
+        class _BrokenInstrument(self._FakeInstrument):
+            def make_qty(self, value: float, round_down: bool = False) -> Quantity:
+                raise ValueError("invalid decimal context")
+
+        logger = self._FakeLogger()
+        with pytest.raises(ValueError, match="invalid decimal context"):
+            _normalize_qty_or_zero(
+                instrument=_BrokenInstrument(),
+                raw_qty=1.0,
+                precision=2,
+                instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
+                primary_order_id=ClientOrderId("O-001"),
+                logger=logger,
+            )
 
 
 # ---------------------------------------------------------------------------
