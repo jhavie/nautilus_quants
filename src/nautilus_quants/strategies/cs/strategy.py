@@ -151,16 +151,16 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
     # -------------------------------------------------------------------------
 
     def _execute_order(self, order_dict: dict[str, Any]) -> None:
-        """Route order to appropriate execution method based on action."""
-        action = order_dict["action"]
-        if action == "CLOSE":
+        """Route order to appropriate execution method based on decision intent."""
+        intent = order_dict["intent"]
+        if intent == "CLOSE":
             self._execute_close(order_dict["instrument_id"], order_dict.get("tags"))
-        elif action == "OPEN":
+        elif intent == "OPEN":
             self._execute_open(order_dict)
-        elif action == "FLIP":
+        elif intent == "FLIP":
             self._execute_flip(order_dict)
         else:
-            self.log.error(f"Unknown action: {action}")
+            self.log.error(f"Unknown intent: {intent}")
 
     def _execute_flip(self, order_dict: dict[str, Any]) -> None:
         """Execute one-shot NETTING flip: actual_position_qty + target_qty.
@@ -198,12 +198,13 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             self.log.warning(f"Skip FLIP {inst_id}: no price available")
             return
 
-        target_value = order_dict["quote_quantity"]
+        target_quote_quantity = float(order_dict["target_quote_quantity"])
         multiplier = float(instrument.multiplier)
-        target_qty = Decimal(str(target_value / (exec_price * multiplier)))
+        target_qty = Decimal(str(target_quote_quantity / (exec_price * multiplier)))
 
         # 3. Flip quantity = actual position + target
         total_qty = instrument.make_qty(current_qty + target_qty)
+        total_target_quote_quantity = float(total_qty) * exec_price * multiplier
         tags = order_dict.get("tags")
 
         self._execution_policy.submit_open(
@@ -211,12 +212,14 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             order_side=side,
             quantity=total_qty,
             tags=tags,
-            target_quote_value=target_value,
+            target_quote_quantity=total_target_quote_quantity,
             contract_multiplier=multiplier,
+            intent="FLIP",
         )
         self.log.info(
             f"FLIP {side.name} {inst_id}: current={current_qty} + "
-            f"target={target_qty} = {total_qty} (price={exec_price})"
+            f"target={target_qty} = {total_qty} (price={exec_price}, "
+            f"target_quote_quantity={total_target_quote_quantity:.6f})"
         )
 
     def _execute_open(self, order_dict: dict[str, Any]) -> None:
@@ -227,9 +230,11 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             self.log.warning(f"Skip OPEN: instrument not cached: {inst_id}")
             return
 
-        quote_qty = order_dict.get("quote_quantity", 0)
-        if quote_qty <= 0:
-            self.log.warning(f"Skip OPEN {inst_id}: quote_quantity={quote_qty}")
+        target_quote_quantity = float(order_dict.get("target_quote_quantity", 0))
+        if target_quote_quantity <= 0:
+            self.log.warning(
+                f"Skip OPEN {inst_id}: target_quote_quantity={target_quote_quantity}"
+            )
             return
 
         side = OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
@@ -241,7 +246,7 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             return
 
         multiplier = float(instrument.multiplier)
-        raw_qty = Decimal(str(quote_qty / (exec_price * multiplier)))
+        raw_qty = Decimal(str(target_quote_quantity / (exec_price * multiplier)))
         quantity = instrument.make_qty(raw_qty)
         tags = order_dict.get("tags")
 
@@ -250,11 +255,14 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             order_side=side,
             quantity=quantity,
             tags=tags,
-            target_quote_value=quote_qty,
+            target_quote_quantity=target_quote_quantity,
             contract_multiplier=multiplier,
+            intent="OPEN",
         )
         self.log.debug(
-            f"OPEN {side.name} {inst_id}: value={quote_qty} price={exec_price} qty={quantity}"
+            "OPEN "
+            f"{side.name} {inst_id}: target_quote_quantity={target_quote_quantity} "
+            f"price={exec_price} qty={quantity}"
         )
 
     def _get_exec_price(

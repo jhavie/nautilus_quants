@@ -83,9 +83,10 @@ class OrderExecutionState:
 
     # Quote-value target for chase-time quantity recalculation
     # When set, remaining qty is recalculated from remaining USDT value / BBO price
-    target_quote_value: float | None = None
-    filled_quote_value: float = 0.0
+    target_quote_quantity: float | None = None
+    filled_quote_quantity: float = 0.0
     contract_multiplier: float = 1.0
+    intent: str = "UNKNOWN"
 
     # Metrics
     limit_orders_submitted: int = 0
