@@ -132,14 +132,14 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         """Log new position opened."""
         self.log.info(
             f"Position opened: {event.instrument_id} "
-            f"side={event.position.side.name} qty={event.position.quantity}"
+            f"side={event.side} qty={event.quantity}"
         )
 
     def on_position_changed(self, event: PositionChanged) -> None:
         """Log position direction change (flip confirmation in NETTING mode)."""
         self.log.info(
             f"Position changed: {event.instrument_id} "
-            f"side={event.position.side.name} qty={event.position.quantity}"
+            f"side={event.side} qty={event.quantity}"
         )
 
     def on_position_closed(self, event: PositionClosed) -> None:
