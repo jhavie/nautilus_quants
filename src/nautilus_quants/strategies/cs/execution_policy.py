@@ -36,6 +36,8 @@ class ExecutionPolicy(Protocol):
         position_id: PositionId | None = None,
         quote_quantity: bool = False,
         tags: list[str] | None = None,
+        target_quote_value: float | None = None,
+        contract_multiplier: float = 1.0,
     ) -> None:
         """Submit an opening order."""
         ...
@@ -63,6 +65,8 @@ class MarketExecutionPolicy:
         position_id: PositionId | None = None,
         quote_quantity: bool = False,
         tags: list[str] | None = None,
+        target_quote_value: float | None = None,
+        contract_multiplier: float = 1.0,
     ) -> None:
         order = self._strategy.order_factory.market(
             instrument_id=instrument_id,
@@ -95,6 +99,10 @@ class PostLimitExecutionPolicy:
     PostLimitExecAlgorithm intercepts and converts to BBO-pegged limit orders
     with chase and market fallback.
 
+    When target_quote_value is provided, PostLimit recalculates remaining
+    quantity from remaining USDT value / BBO price on each chase iteration,
+    eliminating price drift.
+
     QuoteTick subscription is handled automatically by the algorithm on first
     order (algorithm.py on_order → subscribe_quote_ticks).
     """
@@ -110,15 +118,23 @@ class PostLimitExecutionPolicy:
         position_id: PositionId | None = None,
         quote_quantity: bool = False,
         tags: list[str] | None = None,
+        target_quote_value: float | None = None,
+        contract_multiplier: float = 1.0,
     ) -> None:
         anchor_px = self._get_anchor_price(instrument_id, order_side)
-        params = {"anchor_px": str(anchor_px)} if anchor_px else None
+        params: dict[str, str] = {}
+        if anchor_px is not None:
+            params["anchor_px"] = str(anchor_px)
+        if target_quote_value is not None:
+            params["target_quote_value"] = str(target_quote_value)
+            params["contract_multiplier"] = str(contract_multiplier)
+
         order = self._strategy.order_factory.market(
             instrument_id=instrument_id,
             order_side=order_side,
             quantity=quantity,
             exec_algorithm_id=_POST_LIMIT_ID,
-            exec_algorithm_params=params,
+            exec_algorithm_params=params or None,
             tags=tags,
         )
         self._strategy.submit_order(order, position_id=position_id)

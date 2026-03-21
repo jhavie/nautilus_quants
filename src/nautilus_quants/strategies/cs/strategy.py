@@ -211,6 +211,8 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             order_side=side,
             quantity=total_qty,
             tags=tags,
+            target_quote_value=target_value,
+            contract_multiplier=multiplier,
         )
         self.log.info(
             f"FLIP {side.name} {inst_id}: current={current_qty} + "
@@ -248,6 +250,8 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             order_side=side,
             quantity=quantity,
             tags=tags,
+            target_quote_value=quote_qty,
+            contract_multiplier=multiplier,
         )
         self.log.debug(
             f"OPEN {side.name} {inst_id}: value={quote_qty} price={exec_price} qty={quantity}"
