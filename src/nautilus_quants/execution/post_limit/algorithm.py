@@ -185,8 +185,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         - ``max_chase_attempts``: per-order chase limit override
         - ``chase_step_ticks``: per-order chase step override
         - ``post_only``: per-order post_only override ("true"/"false")
-        - ``target_quote_value``: target USDT value for qty recalculation on chase
+        - ``target_quote_quantity``: target USDT value for qty recalculation on chase
         - ``contract_multiplier``: instrument contract multiplier (default 1.0)
+        - ``intent``: strategy intent for diagnostics ("OPEN" or "FLIP")
         """
         if order.order_type != OrderType.MARKET:
             self.log.warning(
@@ -231,10 +232,46 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             exec_state.chase_step_ticks = int(params["chase_step_ticks"])
         if "post_only" in params:
             exec_state.post_only = params["post_only"].lower() == "true"
-        if "target_quote_value" in params:
-            exec_state.target_quote_value = float(params["target_quote_value"])
+        if "target_quote_quantity" in params:
+            try:
+                target_quote_quantity = float(params["target_quote_quantity"])
+            except (ValueError, TypeError):
+                self.log.error(
+                    "PostLimit invalid target_quote_quantity, ignoring: "
+                    f"primary_order_id={order.client_order_id} "
+                    f"value={params['target_quote_quantity']!r}"
+                )
+            else:
+                if target_quote_quantity <= 0:
+                    self.log.error(
+                        "PostLimit target_quote_quantity must be > 0, ignoring: "
+                        f"primary_order_id={order.client_order_id} "
+                        f"value={target_quote_quantity}"
+                    )
+                else:
+                    exec_state.target_quote_quantity = target_quote_quantity
+
         if "contract_multiplier" in params:
-            exec_state.contract_multiplier = float(params["contract_multiplier"])
+            try:
+                contract_multiplier = float(params["contract_multiplier"])
+            except (ValueError, TypeError):
+                self.log.error(
+                    "PostLimit invalid contract_multiplier, using default 1.0: "
+                    f"primary_order_id={order.client_order_id} "
+                    f"value={params['contract_multiplier']!r}"
+                )
+            else:
+                if contract_multiplier <= 0:
+                    self.log.error(
+                        "PostLimit contract_multiplier must be > 0, using default 1.0: "
+                        f"primary_order_id={order.client_order_id} "
+                        f"value={contract_multiplier}"
+                    )
+                else:
+                    exec_state.contract_multiplier = contract_multiplier
+
+        if "intent" in params:
+            exec_state.intent = str(params["intent"]).upper()
 
         self._states[order.client_order_id] = exec_state
 
@@ -247,7 +284,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self.log.info(
             f"PostLimit on_order: {order.client_order_id} "
             f"{order.side.name} {order.quantity} {order.instrument_id} "
-            f"anchor_px={anchor_px}"
+            f"anchor_px={anchor_px} "
+            f"intent={exec_state.intent} "
+            f"target_quote_quantity={exec_state.target_quote_quantity}"
         )
 
         self._spawn_and_submit_limit(exec_state)
@@ -348,7 +387,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
     def _remaining_quantity(self, state: OrderExecutionState) -> Quantity:
         """Calculate unfilled quantity.
 
-        When target_quote_value is set, recalculates remaining quantity from
+        When target_quote_quantity is set, recalculates remaining quantity from
         remaining USDT value / current BBO price. This ensures chase iterations
         always target the correct USDT value regardless of price drift.
         """
@@ -356,8 +395,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if instrument is None:
             return state.total_quantity
 
-        if state.target_quote_value is not None:
-            remaining_value = state.target_quote_value - state.filled_quote_value
+        if state.target_quote_quantity is not None:
+            remaining_value = state.target_quote_quantity - state.filled_quote_quantity
             if remaining_value <= 0:
                 return Quantity.zero(state.total_quantity.precision)
 
@@ -691,9 +730,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             state.filled_quantity.precision,
         )
 
-        # Track filled quote value for target_quote_value recalculation
-        if state.target_quote_value is not None:
-            state.filled_quote_value += (
+        # Track filled quote quantity for target_quote_quantity recalculation
+        if state.target_quote_quantity is not None:
+            state.filled_quote_quantity += (
                 fill_px * float(fill_qty) * state.contract_multiplier
             )
 
