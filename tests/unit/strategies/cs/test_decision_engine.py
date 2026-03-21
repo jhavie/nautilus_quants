@@ -25,7 +25,7 @@ class TestComputeOrders:
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(composite, current_long=set(), current_short=set())
 
-        opens = [o for o in orders if o["action"] == "OPEN"]
+        opens = [o for o in orders if o["intent"] == "OPEN"]
         assert len(opens) == 4  # 2 long + 2 short
         long_opens = [o for o in opens if o["order_side"] == "BUY"]
         short_opens = [o for o in opens if o["order_side"] == "SELL"]
@@ -53,14 +53,14 @@ class TestComputeOrders:
             current_short={"C", "D"},
         )
         # D: single FLIP order (not CLOSE + OPEN)
-        flip_d = [o for o in orders if o["instrument_id"] == "D" and o["action"] == "FLIP"]
-        close_d = [o for o in orders if o["instrument_id"] == "D" and o["action"] == "CLOSE"]
-        open_d = [o for o in orders if o["instrument_id"] == "D" and o["action"] == "OPEN"]
+        flip_d = [o for o in orders if o["instrument_id"] == "D" and o["intent"] == "FLIP"]
+        close_d = [o for o in orders if o["instrument_id"] == "D" and o["intent"] == "CLOSE"]
+        open_d = [o for o in orders if o["instrument_id"] == "D" and o["intent"] == "OPEN"]
         assert len(flip_d) == 1
         assert len(close_d) == 0  # No separate close
         assert len(open_d) == 0  # No separate open
         assert flip_d[0]["order_side"] == "BUY"
-        assert flip_d[0]["reduce_only"] is False
+        assert "reduce_only" not in flip_d[0]
         assert "FLIP_TO_LONG" in flip_d[0]["tags"]
 
     def test_flip_long_to_short_generates_single_flip(self):
@@ -73,14 +73,14 @@ class TestComputeOrders:
             current_long={"A", "B"},
             current_short={"D"},
         )
-        flip_a = [o for o in orders if o["instrument_id"] == "A" and o["action"] == "FLIP"]
+        flip_a = [o for o in orders if o["instrument_id"] == "A" and o["intent"] == "FLIP"]
         assert len(flip_a) == 1
         assert flip_a[0]["order_side"] == "SELL"
-        assert flip_a[0]["reduce_only"] is False
+        assert "reduce_only" not in flip_a[0]
         assert "FLIP_TO_SHORT" in flip_a[0]["tags"]
 
-    def test_flip_quote_quantity_is_position_value(self):
-        """FLIP quote_quantity = position_value (1×), not 2×."""
+    def test_flip_target_quote_quantity_is_position_value(self):
+        """FLIP target_quote_quantity = position_value (1×), not 2×."""
         actor = _make_actor(position_value=500.0)
         composite = {"D": 0.5, "A": 1.0, "B": 3.0, "C": 4.0}
         orders = actor._compute_orders(
@@ -88,9 +88,9 @@ class TestComputeOrders:
             current_long={"A"},
             current_short={"C", "D"},
         )
-        flip_d = [o for o in orders if o["instrument_id"] == "D" and o["action"] == "FLIP"]
+        flip_d = [o for o in orders if o["instrument_id"] == "D" and o["intent"] == "FLIP"]
         assert len(flip_d) == 1
-        assert flip_d[0]["quote_quantity"] == 500.0
+        assert flip_d[0]["target_quote_quantity"] == 500.0
 
     def test_delisting_protection(self):
         actor = _make_actor(n_long=2, n_short=2)
@@ -104,16 +104,16 @@ class TestComputeOrders:
         assert len(close_delisted) == 1
         assert "NO_FACTOR_DATA" in close_delisted[0]["tags"]
 
-    def test_quote_quantity_set_for_opens(self):
+    def test_target_quote_quantity_set_for_opens(self):
         actor = _make_actor(position_value=500.0)
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(composite, current_long=set(), current_short=set())
-        opens = [o for o in orders if o["action"] == "OPEN"]
+        opens = [o for o in orders if o["intent"] == "OPEN"]
         for o in opens:
-            assert o["quote_quantity"] == 500.0
-            assert o["reduce_only"] is False
+            assert o["target_quote_quantity"] == 500.0
+            assert "reduce_only" not in o
 
-    def test_close_orders_have_zero_quote_quantity(self):
+    def test_close_orders_have_zero_target_quote_quantity(self):
         actor = _make_actor(n_long=2, n_short=2)
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(
@@ -121,10 +121,10 @@ class TestComputeOrders:
             current_long={"A", "GONE"},
             current_short=set(),
         )
-        closes = [o for o in orders if o["action"] == "CLOSE"]
+        closes = [o for o in orders if o["intent"] == "CLOSE"]
         for c in closes:
-            assert c["quote_quantity"] == 0
-            assert c["reduce_only"] is True
+            assert c["target_quote_quantity"] == 0
+            assert "reduce_only" not in c
 
     def test_new_open_when_no_existing_position(self):
         """When target is long but no existing position, should be OPEN not FLIP."""
@@ -135,7 +135,7 @@ class TestComputeOrders:
             current_long=set(),
             current_short={"C", "D"},
         )
-        open_a = [o for o in orders if o["instrument_id"] == "A" and o["action"] == "OPEN"]
-        flip_a = [o for o in orders if o["instrument_id"] == "A" and o["action"] == "FLIP"]
+        open_a = [o for o in orders if o["instrument_id"] == "A" and o["intent"] == "OPEN"]
+        flip_a = [o for o in orders if o["instrument_id"] == "A" and o["intent"] == "FLIP"]
         assert len(open_a) == 1
         assert len(flip_a) == 0

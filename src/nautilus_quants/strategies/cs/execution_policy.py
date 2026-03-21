@@ -36,8 +36,9 @@ class ExecutionPolicy(Protocol):
         position_id: PositionId | None = None,
         quote_quantity: bool = False,
         tags: list[str] | None = None,
-        target_quote_value: float | None = None,
+        target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
+        intent: str | None = None,
     ) -> None:
         """Submit an opening order."""
         ...
@@ -65,8 +66,9 @@ class MarketExecutionPolicy:
         position_id: PositionId | None = None,
         quote_quantity: bool = False,
         tags: list[str] | None = None,
-        target_quote_value: float | None = None,
+        target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
+        intent: str | None = None,
     ) -> None:
         order = self._strategy.order_factory.market(
             instrument_id=instrument_id,
@@ -99,7 +101,7 @@ class PostLimitExecutionPolicy:
     PostLimitExecAlgorithm intercepts and converts to BBO-pegged limit orders
     with chase and market fallback.
 
-    When target_quote_value is provided, PostLimit recalculates remaining
+    When target_quote_quantity is provided, PostLimit recalculates remaining
     quantity from remaining USDT value / BBO price on each chase iteration,
     eliminating price drift.
 
@@ -118,16 +120,19 @@ class PostLimitExecutionPolicy:
         position_id: PositionId | None = None,
         quote_quantity: bool = False,
         tags: list[str] | None = None,
-        target_quote_value: float | None = None,
+        target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
+        intent: str | None = None,
     ) -> None:
         anchor_px = self._get_anchor_price(instrument_id, order_side)
         params: dict[str, str] = {}
         if anchor_px is not None:
             params["anchor_px"] = str(anchor_px)
-        if target_quote_value is not None:
-            params["target_quote_value"] = str(target_quote_value)
+        if target_quote_quantity is not None:
+            params["target_quote_quantity"] = str(target_quote_quantity)
             params["contract_multiplier"] = str(contract_multiplier)
+        if intent is not None:
+            params["intent"] = intent
 
         order = self._strategy.order_factory.market(
             instrument_id=instrument_id,
