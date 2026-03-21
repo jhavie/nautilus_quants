@@ -9,6 +9,10 @@ top N short), and publishes RebalanceOrders via MessageBus.
 
 Does not submit orders. Pure decision-making.
 
+NETTING mode: direction flips emit a single FLIP action (instead of
+separate CLOSE + OPEN). The execution layer resolves actual quantities
+from cache positions.
+
 Constitution Compliance:
     - Extends Nautilus Actor base class (Principle I)
     - Configuration-driven via ActorConfig (Principle II)
@@ -119,7 +123,10 @@ class DecisionEngineActor(Actor):
         """
         FMZ core logic: sort + target selection + diff with current positions.
 
-        Returns a list of order instruction dicts aligned with Nautilus MarketOrder fields.
+        Actions:
+        - CLOSE: reduce_only=True, for delisting protection
+        - OPEN: reduce_only=False, new position entry
+        - FLIP: reduce_only=False, one-shot direction reversal (NETTING mode)
         """
         sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
         rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
@@ -150,45 +157,51 @@ class DecisionEngineActor(Actor):
 
             if is_long_target and not currently_long:
                 if currently_short:
+                    # One-shot flip: short → long
                     orders.append(
-                        self._close_order(
+                        self._flip_order(
                             inst_id,
                             order_side="BUY",
-                            tags=["FLIP_TO_LONG"],
+                            tags=["FLIP_TO_LONG", f"rank:{rank}"],
                             rank=rank,
                             composite=comp,
                         )
                     )
-                orders.append(
-                    self._open_order(
-                        inst_id,
-                        order_side="BUY",
-                        tags=["NEW_LONG", f"rank:{rank}"],
-                        rank=rank,
-                        composite=comp,
+                else:
+                    # New long entry
+                    orders.append(
+                        self._open_order(
+                            inst_id,
+                            order_side="BUY",
+                            tags=["NEW_LONG", f"rank:{rank}"],
+                            rank=rank,
+                            composite=comp,
+                        )
                     )
-                )
 
             elif is_short_target and not currently_short:
                 if currently_long:
+                    # One-shot flip: long → short
                     orders.append(
-                        self._close_order(
+                        self._flip_order(
                             inst_id,
                             order_side="SELL",
-                            tags=["FLIP_TO_SHORT"],
+                            tags=["FLIP_TO_SHORT", f"rank:{rank}"],
                             rank=rank,
                             composite=comp,
                         )
                     )
-                orders.append(
-                    self._open_order(
-                        inst_id,
-                        order_side="SELL",
-                        tags=["NEW_SHORT", f"rank:{rank}"],
-                        rank=rank,
-                        composite=comp,
+                else:
+                    # New short entry
+                    orders.append(
+                        self._open_order(
+                            inst_id,
+                            order_side="SELL",
+                            tags=["NEW_SHORT", f"rank:{rank}"],
+                            rank=rank,
+                            composite=comp,
+                        )
                     )
-                )
 
         return orders
 
@@ -223,6 +236,30 @@ class DecisionEngineActor(Actor):
             "instrument_id": instrument_id,
             "order_side": order_side,
             "action": "OPEN",
+            "reduce_only": False,
+            "quote_quantity": self.config.position_value,
+            "tags": tags or [],
+            "rank": rank,
+            "composite": composite,
+        }
+
+    def _flip_order(
+        self,
+        instrument_id: str,
+        order_side: str = "BUY",
+        tags: list[str] | None = None,
+        rank: int = -1,
+        composite: float | None = None,
+    ) -> dict[str, Any]:
+        """One-shot flip intent. quote_quantity = target position value (1×).
+
+        Execution layer resolves actual flip quantity:
+        flip_qty = current_position_qty + target_qty
+        """
+        return {
+            "instrument_id": instrument_id,
+            "order_side": order_side,
+            "action": "FLIP",
             "reduce_only": False,
             "quote_quantity": self.config.position_value,
             "tags": tags or [],
