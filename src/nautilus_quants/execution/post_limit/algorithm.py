@@ -71,6 +71,36 @@ def _spawn_linkage_fields(primary: Order) -> dict[str, object]:
     }
 
 
+def _normalize_qty_or_zero(
+    *,
+    instrument: Instrument,
+    raw_qty: float,
+    precision: int,
+    instrument_id: InstrumentId,
+    primary_order_id: ClientOrderId,
+    logger,
+) -> Quantity:
+    """Normalize quantity to instrument increment, returning zero for dust residuals."""
+    if raw_qty <= 0:
+        return Quantity.zero(precision)
+
+    try:
+        return instrument.make_qty(raw_qty, round_down=True)
+    except ValueError as exc:
+        if "rounded to zero" not in str(exc):
+            raise
+
+        logger.warning(
+            "PostLimit residual below increment, treating as zero: "
+            f"instrument_id={instrument_id} "
+            f"primary_order_id={primary_order_id} "
+            f"raw_qty={raw_qty} "
+            f"size_increment={instrument.size_increment} "
+            f"size_precision={instrument.size_precision}"
+        )
+        return Quantity.zero(precision)
+
+
 class PostLimitExecAlgorithm(ExecAlgorithm):
     """Execution algorithm that converts MarketOrders into post-only limit orders.
 
@@ -335,11 +365,25 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             exec_price = self._get_bbo_price(state)
             if exec_price is not None and exec_price > 0:
                 raw_qty = remaining_value / (exec_price * state.contract_multiplier)
-                return instrument.make_qty(raw_qty)
+                return _normalize_qty_or_zero(
+                    instrument=instrument,
+                    raw_qty=raw_qty,
+                    precision=state.total_quantity.precision,
+                    instrument_id=state.instrument_id,
+                    primary_order_id=state.primary_order_id,
+                    logger=self.log,
+                )
 
         # Fallback: fixed quantity arithmetic
-        remaining = state.total_quantity - state.filled_quantity
-        return instrument.make_qty(remaining)
+        remaining_raw = float(state.total_quantity - state.filled_quantity)
+        return _normalize_qty_or_zero(
+            instrument=instrument,
+            raw_qty=remaining_raw,
+            precision=state.total_quantity.precision,
+            instrument_id=state.instrument_id,
+            primary_order_id=state.primary_order_id,
+            logger=self.log,
+        )
 
     def _get_bbo_price(self, state: OrderExecutionState) -> float | None:
         """Get best available execution price for quantity recalculation."""
