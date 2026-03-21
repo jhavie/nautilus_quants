@@ -11,12 +11,15 @@ Tests are structured to avoid needing fully-initialized Nautilus Actor objects
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import ClientOrderId, InstrumentId
 from nautilus_trader.model.objects import Quantity
 
 from nautilus_quants.execution.post_limit.algorithm import (
+    PostLimitExecAlgorithm,
     _normalize_qty_or_zero,
     _spawn_linkage_fields,
     compute_limit_price,
@@ -637,6 +640,48 @@ class TestConcurrentOrders:
         assert states[2].state == OrderState.CHASING
         assert states[3].state == OrderState.MARKET_FALLBACK
         assert states[4].state == OrderState.COMPLETED
+
+
+class TestTargetQuoteQuantityRemaining:
+    """Test remaining quantity recalculation using target quote quantity."""
+
+    class _FakeInstrument:
+        size_increment = Quantity.from_str("0.01")
+        size_precision = 2
+
+        def make_qty(self, value: float, round_down: bool = False) -> Quantity:
+            if value <= 0:
+                return Quantity.zero(2)
+            if value < 0.01:
+                raise ValueError("Invalid `value` for quantity: rounded to zero")
+            if round_down:
+                floored = int(value * 100) / 100
+                return Quantity.from_str(f"{floored:.2f}")
+            return Quantity.from_str(f"{value:.2f}")
+
+    def test_flip_total_target_quote_quantity_does_not_complete_early(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        state = OrderExecutionState(
+            primary_order_id=ClientOrderId("O-001"),
+            instrument_id=InstrumentId.from_str("SOL-USDT-SWAP.OKX"),
+            side=OrderSide.BUY,
+            total_quantity=Quantity.from_str("22.16"),
+            anchor_px=90.20,
+            filled_quantity=Quantity.from_str("11.08"),
+        )
+        state.target_quote_quantity = 2000.0
+        state.filled_quote_quantity = 999.3052
+        state.contract_multiplier = 1.0
+
+        cache = MagicMock()
+        cache.instrument.return_value = self._FakeInstrument()
+
+        with patch.object(PostLimitExecAlgorithm, "cache", new_callable=PropertyMock) as cache_prop:
+            cache_prop.return_value = cache
+            with patch.object(PostLimitExecAlgorithm, "_get_bbo_price", return_value=90.19):
+                remaining = algo._remaining_quantity(state)
+
+        assert remaining == Quantity.from_str("11.09")
 
 
 # ---------------------------------------------------------------------------

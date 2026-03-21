@@ -123,10 +123,10 @@ class DecisionEngineActor(Actor):
         """
         FMZ core logic: sort + target selection + diff with current positions.
 
-        Actions:
-        - CLOSE: reduce_only=True, for delisting protection
-        - OPEN: reduce_only=False, new position entry
-        - FLIP: reduce_only=False, one-shot direction reversal (NETTING mode)
+        Intents:
+        - CLOSE: close existing position
+        - OPEN: open new position
+        - FLIP: one-shot direction reversal (NETTING mode)
         """
         sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
         rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
@@ -216,9 +216,8 @@ class DecisionEngineActor(Actor):
         return {
             "instrument_id": instrument_id,
             "order_side": order_side,
-            "action": "CLOSE",
-            "reduce_only": True,
-            "quote_quantity": 0,
+            "intent": "CLOSE",
+            "target_quote_quantity": 0,
             "tags": tags or [],
             "rank": rank,
             "composite": composite,
@@ -235,9 +234,8 @@ class DecisionEngineActor(Actor):
         return {
             "instrument_id": instrument_id,
             "order_side": order_side,
-            "action": "OPEN",
-            "reduce_only": False,
-            "quote_quantity": self.config.position_value,
+            "intent": "OPEN",
+            "target_quote_quantity": self.config.position_value,
             "tags": tags or [],
             "rank": rank,
             "composite": composite,
@@ -251,7 +249,7 @@ class DecisionEngineActor(Actor):
         rank: int = -1,
         composite: float | None = None,
     ) -> dict[str, Any]:
-        """One-shot flip intent. quote_quantity = target position value (1×).
+        """One-shot flip intent. target_quote_quantity = target position value (1x).
 
         Execution layer resolves actual flip quantity:
         flip_qty = current_position_qty + target_qty
@@ -259,9 +257,8 @@ class DecisionEngineActor(Actor):
         return {
             "instrument_id": instrument_id,
             "order_side": order_side,
-            "action": "FLIP",
-            "reduce_only": False,
-            "quote_quantity": self.config.position_value,
+            "intent": "FLIP",
+            "target_quote_quantity": self.config.position_value,
             "tags": tags or [],
             "rank": rank,
             "composite": composite,
