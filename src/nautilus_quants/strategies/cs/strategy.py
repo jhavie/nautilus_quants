@@ -3,9 +3,9 @@
 """
 CSStrategy - Lean orchestrator for cross-sectional factor strategies.
 
-Receives RebalanceOrders from DecisionEngineActor, delegates execution
-ordering to ExposureManager, and submits orders via ExecutionPolicy.
-Nautilus position hooks (on_position_closed/opened) drive sequential execution.
+Receives RebalanceOrders from DecisionEngineActor and submits orders
+via ExecutionPolicy. NETTING mode: flips are one-shot orders whose
+quantity is computed from cache position + target at execution time.
 
 Constitution Compliance:
     - Extends Nautilus Strategy base class (Principle I)
@@ -19,9 +19,13 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from nautilus_trader.model.data import Bar, BarType, DataType
+from nautilus_trader.model.data import DataType
 from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.events.position import PositionClosed, PositionOpened
+from nautilus_trader.model.events.position import (
+    PositionChanged,
+    PositionClosed,
+    PositionOpened,
+)
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
@@ -32,7 +36,6 @@ from nautilus_quants.strategies.cs.execution_policy import (
     MarketExecutionPolicy,
     PostLimitExecutionPolicy,
 )
-from nautilus_quants.strategies.cs.exposure_manager import ExposureManager, ExposurePolicy
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 
 if TYPE_CHECKING:
@@ -47,18 +50,16 @@ _EXECUTION_POLICIES: dict[str, type] = {
 
 class CSStrategy(BarSubscriptionMixin, Strategy):
     """
-    Cross-sectional strategy orchestrator.
+    Cross-sectional strategy orchestrator (NETTING mode).
 
     Data flow:
         DecisionEngineActor → RebalanceOrders (via MessageBus)
-        → CSStrategy.on_data() → ExposureManager.submit_plan()
-        → execute closes → on_position_closed() → release opens
+        → CSStrategy.on_data() → _execute_order() for each order
+        → ExecutionPolicy.submit_open/close
     """
 
     def __init__(self, config: CSStrategyConfig) -> None:
         super().__init__(config)
-        exposure_policy = ExposurePolicy(config.exposure_policy)
-        self._exposure_manager = ExposureManager(policy=exposure_policy)
         self._execution_policy: ExecutionPolicy = self._create_execution_policy(config)
         self._instruments: dict[InstrumentId, Instrument] = {}
 
@@ -97,13 +98,11 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
 
         self.subscribe_data(DataType(RebalanceOrders))
         self.log.info(
-            f"CSStrategy started: execution_policy={self.config.execution_policy}, "
-            f"exposure_policy={self.config.exposure_policy}"
+            f"CSStrategy started: execution_policy={self.config.execution_policy}"
         )
 
     def on_stop(self) -> None:
         """Close all positions and clean up."""
-        self._exposure_manager.on_stop()
         self._close_all_positions()
         self.log.info("CSStrategy stopped")
 
@@ -116,52 +115,109 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         if not isinstance(data, RebalanceOrders):
             return
 
-        closes = data.closes
-        opens = data.opens
-
+        all_orders = data.orders
         self.log.info(
-            f"Received RebalanceOrders: {len(closes)} closes, {len(opens)} opens"
+            f"Received RebalanceOrders: {len(data.closes)} closes, "
+            f"{len(data.opens)} opens, {len(data.flips)} flips"
         )
 
-        immediate_closes, immediate_opens = self._exposure_manager.submit_plan(
-            closes, opens,
-        )
-
-        for order_dict in immediate_closes:
-            self._execute_close(order_dict["instrument_id"], order_dict.get("tags"))
-        for order_dict in immediate_opens:
-            self._execute_open(order_dict)
-
-        if self._exposure_manager.has_pending:
-            self.log.info(f"ExposureManager: {self._exposure_manager.state_summary}")
+        for order_dict in all_orders:
+            self._execute_order(order_dict)
 
     # -------------------------------------------------------------------------
-    # Nautilus position hooks — drive sequential execution
+    # Nautilus position hooks — logging only (NETTING mode)
     # -------------------------------------------------------------------------
-
-    def on_position_closed(self, event: PositionClosed) -> None:
-        """Position closed confirmed → release queued orders from ExposureManager."""
-        inst_id = str(event.instrument_id)
-        released = self._exposure_manager.on_close_filled(inst_id)
-        for order_dict in released:
-            if order_dict["action"] == "OPEN":
-                self._execute_open(order_dict)
-            else:
-                self._execute_close(order_dict["instrument_id"], order_dict.get("tags"))
 
     def on_position_opened(self, event: PositionOpened) -> None:
-        """Position opened confirmed → release queued orders from ExposureManager."""
-        inst_id = str(event.instrument_id)
-        released = self._exposure_manager.on_open_filled(inst_id)
-        for order_dict in released:
-            if order_dict["action"] == "CLOSE":
-                self._execute_close(order_dict["instrument_id"], order_dict.get("tags"))
-            else:
-                self._execute_open(order_dict)
+        """Log new position opened."""
+        self.log.info(
+            f"Position opened: {event.instrument_id} "
+            f"side={event.side} qty={event.quantity}"
+        )
+
+    def on_position_changed(self, event: PositionChanged) -> None:
+        """Log position direction change (flip confirmation in NETTING mode)."""
+        self.log.info(
+            f"Position changed: {event.instrument_id} "
+            f"side={event.side} qty={event.quantity}"
+        )
+
+    def on_position_closed(self, event: PositionClosed) -> None:
+        """Log position closed (delisting protection or strategy stop)."""
+        self.log.info(f"Position closed: {event.instrument_id}")
 
     # -------------------------------------------------------------------------
-    # Order execution (via ExecutionPolicy)
+    # Order execution dispatch
     # -------------------------------------------------------------------------
+
+    def _execute_order(self, order_dict: dict[str, Any]) -> None:
+        """Route order to appropriate execution method based on action."""
+        action = order_dict["action"]
+        if action == "CLOSE":
+            self._execute_close(order_dict["instrument_id"], order_dict.get("tags"))
+        elif action == "OPEN":
+            self._execute_open(order_dict)
+        elif action == "FLIP":
+            self._execute_flip(order_dict)
+        else:
+            self.log.error(f"Unknown action: {action}")
+
+    def _execute_flip(self, order_dict: dict[str, Any]) -> None:
+        """Execute one-shot NETTING flip: actual_position_qty + target_qty.
+
+        1. Read actual position quantity from cache (reflects PnL/ADL)
+        2. Calculate target quantity from quote_tick BBO price
+        3. Flip quantity = actual + target
+        """
+        inst_id = InstrumentId.from_str(order_dict["instrument_id"])
+        instrument = self._instruments.get(inst_id)
+        if instrument is None:
+            self.log.warning(f"Skip FLIP: instrument not cached: {inst_id}")
+            return
+
+        side = OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
+
+        # 1. Read actual position quantity from cache
+        current_qty = Decimal(0)
+        for position in self.cache.positions_open(
+            instrument_id=inst_id, strategy_id=self.id,
+        ):
+            current_qty = Decimal(str(position.quantity))
+            break
+
+        if current_qty <= 0:
+            self.log.warning(
+                f"FLIP {inst_id}: no open position found, falling back to OPEN"
+            )
+            self._execute_open(order_dict)
+            return
+
+        # 2. Calculate target quantity from BBO price
+        exec_price = self._get_exec_price(inst_id, side)
+        if exec_price is None or exec_price <= 0:
+            self.log.warning(f"Skip FLIP {inst_id}: no price available")
+            return
+
+        target_value = order_dict["quote_quantity"]
+        multiplier = float(instrument.multiplier)
+        target_qty = Decimal(str(target_value / (exec_price * multiplier)))
+
+        # 3. Flip quantity = actual position + target
+        total_qty = instrument.make_qty(current_qty + target_qty)
+        tags = order_dict.get("tags")
+
+        self._execution_policy.submit_open(
+            instrument_id=inst_id,
+            order_side=side,
+            quantity=total_qty,
+            tags=tags,
+            target_quote_value=target_value,
+            contract_multiplier=multiplier,
+        )
+        self.log.info(
+            f"FLIP {side.name} {inst_id}: current={current_qty} + "
+            f"target={target_qty} = {total_qty} (price={exec_price})"
+        )
 
     def _execute_open(self, order_dict: dict[str, Any]) -> None:
         """Convert a RebalanceOrders open instruction into an actual order."""
@@ -176,13 +232,14 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             self.log.warning(f"Skip OPEN {inst_id}: quote_quantity={quote_qty}")
             return
 
-        # Get latest price from bar data for quantity calculation
-        exec_price = self._get_last_close(inst_id)
+        side = OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
+
+        # Use BBO price for quantity calculation at execution time
+        exec_price = self._get_exec_price(inst_id, side)
         if exec_price is None or exec_price <= 0:
             self.log.warning(f"Skip OPEN {inst_id}: no price available")
             return
 
-        side = OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
         multiplier = float(instrument.multiplier)
         raw_qty = Decimal(str(quote_qty / (exec_price * multiplier)))
         quantity = instrument.make_qty(raw_qty)
@@ -193,10 +250,25 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             order_side=side,
             quantity=quantity,
             tags=tags,
+            target_quote_value=quote_qty,
+            contract_multiplier=multiplier,
         )
         self.log.debug(
             f"OPEN {side.name} {inst_id}: value={quote_qty} price={exec_price} qty={quantity}"
         )
+
+    def _get_exec_price(
+        self,
+        instrument_id: InstrumentId,
+        side: OrderSide,
+    ) -> float | None:
+        """Get execution price: QuoteTick BBO > bar close > None."""
+        quote = self.cache.quote_tick(instrument_id)
+        if quote is not None:
+            if side == OrderSide.BUY:
+                return float(quote.ask_price) if quote.ask_price else None
+            return float(quote.bid_price) if quote.bid_price else None
+        return self._get_last_close(instrument_id)
 
     def _get_last_close(self, instrument_id: InstrumentId) -> float | None:
         """Get the last bar close price for an instrument."""
