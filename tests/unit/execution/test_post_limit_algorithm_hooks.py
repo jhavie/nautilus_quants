@@ -78,10 +78,14 @@ def _patch_algo_environment(algo: PostLimitExecAlgorithm):
     cache.add = MagicMock()
     log = MagicMock()
     stack.enter_context(
-        patch.object(PostLimitExecAlgorithm, "clock", new_callable=PropertyMock, return_value=clock),
+        patch.object(
+            PostLimitExecAlgorithm, "clock", new_callable=PropertyMock, return_value=clock
+        ),
     )
     stack.enter_context(
-        patch.object(PostLimitExecAlgorithm, "cache", new_callable=PropertyMock, return_value=cache),
+        patch.object(
+            PostLimitExecAlgorithm, "cache", new_callable=PropertyMock, return_value=cache
+        ),
     )
     stack.enter_context(
         patch.object(PostLimitExecAlgorithm, "log", new_callable=PropertyMock, return_value=log),
@@ -180,6 +184,109 @@ class TestPostLimitExecAlgorithmHooks:
 
             assert state.state == OrderState.WORKING_LIMIT
             algo._arm_timeout.assert_called_once_with(state)
+
+    def test_on_order_canceled_reprice_submits_new_limit(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.CANCEL_PENDING_REPRICE)
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            algo._restore_primary_from_active = MagicMock()  # type: ignore[method-assign]
+            algo.submit_order = MagicMock()  # type: ignore[method-assign]
+
+            primary = SimpleNamespace(
+                client_order_id=state.primary_order_id,
+                leaves_qty=Quantity.from_str("12.32"),
+                is_closed=False,
+            )
+            cache.order.side_effect = lambda order_id: (
+                primary if order_id == state.primary_order_id else None
+            )
+            cache.instrument.return_value = SimpleNamespace(
+                price_increment=0.01,
+                make_price=lambda value: value,
+            )
+            cache.quote_tick.return_value = SimpleNamespace(bid_price=100.0, ask_price=100.1)
+
+            spawned = SimpleNamespace(
+                client_order_id=ClientOrderId("primary001E2"),
+                quantity=Quantity.from_str("12.32"),
+            )
+            with (
+                patch(
+                    "nautilus_quants.execution.post_limit.algorithm.compute_remaining_quantity",
+                    return_value=Quantity.from_str("12.32"),
+                ),
+                patch(
+                    "nautilus_quants.execution.post_limit.algorithm.ChildOrderFactory.create_limit",
+                    return_value=spawned,
+                ),
+                patch(
+                    "nautilus_quants.execution.post_limit.algorithm.PrimaryMirror.reduce_primary",
+                    return_value=Quantity.from_str("12.32"),
+                ),
+            ):
+                algo.on_order_canceled(
+                    SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+                )
+
+            algo.submit_order.assert_called_once_with(spawned)
+            assert state.state == OrderState.PENDING_LIMIT
+            assert state.active_order_id == ClientOrderId("primary001E2")
+            assert (
+                algo._active_child_to_primary[ClientOrderId("primary001E2")]
+                == state.primary_order_id
+            )
+
+    def test_on_order_canceled_mirror_reduce_error_fails_session_without_raise(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.CANCEL_PENDING_REPRICE)
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            algo._restore_primary_from_active = MagicMock()  # type: ignore[method-assign]
+            algo.submit_order = MagicMock()  # type: ignore[method-assign]
+
+            primary = SimpleNamespace(
+                client_order_id=state.primary_order_id,
+                leaves_qty=Quantity.from_str("1.00"),
+                is_closed=False,
+            )
+            cache.order.side_effect = lambda order_id: (
+                primary if order_id == state.primary_order_id else None
+            )
+            cache.instrument.return_value = SimpleNamespace(
+                price_increment=0.01,
+                make_price=lambda value: value,
+            )
+            cache.quote_tick.return_value = SimpleNamespace(bid_price=100.0, ask_price=100.1)
+
+            spawned = SimpleNamespace(
+                client_order_id=ClientOrderId("primary001E2"),
+                quantity=Quantity.from_str("1.00"),
+            )
+            with (
+                patch(
+                    "nautilus_quants.execution.post_limit.algorithm.compute_remaining_quantity",
+                    return_value=Quantity.from_str("1.00"),
+                ),
+                patch(
+                    "nautilus_quants.execution.post_limit.algorithm.ChildOrderFactory.create_limit",
+                    return_value=spawned,
+                ),
+                patch(
+                    "nautilus_quants.execution.post_limit.algorithm.PrimaryMirror.reduce_primary",
+                    side_effect=ValueError("forced failure"),
+                ),
+            ):
+                algo.on_order_canceled(
+                    SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+                )
+
+            assert state.state == OrderState.FAILED
+            algo.submit_order.assert_not_called()
 
     def test_on_stop_no_longer_persists_state_via_cache(self) -> None:
         algo = PostLimitExecAlgorithm()

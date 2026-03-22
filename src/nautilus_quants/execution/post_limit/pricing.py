@@ -91,6 +91,7 @@ def compute_remaining_quantity(cache, state: OrderExecutionState, logger) -> Qua
     if instrument is None:
         return state.total_quantity
 
+    remaining: Quantity | None = None
     if state.target_quote_quantity is not None:
         remaining_value = state.target_quote_quantity - state.filled_quote_quantity
         if remaining_value <= 0:
@@ -99,7 +100,7 @@ def compute_remaining_quantity(cache, state: OrderExecutionState, logger) -> Qua
         exec_price = get_execution_price(cache, state)
         if exec_price is not None and exec_price > 0:
             raw_qty = remaining_value / (exec_price * state.contract_multiplier)
-            return normalize_qty_or_zero(
+            remaining = normalize_qty_or_zero(
                 instrument=instrument,
                 raw_qty=raw_qty,
                 precision=state.total_quantity.precision,
@@ -108,15 +109,57 @@ def compute_remaining_quantity(cache, state: OrderExecutionState, logger) -> Qua
                 logger=logger,
             )
 
-    remaining_raw = float(state.total_quantity - state.filled_quantity)
-    return normalize_qty_or_zero(
-        instrument=instrument,
-        raw_qty=remaining_raw,
-        precision=state.total_quantity.precision,
-        instrument_id=state.instrument_id,
-        primary_order_id=state.primary_order_id,
+    if remaining is None:
+        remaining_raw = float(state.total_quantity - state.filled_quantity)
+        remaining = normalize_qty_or_zero(
+            instrument=instrument,
+            raw_qty=remaining_raw,
+            precision=state.total_quantity.precision,
+            instrument_id=state.instrument_id,
+            primary_order_id=state.primary_order_id,
+            logger=logger,
+        )
+
+    return _cap_remaining_to_primary_leaves(
+        cache=cache,
+        state=state,
+        remaining=remaining,
         logger=logger,
     )
+
+
+def _cap_remaining_to_primary_leaves(
+    *,
+    cache,
+    state: OrderExecutionState,
+    remaining: Quantity,
+    logger,
+) -> Quantity:
+    primary = cache.order(state.primary_order_id)
+    if primary is None:
+        return remaining
+
+    leaves_qty = getattr(primary, "leaves_qty", None)
+    if not isinstance(leaves_qty, Quantity):
+        return remaining
+
+    if remaining <= leaves_qty:
+        return remaining
+
+    capped = Quantity(float(leaves_qty), remaining.precision)
+    if capped < Quantity.zero(capped.precision):
+        capped = Quantity.zero(capped.precision)
+
+    mode = "target_quote" if state.target_quote_quantity is not None else "fixed_quantity"
+    logger.warning(
+        "PostLimit remaining capped by primary leaves: "
+        f"primary={state.primary_order_id} "
+        f"mode={mode} "
+        f"requested={remaining} "
+        f"capped={capped} "
+        f"leaves={leaves_qty}"
+    )
+    return capped
 
 
 def determine_limit_price(

@@ -124,6 +124,33 @@ class TestQuantities:
 
         assert remaining == Quantity.from_str("11.09")
 
+    def test_compute_remaining_quantity_caps_to_primary_leaves(self) -> None:
+        state = OrderExecutionState(
+            primary_order_id=ClientOrderId("primary001"),
+            instrument_id=InstrumentId.from_str("SOL-USDT-SWAP.OKX"),
+            side=OrderSide.BUY,
+            total_quantity=Quantity.from_str("12.33"),
+            anchor_px=81.10,
+            filled_quantity=Quantity.from_str("0.00"),
+            target_quote_quantity=1000.0,
+            filled_quote_quantity=0.0,
+            contract_multiplier=1.0,
+        )
+        cache = MagicMock()
+        cache.instrument.return_value = _FakeInstrument()
+        cache.quote_tick.return_value = SimpleNamespace(ask_price=81.10, bid_price=81.00)
+        cache.order.return_value = SimpleNamespace(
+            leaves_qty=Quantity.from_str("12.32"),
+            is_closed=False,
+        )
+        logger = MagicMock()
+
+        remaining = compute_remaining_quantity(cache, state, logger)
+
+        assert remaining == Quantity.from_str("12.32")
+        logger.warning.assert_called_once()
+        assert "remaining capped by primary leaves" in logger.warning.call_args.args[0]
+
     def test_compute_residual_notional_uses_mid_price_then_anchor(self) -> None:
         cache = MagicMock()
         cache.quote_tick.return_value = SimpleNamespace(bid_price=99.0, ask_price=101.0)

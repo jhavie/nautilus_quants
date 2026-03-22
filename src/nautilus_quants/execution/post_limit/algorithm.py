@@ -225,9 +225,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             state.filled_quantity.precision,
         )
         if state.target_quote_quantity is not None:
-            state.filled_quote_quantity += (
-                fill_px * float(fill_qty) * state.contract_multiplier
-            )
+            state.filled_quote_quantity += fill_px * float(fill_qty) * state.contract_multiplier
 
         remaining = compute_remaining_quantity(self.cache, state, self.log)
         if remaining <= Quantity.zero(remaining.precision):
@@ -309,7 +307,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if not self._config.enable_residual_sweep:
             return
         if any(
-            state.instrument_id == event.instrument_id and state.active_order_kind == SpawnKind.SWEEP
+            state.instrument_id == event.instrument_id
+            and state.active_order_kind == SpawnKind.SWEEP
             for state in self._states.values()
         ):
             return
@@ -371,7 +370,19 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             post_only=self._get_post_only(state),
             reduce_only=state.reduce_only,
         )
-        mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
+        try:
+            mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
+        except ValueError as exc:
+            self.log.error(
+                "PostLimit limit-child mirror reduce failed: "
+                f"primary={state.primary_order_id} "
+                f"child={spawned.client_order_id} "
+                f"requested={spawned.quantity} "
+                f"leaves={primary.leaves_qty} "
+                f"error={exc}"
+            )
+            self._fail_session(state)
+            return
         factory.register_child(
             state,
             spawned,
@@ -413,7 +424,19 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         mirrored_reserved_quantity = spawned.quantity
         if kind == SpawnKind.MARKET:
             mirror = PrimaryMirror(cache=self.cache, clock=self.clock, logger=self.log)
-            mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
+            try:
+                mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
+            except ValueError as exc:
+                self.log.error(
+                    "PostLimit market-child mirror reduce failed: "
+                    f"primary={state.primary_order_id} "
+                    f"child={spawned.client_order_id} "
+                    f"requested={spawned.quantity} "
+                    f"leaves={primary.leaves_qty} "
+                    f"error={exc}"
+                )
+                self._fail_session(state)
+                return
             PostLimitSession(state).on_market_submitted()
         state.activate_order(
             client_order_id=spawned.client_order_id,

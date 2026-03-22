@@ -121,8 +121,17 @@ class PrimaryMirror:
 
     def reduce_primary(self, primary, quantity: Quantity) -> Quantity:
         if primary.leaves_qty < quantity:
+            self._log.error(
+                "PostLimit mirror reduce invariant violated: "
+                f"primary={primary.client_order_id} "
+                f"requested={quantity} "
+                f"leaves={primary.leaves_qty}"
+            )
             raise ValueError(
-                f"spawn quantity {quantity} exceeds primary leaves_qty {primary.leaves_qty}"
+                "spawn quantity exceeds primary leaves_qty: "
+                f"primary={primary.client_order_id} "
+                f"requested={quantity} "
+                f"leaves={primary.leaves_qty}"
             )
 
         new_qty = Quantity(
