@@ -80,7 +80,9 @@ class TestChildOrderFactory:
 
         state = _make_state()
         primary = _make_primary()
-        factory = ChildOrderFactory(clock=SimpleNamespace(timestamp_ns=lambda: 123456), exec_algorithm_id="PostLimit")
+        factory = ChildOrderFactory(
+            clock=SimpleNamespace(timestamp_ns=lambda: 123456), exec_algorithm_id="PostLimit"
+        )
 
         order = factory.create_limit(
             primary=primary,
@@ -106,7 +108,9 @@ class TestChildOrderFactory:
 
     def test_register_child_sets_active_order_and_sequence(self) -> None:
         state = _make_state()
-        factory = ChildOrderFactory(clock=SimpleNamespace(timestamp_ns=lambda: 1), exec_algorithm_id="PostLimit")
+        factory = ChildOrderFactory(
+            clock=SimpleNamespace(timestamp_ns=lambda: 1), exec_algorithm_id="PostLimit"
+        )
         order = SimpleNamespace(
             client_order_id=ClientOrderId("primary001E2"),
             quantity=Quantity.from_str("1.0"),
@@ -179,3 +183,26 @@ class TestPrimaryMirror:
 
         primary.apply.assert_not_called()
         cache.update_order.assert_not_called()
+
+    def test_reduce_above_leaves_warns_and_reserves_best_effort(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "nautilus_quants.execution.post_limit.spawn.OrderUpdated",
+            lambda **kwargs: SimpleNamespace(**kwargs),
+        )
+
+        cache = MagicMock()
+        clock = SimpleNamespace(timestamp_ns=lambda: 999)
+        logger = MagicMock()
+        mirror = PrimaryMirror(cache=cache, clock=clock, logger=logger)
+
+        primary = _make_primary()
+        primary.leaves_qty = Quantity.from_str("0.80")
+        primary.apply.side_effect = lambda event: setattr(primary, "quantity", event.quantity)
+
+        mirrored_reserved = mirror.reduce_primary(primary, Quantity.from_str("1.25"))
+
+        assert mirrored_reserved == Quantity.from_str("0.80")
+        reduced_event = primary.apply.call_args.args[0]
+        assert reduced_event.quantity == Quantity.from_str("1.20")
+        logger.warning.assert_called_once()
+        assert "above leaves, continuing best-effort" in logger.warning.call_args.args[0]

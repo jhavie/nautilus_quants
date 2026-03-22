@@ -120,33 +120,43 @@ class PrimaryMirror:
         self._log = logger
 
     def reduce_primary(self, primary, quantity: Quantity) -> Quantity:
-        if primary.leaves_qty < quantity:
-            self._log.error(
-                "PostLimit mirror reduce invariant violated: "
+        leaves_qty = primary.leaves_qty
+        mirrorable = min(quantity, leaves_qty)
+        if quantity > leaves_qty:
+            delta = Quantity(float(quantity) - float(leaves_qty), quantity.precision)
+            self._log.warning(
+                "PostLimit mirror reduce above leaves, continuing best-effort: "
                 f"primary={primary.client_order_id} "
                 f"requested={quantity} "
-                f"leaves={primary.leaves_qty}"
-            )
-            raise ValueError(
-                "spawn quantity exceeds primary leaves_qty: "
-                f"primary={primary.client_order_id} "
-                f"requested={quantity} "
-                f"leaves={primary.leaves_qty}"
+                f"leaves={leaves_qty} "
+                f"mirror_reserved={mirrorable} "
+                f"delta={delta}"
             )
 
+        if mirrorable <= Quantity.zero(mirrorable.precision):
+            self._log.debug(
+                "PostLimit mirror skipped reduce with non-positive mirrorable qty: "
+                f"primary={primary.client_order_id} "
+                f"requested={quantity} "
+                f"leaves={leaves_qty}"
+            )
+            return Quantity.zero(quantity.precision)
+
         new_qty = Quantity(
-            primary.quantity - quantity,
+            primary.quantity - mirrorable,
             primary.quantity.precision,
         )
         if new_qty <= Quantity.zero(new_qty.precision):
             self._log.debug(
                 f"PostLimit mirror skipped quantity update at floor: {primary.client_order_id} "
-                f"requested={quantity} current={primary.quantity}"
+                f"requested={quantity} "
+                f"mirror_reserved={mirrorable} "
+                f"current={primary.quantity}"
             )
             return Quantity.zero(quantity.precision)
 
         self._apply_quantity_update(primary, new_qty)
-        return quantity
+        return mirrorable
 
     def restore_primary(self, primary, child_order, reserved_quantity: Quantity | None) -> None:
         if reserved_quantity is None:

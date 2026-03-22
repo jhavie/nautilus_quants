@@ -122,9 +122,9 @@ class TestQuantities:
 
         remaining = compute_remaining_quantity(cache, state, MagicMock())
 
-        assert remaining == Quantity.from_str("11.09")
+        assert remaining == Quantity.from_str("11.10")
 
-    def test_compute_remaining_quantity_caps_to_primary_leaves(self) -> None:
+    def test_compute_remaining_quantity_does_not_cap_to_primary_leaves(self) -> None:
         state = OrderExecutionState(
             primary_order_id=ClientOrderId("primary001"),
             instrument_id=InstrumentId.from_str("SOL-USDT-SWAP.OKX"),
@@ -139,17 +139,27 @@ class TestQuantities:
         cache = MagicMock()
         cache.instrument.return_value = _FakeInstrument()
         cache.quote_tick.return_value = SimpleNamespace(ask_price=81.10, bid_price=81.00)
-        cache.order.return_value = SimpleNamespace(
-            leaves_qty=Quantity.from_str("12.32"),
-            is_closed=False,
-        )
         logger = MagicMock()
 
         remaining = compute_remaining_quantity(cache, state, logger)
 
-        assert remaining == Quantity.from_str("12.32")
-        logger.warning.assert_called_once()
-        assert "remaining capped by primary leaves" in logger.warning.call_args.args[0]
+        assert remaining == Quantity.from_str("12.33")
+        logger.warning.assert_not_called()
+
+    def test_normalize_qty_or_zero_uses_default_rounding_not_round_down(self) -> None:
+        logger = MagicMock()
+
+        quantity = normalize_qty_or_zero(
+            instrument=_FakeInstrument(),
+            raw_qty=1.239,
+            precision=2,
+            instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
+            primary_order_id=ClientOrderId("primary001"),
+            logger=logger,
+        )
+
+        assert quantity == Quantity.from_str("1.24")
+        logger.warning.assert_not_called()
 
     def test_compute_residual_notional_uses_mid_price_then_anchor(self) -> None:
         cache = MagicMock()

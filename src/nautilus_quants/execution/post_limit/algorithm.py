@@ -350,6 +350,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if remaining <= Quantity.zero(remaining.precision):
             self._complete_session(state)
             return
+        mode = "target_quote" if state.target_quote_quantity is not None else "fixed"
+        leaves_qty = getattr(primary, "leaves_qty", None)
 
         limit_price = determine_limit_price(
             cache=self.cache,
@@ -372,17 +374,35 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         )
         try:
             mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
-        except ValueError as exc:
+        except Exception as exc:
             self.log.error(
                 "PostLimit limit-child mirror reduce failed: "
                 f"primary={state.primary_order_id} "
                 f"child={spawned.client_order_id} "
+                f"desired_qty={remaining} "
                 f"requested={spawned.quantity} "
                 f"leaves={primary.leaves_qty} "
+                f"mode={mode} "
                 f"error={exc}"
             )
             self._fail_session(state)
             return
+        delta_qty = float(spawned.quantity) - float(mirrored_reserved_quantity)
+        log_message = (
+            "PostLimit limit-child prepared: "
+            f"primary={state.primary_order_id} "
+            f"child={spawned.client_order_id} "
+            f"mode={mode} "
+            f"desired_qty={remaining} "
+            f"submitted_qty={spawned.quantity} "
+            f"leaves_qty={leaves_qty} "
+            f"mirror_reserved_qty={mirrored_reserved_quantity} "
+            f"delta_qty={delta_qty:.8f}"
+        )
+        if delta_qty > 0:
+            self.log.warning(log_message)
+        else:
+            self.log.debug(log_message)
         factory.register_child(
             state,
             spawned,
@@ -412,6 +432,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if remaining <= Quantity.zero(remaining.precision):
             self._complete_session(state)
             return
+        mode = "target_quote" if state.target_quote_quantity is not None else "fixed"
+        leaves_qty = getattr(primary, "leaves_qty", None)
 
         factory = ChildOrderFactory(clock=self.clock, exec_algorithm_id=self.id)
         spawned = factory.create_market(
@@ -426,18 +448,36 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             mirror = PrimaryMirror(cache=self.cache, clock=self.clock, logger=self.log)
             try:
                 mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
-            except ValueError as exc:
+            except Exception as exc:
                 self.log.error(
                     "PostLimit market-child mirror reduce failed: "
                     f"primary={state.primary_order_id} "
                     f"child={spawned.client_order_id} "
+                    f"desired_qty={remaining} "
                     f"requested={spawned.quantity} "
                     f"leaves={primary.leaves_qty} "
+                    f"mode={mode} "
                     f"error={exc}"
                 )
                 self._fail_session(state)
                 return
             PostLimitSession(state).on_market_submitted()
+        delta_qty = float(spawned.quantity) - float(mirrored_reserved_quantity)
+        log_message = (
+            "PostLimit market-child prepared: "
+            f"primary={state.primary_order_id} "
+            f"child={spawned.client_order_id} "
+            f"mode={mode} "
+            f"desired_qty={remaining} "
+            f"submitted_qty={spawned.quantity} "
+            f"leaves_qty={leaves_qty} "
+            f"mirror_reserved_qty={mirrored_reserved_quantity} "
+            f"delta_qty={delta_qty:.8f}"
+        )
+        if delta_qty > 0:
+            self.log.warning(log_message)
+        else:
+            self.log.debug(log_message)
         state.activate_order(
             client_order_id=spawned.client_order_id,
             kind=kind,

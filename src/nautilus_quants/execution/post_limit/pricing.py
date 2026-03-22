@@ -59,7 +59,7 @@ def normalize_qty_or_zero(
         return Quantity.zero(precision)
 
     try:
-        return instrument.make_qty(raw_qty, round_down=True)
+        return instrument.make_qty(raw_qty)
     except ValueError as exc:
         if "rounded to zero" not in str(exc):
             raise
@@ -120,46 +120,7 @@ def compute_remaining_quantity(cache, state: OrderExecutionState, logger) -> Qua
             logger=logger,
         )
 
-    return _cap_remaining_to_primary_leaves(
-        cache=cache,
-        state=state,
-        remaining=remaining,
-        logger=logger,
-    )
-
-
-def _cap_remaining_to_primary_leaves(
-    *,
-    cache,
-    state: OrderExecutionState,
-    remaining: Quantity,
-    logger,
-) -> Quantity:
-    primary = cache.order(state.primary_order_id)
-    if primary is None:
-        return remaining
-
-    leaves_qty = getattr(primary, "leaves_qty", None)
-    if not isinstance(leaves_qty, Quantity):
-        return remaining
-
-    if remaining <= leaves_qty:
-        return remaining
-
-    capped = Quantity(float(leaves_qty), remaining.precision)
-    if capped < Quantity.zero(capped.precision):
-        capped = Quantity.zero(capped.precision)
-
-    mode = "target_quote" if state.target_quote_quantity is not None else "fixed_quantity"
-    logger.warning(
-        "PostLimit remaining capped by primary leaves: "
-        f"primary={state.primary_order_id} "
-        f"mode={mode} "
-        f"requested={remaining} "
-        f"capped={capped} "
-        f"leaves={leaves_qty}"
-    )
-    return capped
+    return remaining
 
 
 def determine_limit_price(
