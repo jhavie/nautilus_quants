@@ -371,8 +371,13 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             post_only=self._get_post_only(state),
             reduce_only=state.reduce_only,
         )
-        mirror.reduce_primary(primary, spawned.quantity)
-        factory.register_child(state, spawned, SpawnKind.LIMIT)
+        mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
+        factory.register_child(
+            state,
+            spawned,
+            SpawnKind.LIMIT,
+            reserved_quantity=mirrored_reserved_quantity,
+        )
         state.last_limit_price = float(limit_price)
         self._active_child_to_primary[spawned.client_order_id] = state.primary_order_id
         PostLimitSession(state).on_limit_submitted()
@@ -405,14 +410,15 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             time_in_force=TimeInForce.GTC,
             reduce_only=True if kind == SpawnKind.SWEEP else state.reduce_only,
         )
+        mirrored_reserved_quantity = spawned.quantity
         if kind == SpawnKind.MARKET:
             mirror = PrimaryMirror(cache=self.cache, clock=self.clock, logger=self.log)
-            mirror.reduce_primary(primary, spawned.quantity)
+            mirrored_reserved_quantity = mirror.reduce_primary(primary, spawned.quantity)
             PostLimitSession(state).on_market_submitted()
         state.activate_order(
             client_order_id=spawned.client_order_id,
             kind=kind,
-            reserved_quantity=spawned.quantity,
+            reserved_quantity=mirrored_reserved_quantity,
         )
         self._active_child_to_primary[spawned.client_order_id] = state.primary_order_id
         self.submit_order(spawned)

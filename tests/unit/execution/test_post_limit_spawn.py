@@ -137,9 +137,10 @@ class TestPrimaryMirror:
         primary.apply.side_effect = lambda event: setattr(primary, "quantity", event.quantity)
         child = SimpleNamespace(leaves_qty=Quantity.from_str("0.40"))
 
-        mirror.reduce_primary(primary, Quantity.from_str("1.25"))
+        mirrored_reserved = mirror.reduce_primary(primary, Quantity.from_str("1.25"))
 
         reduced_event = primary.apply.call_args.args[0]
+        assert mirrored_reserved == Quantity.from_str("1.25")
         assert reduced_event.quantity == Quantity.from_str("0.75")
         assert cache.update_order.call_count == 1
 
@@ -152,3 +153,29 @@ class TestPrimaryMirror:
         restored_event = primary.apply.call_args.args[0]
         assert restored_event.quantity == Quantity.from_str("1.15")
         assert cache.update_order.call_count == 2
+
+    def test_full_delegation_skips_zero_quantity_update(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "nautilus_quants.execution.post_limit.spawn.OrderUpdated",
+            lambda **kwargs: SimpleNamespace(**kwargs),
+        )
+
+        cache = MagicMock()
+        clock = SimpleNamespace(timestamp_ns=lambda: 999)
+        logger = MagicMock()
+        mirror = PrimaryMirror(cache=cache, clock=clock, logger=logger)
+
+        primary = _make_primary()
+        child = SimpleNamespace(leaves_qty=Quantity.from_str("2.00"))
+
+        mirrored_reserved = mirror.reduce_primary(primary, Quantity.from_str("2.00"))
+
+        assert mirrored_reserved == Quantity.from_str("0.00")
+        primary.apply.assert_not_called()
+        cache.update_order.assert_not_called()
+        logger.debug.assert_called_once()
+
+        mirror.restore_primary(primary, child, reserved_quantity=mirrored_reserved)
+
+        primary.apply.assert_not_called()
+        cache.update_order.assert_not_called()

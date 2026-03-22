@@ -89,11 +89,18 @@ class ChildOrderFactory:
             **spawn_linkage_fields(primary),
         )
 
-    def register_child(self, state: OrderExecutionState, order, kind: SpawnKind) -> None:
+    def register_child(
+        self,
+        state: OrderExecutionState,
+        order,
+        kind: SpawnKind,
+        *,
+        reserved_quantity: Quantity | None = None,
+    ) -> None:
         state.activate_order(
             client_order_id=order.client_order_id,
             kind=kind,
-            reserved_quantity=order.quantity,
+            reserved_quantity=order.quantity if reserved_quantity is None else reserved_quantity,
         )
         if kind == SpawnKind.LIMIT:
             state.limit_orders_submitted += 1
@@ -112,7 +119,7 @@ class PrimaryMirror:
         self._clock = clock
         self._log = logger
 
-    def reduce_primary(self, primary, quantity: Quantity) -> None:
+    def reduce_primary(self, primary, quantity: Quantity) -> Quantity:
         if primary.leaves_qty < quantity:
             raise ValueError(
                 f"spawn quantity {quantity} exceeds primary leaves_qty {primary.leaves_qty}"
@@ -122,7 +129,15 @@ class PrimaryMirror:
             primary.quantity - quantity,
             primary.quantity.precision,
         )
+        if new_qty <= Quantity.zero(new_qty.precision):
+            self._log.debug(
+                f"PostLimit mirror skipped quantity update at floor: {primary.client_order_id} "
+                f"requested={quantity} current={primary.quantity}"
+            )
+            return Quantity.zero(quantity.precision)
+
         self._apply_quantity_update(primary, new_qty)
+        return quantity
 
     def restore_primary(self, primary, child_order, reserved_quantity: Quantity | None) -> None:
         if reserved_quantity is None:
