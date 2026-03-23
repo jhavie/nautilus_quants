@@ -1,6 +1,6 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""Tests for PostLimit state machine transitions."""
+"""Tests for PostLimit runtime state and snapshot encoding."""
 
 from __future__ import annotations
 
@@ -14,256 +14,129 @@ from nautilus_quants.execution.post_limit.state import (
     VALID_TRANSITIONS,
     OrderExecutionState,
     OrderState,
+    SpawnKind,
+    decode_execution_states,
+    encode_execution_states,
 )
 
 
-def _make_state(
-    state: OrderState = OrderState.PENDING,
-    chase_count: int = 0,
-) -> OrderExecutionState:
-    """Helper to create an OrderExecutionState for testing."""
+def _make_state(state: OrderState = OrderState.PENDING_LIMIT) -> OrderExecutionState:
     return OrderExecutionState(
-        primary_order_id=ClientOrderId("O-001"),
+        primary_order_id=ClientOrderId("primary001"),
         instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
         side=OrderSide.BUY,
-        total_quantity=Quantity.from_str("1.0"),
+        total_quantity=Quantity.from_str("1.50"),
         anchor_px=50000.0,
         state=state,
-        chase_count=chase_count,
-        filled_quantity=Quantity.zero(1),
+        timer_name="PostLimit-primary001",
+        created_ns=123,
     )
 
 
-class TestOrderStateEnum:
-    """Test OrderState enum values."""
-
+class TestOrderState:
     def test_all_states_defined(self) -> None:
-        states = {s.value for s in OrderState}
-        expected = {"PENDING", "ACTIVE", "CHASING", "MARKET_FALLBACK", "COMPLETED", "FAILED"}
-        assert states == expected
+        assert {state.value for state in OrderState} == {
+            "PENDING_LIMIT",
+            "WORKING_LIMIT",
+            "CANCEL_PENDING_REPRICE",
+            "CANCEL_PENDING_MARKET",
+            "PENDING_MARKET",
+            "WORKING_MARKET",
+            "COMPLETED",
+            "FAILED",
+        }
 
     def test_terminal_states(self) -> None:
         assert TERMINAL_STATES == {OrderState.COMPLETED, OrderState.FAILED}
 
-
-class TestValidTransitions:
-    """Test the VALID_TRANSITIONS map covers all states."""
-
-    def test_all_states_have_transitions(self) -> None:
+    def test_every_state_has_a_transition_entry(self) -> None:
         for state in OrderState:
             assert state in VALID_TRANSITIONS
 
-    def test_terminal_states_have_no_transitions(self) -> None:
-        for state in TERMINAL_STATES:
-            assert VALID_TRANSITIONS[state] == set()
 
+class TestOrderExecutionState:
+    def test_activate_and_clear_active_order(self) -> None:
+        state = _make_state()
 
-class TestOrderExecutionStateTransitions:
-    """Test OrderExecutionState.transition_to() validates transitions."""
-
-    # --- Happy path transitions ---
-
-    def test_pending_to_active(self) -> None:
-        s = _make_state(OrderState.PENDING)
-        s.transition_to(OrderState.ACTIVE)
-        assert s.state == OrderState.ACTIVE
-
-    def test_pending_to_failed(self) -> None:
-        s = _make_state(OrderState.PENDING)
-        s.transition_to(OrderState.FAILED)
-        assert s.state == OrderState.FAILED
-
-    def test_active_to_completed(self) -> None:
-        s = _make_state(OrderState.ACTIVE)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.state == OrderState.COMPLETED
-
-    def test_active_to_chasing(self) -> None:
-        s = _make_state(OrderState.ACTIVE)
-        s.transition_to(OrderState.CHASING)
-        assert s.state == OrderState.CHASING
-
-    def test_active_to_market_fallback(self) -> None:
-        s = _make_state(OrderState.ACTIVE)
-        s.transition_to(OrderState.MARKET_FALLBACK)
-        assert s.state == OrderState.MARKET_FALLBACK
-
-    def test_chasing_to_active(self) -> None:
-        s = _make_state(OrderState.CHASING)
-        s.transition_to(OrderState.ACTIVE)
-        assert s.state == OrderState.ACTIVE
-
-    def test_chasing_to_completed(self) -> None:
-        s = _make_state(OrderState.CHASING)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.state == OrderState.COMPLETED
-
-    def test_market_fallback_to_completed(self) -> None:
-        s = _make_state(OrderState.MARKET_FALLBACK)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.state == OrderState.COMPLETED
-
-    def test_market_fallback_to_failed(self) -> None:
-        s = _make_state(OrderState.MARKET_FALLBACK)
-        s.transition_to(OrderState.FAILED)
-        assert s.state == OrderState.FAILED
-
-    # --- Invalid transitions ---
-
-    def test_pending_to_completed_invalid(self) -> None:
-        s = _make_state(OrderState.PENDING)
-        with pytest.raises(ValueError, match="Invalid state transition"):
-            s.transition_to(OrderState.COMPLETED)
-
-    def test_pending_to_chasing_invalid(self) -> None:
-        s = _make_state(OrderState.PENDING)
-        with pytest.raises(ValueError, match="Invalid state transition"):
-            s.transition_to(OrderState.CHASING)
-
-    def test_active_to_pending_invalid(self) -> None:
-        s = _make_state(OrderState.ACTIVE)
-        with pytest.raises(ValueError, match="Invalid state transition"):
-            s.transition_to(OrderState.PENDING)
-
-    def test_completed_to_active_invalid(self) -> None:
-        s = _make_state(OrderState.COMPLETED)
-        with pytest.raises(ValueError, match="Invalid state transition"):
-            s.transition_to(OrderState.ACTIVE)
-
-    def test_failed_to_active_invalid(self) -> None:
-        s = _make_state(OrderState.FAILED)
-        with pytest.raises(ValueError, match="Invalid state transition"):
-            s.transition_to(OrderState.ACTIVE)
-
-    def test_chasing_to_market_fallback(self) -> None:
-        """CHASING -> MARKET_FALLBACK is valid (rejected during chase)."""
-        s = _make_state(OrderState.CHASING)
-        s.transition_to(OrderState.MARKET_FALLBACK)
-        assert s.state == OrderState.MARKET_FALLBACK
-
-    def test_chasing_to_failed(self) -> None:
-        """CHASING -> FAILED is valid (unrecoverable error during chase)."""
-        s = _make_state(OrderState.CHASING)
-        s.transition_to(OrderState.FAILED)
-        assert s.state == OrderState.FAILED
-
-    def test_chasing_to_pending_invalid(self) -> None:
-        s = _make_state(OrderState.CHASING)
-        with pytest.raises(ValueError, match="Invalid state transition"):
-            s.transition_to(OrderState.PENDING)
-
-    # --- Full lifecycle paths ---
-
-    def test_full_lifecycle_normal(self) -> None:
-        """PENDING -> ACTIVE -> COMPLETED (normal fill)."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_with_chase(self) -> None:
-        """PENDING -> ACTIVE -> CHASING -> ACTIVE -> COMPLETED."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.CHASING)
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_multiple_chases(self) -> None:
-        """PENDING -> ACTIVE -> (CHASING -> ACTIVE) x 3 -> MARKET_FALLBACK -> COMPLETED."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        for _ in range(3):
-            s.transition_to(OrderState.CHASING)
-            s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.MARKET_FALLBACK)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_chase_then_fill(self) -> None:
-        """PENDING -> ACTIVE -> CHASING -> COMPLETED (fill during cancel)."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.CHASING)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_reject_to_market(self) -> None:
-        """PENDING -> ACTIVE -> MARKET_FALLBACK -> COMPLETED."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.MARKET_FALLBACK)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_pending_fail(self) -> None:
-        """PENDING -> FAILED (instrument not found)."""
-        s = _make_state()
-        s.transition_to(OrderState.FAILED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_chase_rejected_to_market(self) -> None:
-        """PENDING -> ACTIVE -> CHASING -> MARKET_FALLBACK -> COMPLETED."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.CHASING)
-        s.transition_to(OrderState.MARKET_FALLBACK)
-        s.transition_to(OrderState.COMPLETED)
-        assert s.is_terminal
-
-    def test_full_lifecycle_chase_failed(self) -> None:
-        """PENDING -> ACTIVE -> CHASING -> FAILED."""
-        s = _make_state()
-        s.transition_to(OrderState.ACTIVE)
-        s.transition_to(OrderState.CHASING)
-        s.transition_to(OrderState.FAILED)
-        assert s.is_terminal
-
-
-class TestOrderExecutionStateProperties:
-    """Test OrderExecutionState dataclass properties."""
-
-    def test_is_terminal_false_for_active_states(self) -> None:
-        for state in (OrderState.PENDING, OrderState.ACTIVE, OrderState.CHASING, OrderState.MARKET_FALLBACK):
-            s = _make_state(state)
-            assert not s.is_terminal
-
-    def test_is_terminal_true_for_terminal_states(self) -> None:
-        for state in (OrderState.COMPLETED, OrderState.FAILED):
-            s = _make_state(state)
-            assert s.is_terminal
-
-    def test_default_values(self) -> None:
-        s = _make_state()
-        assert s.state == OrderState.PENDING
-        assert s.chase_count == 0
-        assert s.current_limit_order_id is None
-        assert s.timer_name == ""
-        assert s.limit_orders_submitted == 0
-        assert s.last_limit_price == 0.0
-        assert s.fill_cost == 0.0
-        assert s.timeout_secs is None
-        assert s.max_chase_attempts is None
-        assert s.chase_step_ticks is None
-        assert s.post_only is None
-
-    def test_completed_ns_default(self) -> None:
-        s = _make_state()
-        assert s.completed_ns == 0
-
-    def test_used_market_fallback_default(self) -> None:
-        s = _make_state()
-        assert s.used_market_fallback is False
-
-    def test_filled_quantity_auto_initialized(self) -> None:
-        """filled_quantity is auto-initialized to zero if not provided."""
-        s = OrderExecutionState(
-            primary_order_id=ClientOrderId("O-AUTO"),
-            instrument_id=InstrumentId.from_str("BTCUSDT-PERP.BINANCE"),
-            side=OrderSide.BUY,
-            total_quantity=Quantity.from_str("1.0"),
-            anchor_px=50000.0,
+        state.activate_order(
+            client_order_id=ClientOrderId("primary001E1"),
+            kind=SpawnKind.LIMIT,
+            reserved_quantity=Quantity.from_str("1.50"),
         )
-        assert s.filled_quantity is not None
-        assert s.filled_quantity == Quantity.zero(1)
+
+        assert state.active_order_id == ClientOrderId("primary001E1")
+        assert state.active_order_kind == SpawnKind.LIMIT
+        assert state.active_reserved_quantity == Quantity.from_str("1.50")
+        assert state.active_order_accepted is False
+
+        state.clear_active_order()
+
+        assert state.active_order_id is None
+        assert state.active_order_kind is None
+        assert state.active_reserved_quantity is None
+        assert state.active_order_accepted is False
+
+    def test_valid_transition(self) -> None:
+        state = _make_state(OrderState.PENDING_LIMIT)
+
+        state.transition_to(OrderState.WORKING_LIMIT)
+
+        assert state.state == OrderState.WORKING_LIMIT
+
+    def test_invalid_transition_raises(self) -> None:
+        state = _make_state(OrderState.PENDING_LIMIT)
+
+        with pytest.raises(ValueError, match="Invalid state transition"):
+            state.transition_to(OrderState.WORKING_MARKET)
+
+    def test_is_terminal_and_is_working_properties(self) -> None:
+        assert _make_state(OrderState.WORKING_LIMIT).is_working is True
+        assert _make_state(OrderState.WORKING_MARKET).is_working is True
+        assert _make_state(OrderState.COMPLETED).is_terminal is True
+        assert _make_state(OrderState.FAILED).is_terminal is True
+
+
+class TestStateSnapshots:
+    def test_encode_decode_round_trip_preserves_runtime_fields(self) -> None:
+        state = _make_state(OrderState.WORKING_LIMIT)
+        state.activate_order(
+            client_order_id=ClientOrderId("primary001E2"),
+            kind=SpawnKind.LIMIT,
+            reserved_quantity=Quantity.from_str("0.75"),
+            accepted=True,
+        )
+        state.chase_count = 2
+        state.spawn_sequence = 2
+        state.post_only_retreat_ticks = 1
+        state.filled_quantity = Quantity.from_str("0.75")
+        state.filled_quote_quantity = 37500.0
+        state.contract_multiplier = 1.0
+        state.intent = "OPEN"
+        state.limit_orders_submitted = 2
+        state.last_limit_price = 49999.5
+        state.fill_cost = 37499.625
+        state.residual_sweep_pending = True
+
+        encoded = encode_execution_states({state.primary_order_id: state})
+        decoded = decode_execution_states(encoded)
+
+        restored = decoded[state.primary_order_id]
+        assert restored.state == OrderState.WORKING_LIMIT
+        assert restored.active_order_id == ClientOrderId("primary001E2")
+        assert restored.active_order_kind == SpawnKind.LIMIT
+        assert restored.active_reserved_quantity == Quantity.from_str("0.75")
+        assert restored.active_order_accepted is True
+        assert restored.spawn_sequence == 2
+        assert restored.chase_count == 2
+        assert restored.post_only_retreat_ticks == 1
+        assert restored.filled_quantity == Quantity.from_str("0.75")
+        assert restored.filled_quote_quantity == 37500.0
+        assert restored.limit_orders_submitted == 2
+        assert restored.last_limit_price == 49999.5
+        assert restored.fill_cost == 37499.625
+        assert restored.residual_sweep_pending is True
+
+    def test_decode_empty_store(self) -> None:
+        encoded = encode_execution_states({})
+
+        assert decode_execution_states(encoded) == {}

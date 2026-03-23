@@ -12,6 +12,10 @@ on:
           - testnet
           - pre-release
           - prod
+      image_tag:
+        description: 'Optional image tag to build and deploy (e.g. 0.2.3-rc.1)'
+        required: false
+        type: string
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -49,9 +53,16 @@ jobs:
       - name: Build tags
         id: tags
         run: |
-          TAGS="${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}"
-          if [ -n "${{ steps.version.outputs.tag }}" ]; then
-            TAGS="${TAGS},${{ env.IMAGE }}:${{ steps.version.outputs.tag }}"
+          if [ "${{ github.ref_name }}" = "develop" ]; then
+            TAGS="${{ env.IMAGE }}:develop-latest,${{ env.IMAGE }}:develop-${{ github.sha }}"
+          else
+            TAGS="${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}"
+            if [ -n "${{ steps.version.outputs.tag }}" ]; then
+              TAGS="${TAGS},${{ env.IMAGE }}:${{ steps.version.outputs.tag }}"
+            fi
+          fi
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAGS="${TAGS},${{ env.IMAGE }}:${{ inputs.image_tag }}"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
       - uses: docker/build-push-action@v6
@@ -74,8 +85,15 @@ jobs:
       - name: Set environment variables
         id: env
         run: |
+          CUSTOM_IMAGE_TAG="${{ inputs.image_tag }}"
+          IMAGE_TAG="${{ github.sha }}"
+
           case "${{ inputs.environment }}" in
             prod)
+              if [ "${{ github.ref_name }}" != "main" ]; then
+                echo "ERROR: prod deploy is only allowed from main (current=${{ github.ref_name }})"
+                exit 1
+              fi
               echo "container=nautilus-prod" >> $GITHUB_OUTPUT
               echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
               echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
@@ -94,7 +112,11 @@ jobs:
               echo "github_environment=testnet" >> $GITHUB_OUTPUT
               ;;
           esac
-          echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+          if [ -n "${CUSTOM_IMAGE_TAG}" ]; then
+            IMAGE_TAG="${CUSTOM_IMAGE_TAG}"
+          fi
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
