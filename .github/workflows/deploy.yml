@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - testnet
+          - pre-release
           - prod
       image_tag:
         description: 'Optional image tag to build and deploy (e.g. 0.2.3-rc.1)'
@@ -73,32 +74,45 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
     steps:
       - name: Set environment variables
         id: env
         run: |
           CUSTOM_IMAGE_TAG="${{ inputs.image_tag }}"
-          IMAGE_TAG=""
-          if [ "${{ inputs.environment }}" = "prod" ]; then
-            if [ "${{ github.ref_name }}" != "main" ]; then
-              echo "ERROR: prod deploy is only allowed from main (current=${{ github.ref_name }})"
-              exit 1
-            fi
-            echo "container=nautilus-prod" >> $GITHUB_OUTPUT
-            echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
-            echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
-            IMAGE_TAG="latest"
-          else
-            if [ "${{ github.ref_name }}" = "develop" ]; then
-              echo "container=nautilus-testnet-develop" >> $GITHUB_OUTPUT
-              IMAGE_TAG="develop-latest"
-            else
+          IMAGE_TAG="${{ github.sha }}"
+
+          case "${{ inputs.environment }}" in
+            prod)
+              if [ "${{ github.ref_name }}" != "main" ]; then
+                echo "ERROR: prod deploy is only allowed from main (current=${{ github.ref_name }})"
+                exit 1
+              fi
+              echo "container=nautilus-prod" >> $GITHUB_OUTPUT
+              echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
+              echo "github_environment=prod" >> $GITHUB_OUTPUT
+              ;;
+            pre-release)
+              echo "container=nautilus-pre-release" >> $GITHUB_OUTPUT
+              echo "config=config/live/okx_fmz_demo.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env.pre" >> $GITHUB_OUTPUT
+              echo "github_environment=pre-release" >> $GITHUB_OUTPUT
+              ;;
+            *)
               echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
-              IMAGE_TAG="latest"
-            fi
-            echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
-            echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
-          fi
+              echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
+              echo "github_environment=testnet" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
           if [ -n "${CUSTOM_IMAGE_TAG}" ]; then
             IMAGE_TAG="${CUSTOM_IMAGE_TAG}"
           fi
