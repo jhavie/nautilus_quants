@@ -375,6 +375,11 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if self._config.publish_signals:
             self.publish_data(data_type=DataType(FactorValues), data=factor_values)
 
+            # 存入 Redis (JSON 格式)
+            from nautilus_quants.utils.cache_keys import FACTOR_VALUES_CACHE_KEY
+
+            self.cache.add(FACTOR_VALUES_CACHE_KEY, factor_values.to_json().encode())
+
     # -------------------------------------------------------------------------
     # Flush timeout (one-shot time alert)
     # -------------------------------------------------------------------------
