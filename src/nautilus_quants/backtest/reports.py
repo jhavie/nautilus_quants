@@ -800,8 +800,6 @@ class ReportGenerator:
         Returns:
             Path to CSV file, or None if no execution state data available.
         """
-        import pickle
-
         try:
             data = self.engine.cache.get(EXECUTION_STATES_CACHE_KEY)
         except Exception:
@@ -811,9 +809,16 @@ class ReportGenerator:
             return None
 
         try:
-            states: dict = pickle.loads(data)
+            from nautilus_quants.execution.post_limit.state import decode_execution_states
+
+            states = decode_execution_states(data)
         except Exception:
-            return None
+            try:
+                import pickle
+
+                states = pickle.loads(data)
+            except Exception:
+                return None
 
         if not states:
             return None

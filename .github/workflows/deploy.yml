@@ -11,6 +11,10 @@ on:
         options:
           - testnet
           - prod
+      image_tag:
+        description: 'Optional image tag to build and deploy (e.g. 0.2.3-rc.1)'
+        required: false
+        type: string
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -48,9 +52,16 @@ jobs:
       - name: Build tags
         id: tags
         run: |
-          TAGS="${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}"
-          if [ -n "${{ steps.version.outputs.tag }}" ]; then
-            TAGS="${TAGS},${{ env.IMAGE }}:${{ steps.version.outputs.tag }}"
+          if [ "${{ github.ref_name }}" = "develop" ]; then
+            TAGS="${{ env.IMAGE }}:develop-latest,${{ env.IMAGE }}:develop-${{ github.sha }}"
+          else
+            TAGS="${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}"
+            if [ -n "${{ steps.version.outputs.tag }}" ]; then
+              TAGS="${TAGS},${{ env.IMAGE }}:${{ steps.version.outputs.tag }}"
+            fi
+          fi
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAGS="${TAGS},${{ env.IMAGE }}:${{ inputs.image_tag }}"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
       - uses: docker/build-push-action@v6
@@ -66,15 +77,32 @@ jobs:
       - name: Set environment variables
         id: env
         run: |
+          CUSTOM_IMAGE_TAG="${{ inputs.image_tag }}"
+          IMAGE_TAG=""
           if [ "${{ inputs.environment }}" = "prod" ]; then
+            if [ "${{ github.ref_name }}" != "main" ]; then
+              echo "ERROR: prod deploy is only allowed from main (current=${{ github.ref_name }})"
+              exit 1
+            fi
             echo "container=nautilus-prod" >> $GITHUB_OUTPUT
             echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
             echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
+            IMAGE_TAG="latest"
           else
-            echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
+            if [ "${{ github.ref_name }}" = "develop" ]; then
+              echo "container=nautilus-testnet-develop" >> $GITHUB_OUTPUT
+              IMAGE_TAG="develop-latest"
+            else
+              echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
+              IMAGE_TAG="latest"
+            fi
             echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
             echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
           fi
+          if [ -n "${CUSTOM_IMAGE_TAG}" ]; then
+            IMAGE_TAG="${CUSTOM_IMAGE_TAG}"
+          fi
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
@@ -84,7 +112,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             docker login ghcr.io -u jhavie -p ${{ secrets.GHCR_PAT }}
-            docker pull ${{ env.IMAGE }}:latest
+            docker pull ${{ env.IMAGE }}:${{ steps.env.outputs.image_tag }}
             docker rm -f ${{ steps.env.outputs.container }} || true
             docker run -d \
               --name ${{ steps.env.outputs.container }} \
@@ -95,7 +123,7 @@ jobs:
               -v /root/workspace/nautilus_quants/config:/app/config:ro \
               -v /root/workspace/nautilus_quants/logs:/app/logs \
               -v /root/workspace/nautilus_quants/data:/app/data \
-              ${{ env.IMAGE }}:latest \
+              ${{ env.IMAGE }}:${{ steps.env.outputs.image_tag }} \
               run ${{ steps.env.outputs.config }}
             sleep 5
             docker logs ${{ steps.env.outputs.container }} --tail 20

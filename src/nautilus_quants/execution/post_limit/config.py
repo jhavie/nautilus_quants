@@ -37,6 +37,12 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
         Maximum number of retries after a POST_ONLY rejection (due_post_only).
         Each retry retreats an additional tick from BBO.
         Set to 0 to disable retries (immediate market fallback, legacy behavior).
+    enable_residual_sweep : bool, default True
+        Whether reduce-only sessions should attempt a final residual sweep when
+        the remaining position notional falls below the venue minimum.
+    residual_sweep_min_notional_fallback : float, default 5.0
+        Fallback min-notional threshold used when the instrument does not expose
+        ``min_notional``.
     """
 
     exec_algorithm_id: ExecAlgorithmId | None = ExecAlgorithmId("PostLimit")
@@ -47,3 +53,5 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     fallback_to_market: bool = True
     post_only: bool = True
     max_post_only_retries: int = 3
+    enable_residual_sweep: bool = True
+    residual_sweep_min_notional_fallback: float = 5.0
