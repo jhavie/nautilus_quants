@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - testnet
+          - pre-release
           - prod
 
 env:
@@ -62,19 +63,38 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      deployments: write
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
     steps:
       - name: Set environment variables
         id: env
         run: |
-          if [ "${{ inputs.environment }}" = "prod" ]; then
-            echo "container=nautilus-prod" >> $GITHUB_OUTPUT
-            echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
-            echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
-          else
-            echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
-            echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
-            echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
-          fi
+          case "${{ inputs.environment }}" in
+            prod)
+              echo "container=nautilus-prod" >> $GITHUB_OUTPUT
+              echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
+              echo "github_environment=prod" >> $GITHUB_OUTPUT
+              ;;
+            pre-release)
+              echo "container=nautilus-pre-release" >> $GITHUB_OUTPUT
+              echo "config=config/live/okx_fmz_demo.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env.pre" >> $GITHUB_OUTPUT
+              echo "github_environment=pre-release" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
+              echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
+              echo "github_environment=testnet" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
 
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
@@ -84,7 +104,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             docker login ghcr.io -u jhavie -p ${{ secrets.GHCR_PAT }}
-            docker pull ${{ env.IMAGE }}:latest
+            docker pull ${{ env.IMAGE }}:${{ steps.env.outputs.image_tag }}
             docker rm -f ${{ steps.env.outputs.container }} || true
             docker run -d \
               --name ${{ steps.env.outputs.container }} \
@@ -95,7 +115,7 @@ jobs:
               -v /root/workspace/nautilus_quants/config:/app/config:ro \
               -v /root/workspace/nautilus_quants/logs:/app/logs \
               -v /root/workspace/nautilus_quants/data:/app/data \
-              ${{ env.IMAGE }}:latest \
+              ${{ env.IMAGE }}:${{ steps.env.outputs.image_tag }} \
               run ${{ steps.env.outputs.config }}
             sleep 5
             docker logs ${{ steps.env.outputs.container }} --tail 20
