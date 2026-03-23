@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from nautilus_trader.common.config import ImportableActorConfig
+from nautilus_trader.config import CacheConfig, DatabaseConfig
 from nautilus_trader.config import ImportableExecAlgorithmConfig, LoggingConfig
 from nautilus_trader.live.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
@@ -81,6 +82,23 @@ def _build_logging_config(engine_dict: dict[str, Any]) -> LoggingConfig | None:
     )
 
 
+def _build_cache_config(engine_dict: dict[str, Any]) -> CacheConfig | None:
+    """Extract CacheConfig from engine dict if present."""
+    cache_section = engine_dict.get("cache")
+    if not cache_section:
+        return None
+
+    # Handle nested database config
+    cache_section = dict(cache_section)  # Make a copy to avoid mutating original
+    database_config = None
+    if "database" in cache_section:
+        db_section = cache_section.pop("database")
+        database_config = DatabaseConfig(**db_section)
+
+    return CacheConfig(database=database_config, **cache_section)
+
+
+
 def run_live(
     config_file: Path,
     dry_run: bool = False,
@@ -126,6 +144,7 @@ def run_live(
 
     # 7. Build TradingNodeConfig
     logging_config = _build_logging_config(engine_dict)
+    cache_config = _build_cache_config(engine_dict)
 
     trader_id = engine_dict.get("trader_id", "LIVE-001")
 
@@ -161,6 +180,8 @@ def run_live(
         "strategies": [ImportableStrategyConfig(**s) for s in engine_dict.get("strategies", [])],
         "exec_algorithms": exec_algorithms,
     }
+    if cache_config is not None:
+        node_kwargs["cache"] = cache_config
     if risk_engine_config is not None:
         node_kwargs["risk_engine"] = risk_engine_config
     if exec_engine_config is not None:

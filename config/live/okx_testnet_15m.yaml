@@ -33,6 +33,24 @@ instruments:
 
 engine:
   trader_id: "TESTNET-ALPHA101-001"
+
+  # Redis 缓存配置 (生产级优化)
+  cache:
+    database:
+      type: "redis"
+      host: "10.100.0.2"
+      port: 30379
+      timeout: 20
+    encoding: "msgpack"
+    buffer_interval_ms: 100
+    bulk_read_batch_size: 1000
+    use_trader_prefix: true
+    use_instance_id: false
+    flush_on_start: false
+    persist_account_events: true
+    bar_capacity: 10000
+    tick_capacity: 10000
+
   logging:
     log_level: "INFO"
     log_level_file: "DEBUG"
