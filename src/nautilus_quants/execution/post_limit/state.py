@@ -113,6 +113,7 @@ class OrderExecutionState:
     completed_ns: int = 0
     used_market_fallback: bool = False
     residual_sweep_pending: bool = False
+    sweep_retry_count: int = 0
 
     timeout_secs: float | None = None
     max_chase_attempts: int | None = None
@@ -205,6 +206,7 @@ class OrderExecutionStateSnapshot(msgspec.Struct, frozen=True):
     last_limit_price: float
     filled_quantity: str
     fill_cost: float
+    sweep_retry_count: int = 0
 
 
 class OrderExecutionStateStore(msgspec.Struct, frozen=True):
@@ -255,6 +257,7 @@ def _snapshot_from_state(state: OrderExecutionState) -> OrderExecutionStateSnaps
         completed_ns=state.completed_ns,
         used_market_fallback=state.used_market_fallback,
         residual_sweep_pending=state.residual_sweep_pending,
+        sweep_retry_count=state.sweep_retry_count,
         timeout_secs=state.timeout_secs,
         max_chase_attempts=state.max_chase_attempts,
         chase_step_ticks=state.chase_step_ticks,
@@ -287,6 +290,7 @@ def _state_from_snapshot(snapshot: OrderExecutionStateSnapshot) -> OrderExecutio
         completed_ns=snapshot.completed_ns,
         used_market_fallback=snapshot.used_market_fallback,
         residual_sweep_pending=snapshot.residual_sweep_pending,
+        sweep_retry_count=snapshot.sweep_retry_count,
         timeout_secs=snapshot.timeout_secs,
         max_chase_attempts=snapshot.max_chase_attempts,
         chase_step_ticks=snapshot.chase_step_ticks,

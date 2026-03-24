@@ -43,6 +43,9 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     residual_sweep_min_notional_fallback : float, default 5.0
         Fallback min-notional threshold used when the instrument does not expose
         ``min_notional``.
+    max_sweep_retries : int, default 3
+        Maximum retry attempts for residual sweep market orders when a sweep
+        child is canceled/rejected/denied.
     """
 
     exec_algorithm_id: ExecAlgorithmId | None = ExecAlgorithmId("PostLimit")
@@ -55,3 +58,4 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     max_post_only_retries: int = 3
     enable_residual_sweep: bool = True
     residual_sweep_min_notional_fallback: float = 5.0
+    max_sweep_retries: int = 3

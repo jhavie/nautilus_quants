@@ -40,11 +40,13 @@ class CSStrategyConfig(StrategyConfig, frozen=True):
         List of instrument IDs to trade.
     bar_types : list[str], default []
         Bar type strings for price subscription (injected by CLI).
-    execution_policy : str, default "MarketExecutionPolicy"
-        Execution policy class name. Available: "MarketExecutionPolicy",
-        "PostLimitExecutionPolicy".
+    execution_policy : str, default "PostLimitExecutionPolicy"
+        Execution policy class name. Available:
+        "MarketExecutionPolicy", "PostLimitExecutionPolicy".
+        Production configuration should use the explicit
+        "PostLimitExecutionPolicy" string.
     """
 
     instrument_ids: list[str]
     bar_types: list[str] = []
-    execution_policy: str = "MarketExecutionPolicy"
+    execution_policy: str = "PostLimitExecutionPolicy"
