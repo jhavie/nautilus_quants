@@ -116,6 +116,7 @@ class TestStateSnapshots:
         state.last_limit_price = 49999.5
         state.fill_cost = 37499.625
         state.residual_sweep_pending = True
+        state.sweep_retry_count = 2
 
         encoded = encode_execution_states({state.primary_order_id: state})
         decoded = decode_execution_states(encoded)
@@ -135,6 +136,7 @@ class TestStateSnapshots:
         assert restored.last_limit_price == 49999.5
         assert restored.fill_cost == 37499.625
         assert restored.residual_sweep_pending is True
+        assert restored.sweep_retry_count == 2
 
     def test_decode_empty_store(self) -> None:
         encoded = encode_execution_states({})

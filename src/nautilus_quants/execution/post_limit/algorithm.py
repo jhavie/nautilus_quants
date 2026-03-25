@@ -81,7 +81,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"fallback_to_market={self._config.fallback_to_market}, "
             f"post_only={self._config.post_only}, "
             f"max_post_only_retries={self._config.max_post_only_retries}, "
-            f"enable_residual_sweep={self._config.enable_residual_sweep}"
+            f"enable_residual_sweep={self._config.enable_residual_sweep}, "
+            f"max_sweep_retries={self._config.max_sweep_retries}"
         )
         self._rebuild_runtime_indexes(rearm_timers=True)
 
@@ -213,8 +214,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             return
 
         if state.active_order_kind == SpawnKind.SWEEP:
-            self._clear_active_child(state)
-            state.residual_sweep_pending = False
+            sweep_order = self.cache.order(event.client_order_id)
+            if sweep_order is not None and self._is_order_fully_filled(sweep_order):
+                self._clear_active_child(state)
+                state.residual_sweep_pending = False
+                state.sweep_retry_count = 0
+            self._publish_execution_states()
             return
 
         fill_qty = event.last_qty
@@ -240,8 +245,18 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
 
         if state.active_order_kind == SpawnKind.SWEEP:
             self.log.warning(f"PostLimit sweep order rejected: {event.client_order_id}")
+            sweep_order = self.cache.order(event.client_order_id)
+            retry_qty = self._extract_positive_leaves_qty(sweep_order)
+            if self._retry_sweep(
+                state,
+                reason=f"rejected:{event.reason}",
+                quantity=retry_qty,
+            ):
+                return
             self._clear_active_child(state)
             state.residual_sweep_pending = False
+            state.sweep_retry_count = 0
+            self._publish_execution_states()
             return
 
         self.log.warning(
@@ -267,8 +282,14 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
 
         if state.active_order_kind == SpawnKind.SWEEP:
             self.log.warning(f"PostLimit sweep order denied: {event.client_order_id}")
+            sweep_order = self.cache.order(event.client_order_id)
+            retry_qty = self._extract_positive_leaves_qty(sweep_order)
+            if self._retry_sweep(state, reason="denied", quantity=retry_qty):
+                return
             self._clear_active_child(state)
             state.residual_sweep_pending = False
+            state.sweep_retry_count = 0
+            self._publish_execution_states()
             return
 
         self.log.warning(
@@ -329,6 +350,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             if state.instrument_id != event.instrument_id:
                 continue
             state.residual_sweep_pending = False
+            state.sweep_retry_count = 0
             if state.active_order_kind == SpawnKind.SWEEP:
                 self._clear_active_child(state)
         self._publish_execution_states()
@@ -491,6 +513,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         positions = self.cache.positions_open(instrument_id=state.instrument_id)
         if not positions:
             state.residual_sweep_pending = False
+            state.sweep_retry_count = 0
             return
 
         instrument = self.cache.instrument(state.instrument_id)
@@ -519,6 +542,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
                 f"qty={position.quantity} value={residual_value:.2f} "
                 f"< min_notional={min_notional}"
             )
+            state.sweep_retry_count = 0
             self._submit_market_child(
                 state,
                 kind=SpawnKind.SWEEP,
@@ -532,8 +556,14 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             return
 
         if state.active_order_kind == SpawnKind.SWEEP:
+            sweep_order = self.cache.order(child_order_id)
+            retry_qty = self._extract_positive_leaves_qty(sweep_order)
+            if self._retry_sweep(state, reason="terminal", quantity=retry_qty):
+                return
             self._clear_active_child(state)
             state.residual_sweep_pending = False
+            state.sweep_retry_count = 0
+            self._publish_execution_states()
             return
 
         self._cancel_timer(state)
@@ -584,6 +614,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         PostLimitSession(state).mark_complete()
         if state.reduce_only and self._config.enable_residual_sweep:
             state.residual_sweep_pending = True
+            state.sweep_retry_count = 0
         elapsed_ms = (state.completed_ns - state.created_ns) / 1_000_000
         self.log.info(
             f"PostLimit complete: {state.primary_order_id} "
@@ -675,6 +706,74 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
 
     def _get_post_only(self, state: OrderExecutionState) -> bool:
         return state.post_only if state.post_only is not None else self._config.post_only
+
+    def _extract_positive_leaves_qty(self, order: Order | None) -> Quantity | None:
+        if order is None:
+            return None
+        leaves_qty = getattr(order, "leaves_qty", None)
+        if leaves_qty is None:
+            return None
+        if leaves_qty <= Quantity.zero(leaves_qty.precision):
+            return None
+        return leaves_qty
+
+    def _resolve_sweep_retry_quantity(self, state: OrderExecutionState) -> Quantity | None:
+        if state.active_order_id is not None:
+            active_order = self.cache.order(state.active_order_id)
+            active_leaves = self._extract_positive_leaves_qty(active_order)
+            if active_leaves is not None:
+                return active_leaves
+
+        for position in self.cache.positions_open(instrument_id=state.instrument_id):
+            if position.is_closed:
+                continue
+            if position.quantity <= Quantity.zero(position.quantity.precision):
+                continue
+            return position.quantity
+        return None
+
+    def _retry_sweep(
+        self,
+        state: OrderExecutionState,
+        *,
+        reason: str,
+        quantity: Quantity | None = None,
+    ) -> bool:
+        if state.sweep_retry_count >= self._config.max_sweep_retries:
+            self.log.warning(
+                "PostLimit sweep retries exhausted: "
+                f"primary={state.primary_order_id} "
+                f"retries={state.sweep_retry_count}/{self._config.max_sweep_retries} "
+                f"reason={reason}"
+            )
+            return False
+
+        retry_qty = quantity or self._resolve_sweep_retry_quantity(state)
+        if retry_qty is None or retry_qty <= Quantity.zero(retry_qty.precision):
+            self.log.warning(
+                "PostLimit sweep retry skipped due to non-positive remaining quantity: "
+                f"primary={state.primary_order_id} reason={reason}"
+            )
+            return False
+
+        state.sweep_retry_count += 1
+        self._clear_active_child(state)
+        self.log.warning(
+            "PostLimit sweep retry: "
+            f"primary={state.primary_order_id} "
+            f"attempt={state.sweep_retry_count}/{self._config.max_sweep_retries} "
+            f"qty={retry_qty} reason={reason}"
+        )
+        self._submit_market_child(state, kind=SpawnKind.SWEEP, quantity=retry_qty)
+        return True
+
+    def _is_order_fully_filled(self, order: Order) -> bool:
+        leaves_qty = getattr(order, "leaves_qty", None)
+        if leaves_qty is not None:
+            return leaves_qty <= Quantity.zero(leaves_qty.precision)
+
+        status = getattr(order, "status", None)
+        return bool(status is not None and getattr(status, "name", None) == "FILLED")
 
     def _encode_states(self) -> bytes:
         return encode_execution_states(self._states)

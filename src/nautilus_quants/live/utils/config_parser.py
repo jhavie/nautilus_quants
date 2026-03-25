@@ -138,7 +138,14 @@ def inject_data_configs(
     # Inject into actors
     for actor in engine.get("actors", []):
         actor_config = actor.get("config", {})
-        if "bar_types" not in actor_config or not actor_config["bar_types"]:
+        actor_path = actor.get("actor_path", "")
+        should_inject_bar_types = (
+            "bar_types" in actor_config
+            or actor_path.endswith("factor_engine:FactorEngineActor")
+        )
+        if should_inject_bar_types and (
+            "bar_types" not in actor_config or not actor_config["bar_types"]
+        ):
             actor_config["bar_types"] = all_bar_types
         actor["config"] = actor_config
 

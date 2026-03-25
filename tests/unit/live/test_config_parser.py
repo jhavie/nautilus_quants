@@ -182,6 +182,21 @@ class TestInjectDataConfigs:
         actor_config = result["engine"]["actors"][0]["config"]
         assert actor_config["bar_types"] == ["EXISTING.BAR-TYPE"]
 
+    def test_inject_skips_non_factor_actor_without_bar_types_field(self) -> None:
+        config_dict = _make_config_dict()
+        config_dict["engine"]["actors"].append(
+            {
+                "actor_path": "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor",
+                "config_path": "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig",
+                "config": {"n_long": 8, "n_short": 8},
+            }
+        )
+        data_configs = extract_data_configs(config_dict)
+        result = inject_data_configs(config_dict, data_configs)
+
+        decision_config = result["engine"]["actors"][1]["config"]
+        assert "bar_types" not in decision_config
+
     def test_inject_preserves_existing_instrument_ids(self) -> None:
         config_dict = _make_config_dict()
         config_dict["engine"]["strategies"][0]["config"]["instrument_ids"] = ["CUSTOM-ID"]
