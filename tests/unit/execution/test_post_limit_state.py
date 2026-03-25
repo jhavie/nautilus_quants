@@ -42,6 +42,7 @@ class TestOrderState:
             "CANCEL_PENDING_MARKET",
             "PENDING_MARKET",
             "WORKING_MARKET",
+            "RETRY_PENDING",
             "COMPLETED",
             "FAILED",
         }
@@ -137,6 +138,7 @@ class TestStateSnapshots:
         assert restored.fill_cost == 37499.625
         assert restored.residual_sweep_pending is True
         assert restored.sweep_retry_count == 2
+        assert restored.transient_retry_count == 0
 
     def test_decode_empty_store(self) -> None:
         encoded = encode_execution_states({})

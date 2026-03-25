@@ -37,6 +37,12 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
         Maximum number of retries after a POST_ONLY rejection (due_post_only).
         Each retry retreats an additional tick from BBO.
         Set to 0 to disable retries (immediate market fallback, legacy behavior).
+    max_transient_retries : int, default 3
+        Maximum number of delayed retries when an order is rejected due to a
+        transient venue error (e.g. OKX 50001 "Service temporarily unavailable").
+        Set to 0 to disable transient retries (immediate fallback, legacy behavior).
+    transient_retry_delay_secs : float, default 3.0
+        Seconds to wait before re-submitting an order after a transient rejection.
     enable_residual_sweep : bool, default True
         Whether reduce-only sessions should attempt a final residual sweep when
         the remaining position notional falls below the venue minimum.
@@ -56,6 +62,8 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     fallback_to_market: bool = True
     post_only: bool = True
     max_post_only_retries: int = 3
+    max_transient_retries: int = 3
+    transient_retry_delay_secs: float = 3.0
     enable_residual_sweep: bool = True
     residual_sweep_min_notional_fallback: float = 5.0
     max_sweep_retries: int = 3
