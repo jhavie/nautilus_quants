@@ -102,11 +102,26 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         )
 
     def on_stop(self) -> None:
-        """Close all positions with market orders for immediate execution."""
-        self.close_all_positions()  # Nautilus built-in: direct market orders
-        self.log.info("CSStrategy stopped")
+        """Cancel in-flight orders, then close all positions with market orders.
 
-    # -------------------------------------------------------------------------
+        Must cancel first to prevent double-fills when PostLimit has active
+        child orders. close_position() sends direct market orders that bypass
+        the ExecAlgorithm entirely.
+        """
+        # 1. Cancel all open/in-flight orders (cleans up PostLimit state machine)
+        for order in self.cache.orders_open(strategy_id=self.id):
+            if not order.is_closed:
+                self.cancel_order(order)
+        for order in self.cache.orders_inflight(strategy_id=self.id):
+            if not order.is_closed:
+                self.cancel_order(order)
+
+        # 2. Close all positions with direct market orders
+        for position in self.cache.positions_open(strategy_id=self.id):
+            if not position.is_closed:
+                self.close_position(position, tags=["STRATEGY_STOP"])
+
+        self.log.info("CSStrategy stopped")
     # Data handling
     # -------------------------------------------------------------------------
 
