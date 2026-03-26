@@ -249,15 +249,27 @@ def _dry_run_validate(
 
 
 def _register_signal_handlers(node: TradingNode) -> None:
-    """Register signal handlers for graceful shutdown."""
+    """Register signal handlers for graceful shutdown.
+
+    Sequence: SIGTERM → node.stop() (trader.stop → on_stop → close positions
+    → await residuals → disconnect) → node.dispose() → exit.
+    """
+    _shutdown_in_progress = False
 
     def _handle_signal(signum: int, frame: Any) -> None:
+        nonlocal _shutdown_in_progress
+        if _shutdown_in_progress:
+            print("\nForce exit (second signal).")
+            sys.exit(1)
+
+        _shutdown_in_progress = True
         sig_name = signal.Signals(signum).name
         print(f"\nReceived {sig_name}, shutting down gracefully...")
         try:
-            node.dispose()
-        except Exception:
-            pass
+            node.stop()     # trader.stop → on_stop → close_all_positions → await residuals
+            node.dispose()  # cleanup resources, cancel tasks, close loop
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _handle_signal)

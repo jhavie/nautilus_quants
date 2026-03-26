@@ -102,8 +102,8 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         )
 
     def on_stop(self) -> None:
-        """Close all positions and clean up."""
-        self._close_all_positions()
+        """Close all positions with market orders for immediate execution."""
+        self.close_all_positions()  # Nautilus built-in: direct market orders
         self.log.info("CSStrategy stopped")
 
     # -------------------------------------------------------------------------
