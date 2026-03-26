@@ -1,0 +1,112 @@
+# OKX Testnet CS Strategy — Nightly (bracket TP/SL)
+#
+# Requires nautilus_trader built from source (commit 0970f95+)
+# for OKX bracket order support (submit_order_list).
+#
+# Usage:
+#   python -m nautilus_quants.live run config/live/okx_testnet_nightly.yaml --dry-run
+#   python -m nautilus_quants.live run config/live/okx_testnet_nightly.yaml
+#
+# Required environment variables:
+#   OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
+
+venue:
+  name: "OKX"
+  instrument_type: "SWAP"
+  contract_type: "LINEAR"
+  margin_mode: "CROSS"
+  is_demo: true
+
+instruments:
+  bar_spec: "5m"
+  instrument_ids:
+    - "BTC-USDT-SWAP.OKX"
+    - "ETH-USDT-SWAP.OKX"
+    - "SOL-USDT-SWAP.OKX"
+    - "DOGE-USDT-SWAP.OKX"
+    - "ADA-USDT-SWAP.OKX"
+    - "LINK-USDT-SWAP.OKX"
+    - "AAVE-USDT-SWAP.OKX"
+    - "OP-USDT-SWAP.OKX"
+    - "ARB-USDT-SWAP.OKX"
+    - "BNB-USDT-SWAP.OKX"
+    - "BCH-USDT-SWAP.OKX"
+    - "ETC-USDT-SWAP.OKX"
+    - "LTC-USDT-SWAP.OKX"
+    - "PEPE-USDT-SWAP.OKX"
+    - "FLOKI-USDT-SWAP.OKX"
+    - "SHIB-USDT-SWAP.OKX"
+    - "ATOM-USDT-SWAP.OKX"
+    - "AVAX-USDT-SWAP.OKX"
+    - "DOT-USDT-SWAP.OKX"
+
+engine:
+  trader_id: "NIGHTLY-BRACKET-001"
+
+  cache:
+    database:
+      type: "redis"
+      host: "10.100.0.2"
+      port: 30379
+      timeout: 20
+    encoding: "msgpack"
+    buffer_interval_ms: 100
+    bulk_read_batch_size: 1000
+    use_trader_prefix: true
+    use_instance_id: false
+    flush_on_start: false
+    persist_account_events: true
+    bar_capacity: 10000
+    tick_capacity: 10000
+
+  logging:
+    log_level: "INFO"
+    log_level_file: "DEBUG"
+    log_directory: "logs/nightly"
+    use_pyo3: true
+  risk_engine:
+    bypass: false
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors_alpha101.yaml"
+        max_history: 0
+        publish_signals: true
+        flush_timeout_secs: 60
+
+    - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
+      config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
+      config:
+        n_long: 8
+        n_short: 8
+        position_value: 2000
+        rebalance_interval: 1
+        composite_factor: "alpha101"
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: []  # Auto-injected
+        oms_type: "NETTING"
+        execution_policy: "PostLimitExecutionPolicy"
+        bracket:
+          take_profit_pct: 0.03
+          stop_loss_pct: 0.02
+
+  exec_algorithms:
+    - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
+      config_path: "nautilus_quants.execution.post_limit.config:PostLimitExecAlgorithmConfig"
+      config:
+        exec_algorithm_id: "PostLimit"
+        offset_ticks: 0
+        timeout_secs: 15.0
+        max_chase_attempts: 3
+        max_post_only_retries: 3
+        fallback_to_market: true
+        post_only: true
+        enable_residual_sweep: true
+        residual_sweep_min_notional_fallback: 5.0
+        max_sweep_retries: 3

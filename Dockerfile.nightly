@@ -1,0 +1,91 @@
+# === Nightly Dockerfile ===
+# Builds nautilus_trader from GitHub develop branch to include
+# unreleased features (e.g. OKX bracket order support, commit 0970f95).
+#
+# ~30-45 min build due to Rust compilation.
+# Use standard Dockerfile for production with PyPI releases.
+
+# === Stage 1: Rust + nautilus_trader build ===
+FROM python:3.12-slim AS nt-builder
+
+ENV RUSTUP_TOOLCHAIN="stable" \
+    CC="clang" \
+    BUILD_MODE="release" \
+    PYO3_PYTHON="/usr/local/bin/python3"
+ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl clang git make pkg-config capnproto libcapnp-dev build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone nautilus_trader develop branch from GitHub (shallow for speed)
+RUN git clone --depth 1 --branch develop \
+    https://github.com/nautechsystems/nautilus_trader.git .
+
+# Build nautilus_trader wheel
+RUN uv sync --no-install-package nautilus_trader 2>/dev/null || true
+RUN cargo build --lib --release --all-features
+RUN uv build --wheel
+# Store wheel for next stage
+RUN mkdir /wheels && cp dist/*.whl /wheels/
+
+# === Stage 2: App builder (same as standard Dockerfile + NT wheel) ===
+FROM python:3.12-slim AS builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl git && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Install NT wheel from stage 1
+COPY --from=nt-builder /wheels/*.whl /tmp/wheels/
+
+# Layer cache: install dependencies first
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-install-project || uv sync --no-install-project
+# Override nautilus_trader with source-built wheel
+RUN uv pip install --python .venv/bin/python /tmp/wheels/*.whl --force-reinstall --no-deps
+
+# Install project
+COPY src/ ./src/
+RUN uv sync --no-editable --no-install-package nautilus_trader 2>/dev/null || \
+    uv pip install --python .venv/bin/python -e .
+
+# === Stage 3: Runtime (identical to standard Dockerfile) ===
+FROM python:3.12-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 procps && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 trader && mkdir -p /app/logs /app/data && chown -R trader:trader /app
+
+COPY --from=builder --chown=trader:trader /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Deterministic floating-point: force OpenBLAS single-thread
+ENV OPENBLAS_NUM_THREADS=1
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+
+COPY --chown=trader:trader src/ ./src/
+COPY --chown=trader:trader config/ ./config/
+
+USER trader
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD pgrep -f "nautilus_quants" || exit 1
+
+# Default entrypoint: live trading CLI
+ENTRYPOINT ["python", "-m", "nautilus_quants.live"]
+CMD ["--help"]

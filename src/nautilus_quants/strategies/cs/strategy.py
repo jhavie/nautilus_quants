@@ -32,6 +32,7 @@ from nautilus_trader.trading.strategy import Strategy
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
 from nautilus_quants.strategies.cs.config import CSStrategyConfig
 from nautilus_quants.strategies.cs.execution_policy import (
+    BracketExecutionPolicyWrapper,
     ExecutionPolicy,
     MarketExecutionPolicy,
     PostLimitExecutionPolicy,
@@ -70,7 +71,24 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
                 f"Unknown execution_policy: {config.execution_policy}. "
                 f"Available: {list(_EXECUTION_POLICIES)}"
             )
-        return policy_cls(self)
+        inner = policy_cls(self)
+
+        if config.bracket is not None:
+            bracket_cfg = config.bracket
+            if (
+                config.execution_policy == "PostLimitExecutionPolicy"
+                and not bracket_cfg.entry_exec_algorithm_id
+            ):
+                bracket_cfg = bracket_cfg.__class__(
+                    take_profit_pct=bracket_cfg.take_profit_pct,
+                    stop_loss_pct=bracket_cfg.stop_loss_pct,
+                    tp_order_type=bracket_cfg.tp_order_type,
+                    sl_order_type=bracket_cfg.sl_order_type,
+                    entry_exec_algorithm_id="PostLimit",
+                )
+            return BracketExecutionPolicyWrapper(inner, self, bracket_cfg)
+
+        return inner
 
     # -------------------------------------------------------------------------
     # Lifecycle
