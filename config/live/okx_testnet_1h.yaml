@@ -1,0 +1,112 @@
+# OKX Testnet 1h Alpha101 CS Strategy
+#
+# Usage:
+#   python -m nautilus_quants.live run config/live/okx_testnet_1h.yaml --dry-run
+#   python -m nautilus_quants.live run config/live/okx_testnet_1h.yaml
+#
+# Required environment variables:
+#   OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
+#   (Use testnet API keys from OKX)
+
+venue:
+  name: "OKX"
+  instrument_type: "SWAP"
+  contract_type: "LINEAR"
+  margin_mode: "CROSS"
+  is_demo: true
+
+instruments:
+  bar_spec: "1h"
+  instrument_ids:
+    - "BTC-USDT-SWAP.OKX"
+    - "ETH-USDT-SWAP.OKX"
+    - "SOL-USDT-SWAP.OKX"
+    - "DOGE-USDT-SWAP.OKX"
+    - "ADA-USDT-SWAP.OKX"
+    - "LINK-USDT-SWAP.OKX"
+    - "AAVE-USDT-SWAP.OKX"
+    - "OP-USDT-SWAP.OKX"
+    - "ARB-USDT-SWAP.OKX"
+    - "BNB-USDT-SWAP.OKX"
+    - "BCH-USDT-SWAP.OKX"
+    - "ETC-USDT-SWAP.OKX"
+
+engine:
+  trader_id: "TESTNET-ALPHA101-001"
+
+  # Redis 缓存配置 (生产级优化)
+  cache:
+    database:
+      type: "redis"
+      host: "10.100.0.2"
+      port: 30379
+      timeout: 20
+    encoding: "msgpack"
+    buffer_interval_ms: 100
+    bulk_read_batch_size: 1000
+    use_trader_prefix: true
+    use_instance_id: false
+    flush_on_start: false
+    persist_account_events: true
+    bar_capacity: 10000
+    tick_capacity: 10000
+
+  logging:
+    log_level: "INFO"
+    log_level_file: "DEBUG"
+    log_directory: "logs/testnet_1h"
+    use_pyo3: true
+
+  exec_engine:
+    reconciliation: true
+    open_check_interval_secs: 10.0
+    open_check_open_only: false
+    open_check_lookback_mins: 60
+    open_check_threshold_ms: 5000
+    open_check_missing_retries: 5
+    position_check_interval_secs: 30.0
+    position_check_lookback_mins: 60
+    position_check_threshold_ms: 5000
+    position_check_retries: 5
+
+  risk_engine:
+    bypass: false
+
+  controller:
+    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
+    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    config:
+      interval: "1h"
+      venue_name: "OKX"
+      currency: "USDT"
+      min_equity_ratio: 0.7
+      cooldown_period: "24h"
+      guarded_strategy_ids: []
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/fmz/factors_alpha101.yaml"
+        max_history: 0
+        publish_signals: true
+        flush_timeout_secs: 60
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: []  # Auto-injected
+        oms_type: "NETTING"
+        execution_policy: "PostLimitExecutionPolicy"
+        use_hyphens_in_client_order_ids: false  # OKX doesn't allow hyphens in clOrdId
+
+  # PostLimitExecAlgorithm - BBO-pegged limit orders with chase + market fallback
+  exec_algorithms:
+    - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
+      config_path: "nautilus_quants.execution.post_limit.config:PostLimitExecAlgorithmConfig"
+      config:
+        exec_algorithm_id: "PostLimit"
+        offset_ticks: 0
+        timeout_secs: 50.0
+        max_chase_attempts: 3
