@@ -223,7 +223,10 @@ def run_live(
     _register_signal_handlers(node)
 
     node.build()
-    node.run()
+    try:
+        node.run()
+    finally:
+        node.dispose()
 
 
 def _dry_run_validate(
@@ -251,8 +254,13 @@ def _dry_run_validate(
 def _register_signal_handlers(node: TradingNode) -> None:
     """Register signal handlers for graceful shutdown.
 
-    Sequence: SIGTERM → node.stop() (trader.stop → on_stop → close positions
-    → await residuals → disconnect) → node.dispose() → exit.
+    Sequence: SIGTERM → node.stop() schedules stop_async on the event loop
+    → trader.stop → strategy.on_stop → close positions → await fills
+    → disconnect → node.dispose() runs after loop exits naturally.
+
+    IMPORTANT: node.stop() only *schedules* stop_async() when the loop is
+    running. We must NOT call sys.exit() or node.dispose() here — let the
+    event loop finish stop_async() and exit run_async() naturally.
     """
     _shutdown_in_progress = False
 
@@ -266,11 +274,10 @@ def _register_signal_handlers(node: TradingNode) -> None:
         sig_name = signal.Signals(signum).name
         print(f"\nReceived {sig_name}, shutting down gracefully...")
         try:
-            node.stop()     # trader.stop → on_stop → close_all_positions → await residuals
-            node.dispose()  # cleanup resources, cancel tasks, close loop
+            node.stop()  # Schedules stop_async on event loop; do NOT sys.exit
         except Exception as e:
             print(f"Error during shutdown: {e}")
-        sys.exit(0)
+            sys.exit(1)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
