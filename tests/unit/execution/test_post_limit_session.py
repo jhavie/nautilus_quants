@@ -115,3 +115,49 @@ class TestPostLimitSession:
 
         assert state.state == OrderState.WORKING_LIMIT
         assert command == SessionCommand.REARM_TIMEOUT
+
+    def test_transient_reject_schedules_retry_when_budget_remaining(self) -> None:
+        state = _make_state(OrderState.PENDING_LIMIT)
+
+        command = PostLimitSession(state).on_rejected(
+            due_post_only=False,
+            max_post_only_retries=0,
+            fallback_to_market=True,
+            reason="Service temporarily unavailable. Please try again later.",
+            max_transient_retries=3,
+        )
+
+        assert state.state == OrderState.RETRY_PENDING
+        assert state.transient_retry_count == 1
+        assert command == SessionCommand.SCHEDULE_RETRY
+
+    def test_transient_reject_falls_back_when_budget_exhausted(self) -> None:
+        state = _make_state(OrderState.PENDING_LIMIT)
+        state.transient_retry_count = 3
+
+        command = PostLimitSession(state).on_rejected(
+            due_post_only=False,
+            max_post_only_retries=0,
+            fallback_to_market=True,
+            reason="Service temporarily unavailable. Please try again later.",
+            max_transient_retries=3,
+        )
+
+        assert state.state == OrderState.PENDING_MARKET
+        assert state.used_market_fallback is True
+        assert command == SessionCommand.SUBMIT_MARKET
+
+    def test_non_transient_reject_bypasses_retry(self) -> None:
+        state = _make_state(OrderState.PENDING_LIMIT)
+
+        command = PostLimitSession(state).on_rejected(
+            due_post_only=False,
+            max_post_only_retries=0,
+            fallback_to_market=True,
+            reason="Insufficient balance",
+            max_transient_retries=3,
+        )
+
+        assert state.state == OrderState.PENDING_MARKET
+        assert state.transient_retry_count == 0
+        assert command == SessionCommand.SUBMIT_MARKET

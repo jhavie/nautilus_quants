@@ -23,6 +23,7 @@ class TestPostLimitExecAlgorithmConfig:
         assert config.max_post_only_retries == 3
         assert config.enable_residual_sweep is True
         assert config.residual_sweep_min_notional_fallback == 5.0
+        assert config.max_sweep_retries == 3
 
     def test_custom_values(self) -> None:
         config = PostLimitExecAlgorithmConfig(
@@ -36,6 +37,7 @@ class TestPostLimitExecAlgorithmConfig:
             max_post_only_retries=1,
             enable_residual_sweep=False,
             residual_sweep_min_notional_fallback=10.0,
+            max_sweep_retries=7,
         )
 
         assert config.exec_algorithm_id == ExecAlgorithmId("CustomPostLimit")
@@ -48,6 +50,7 @@ class TestPostLimitExecAlgorithmConfig:
         assert config.max_post_only_retries == 1
         assert config.enable_residual_sweep is False
         assert config.residual_sweep_min_notional_fallback == 10.0
+        assert config.max_sweep_retries == 7
 
     def test_config_is_frozen(self) -> None:
         config = PostLimitExecAlgorithmConfig()

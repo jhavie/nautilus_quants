@@ -164,6 +164,18 @@ def run_live(
 
         exec_engine_config = LiveExecEngineConfig(**exec_engine_dict)
 
+    # Build cache config (optional, supports Redis persistence)
+    cache_config = None
+    cache_dict = engine_dict.get("cache")
+    if cache_dict:
+        from nautilus_trader.config import CacheConfig, DatabaseConfig
+
+        cache_payload = dict(cache_dict)
+        database_dict = cache_payload.get("database")
+        if database_dict:
+            cache_payload["database"] = DatabaseConfig(**database_dict)
+        cache_config = CacheConfig(**cache_payload)
+
     # Build exec algorithms from config
     exec_algorithms = [
         ImportableExecAlgorithmConfig(**ea)

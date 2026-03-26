@@ -298,3 +298,109 @@ class TestPostLimitExecAlgorithmHooks:
 
             clock.cancel_timers.assert_called_once()
             cache.add.assert_not_called()
+
+    def test_sweep_partial_fill_keeps_active_child(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.WORKING_MARKET, kind=SpawnKind.SWEEP)
+            state.residual_sweep_pending = True
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            cache.order.return_value = SimpleNamespace(
+                leaves_qty=Quantity.from_str("0.25"),
+                status=SimpleNamespace(name="PARTIALLY_FILLED"),
+            )
+
+            algo.on_order_filled(
+                SimpleNamespace(
+                    client_order_id=state.active_order_id,
+                    last_qty=Quantity.from_str("0.75"),
+                    last_px=100.0,
+                )
+            )
+
+            assert state.active_order_id == ClientOrderId("primary001E1")
+            assert state.residual_sweep_pending is True
+            assert state.sweep_retry_count == 0
+
+    def test_sweep_full_fill_clears_active_child(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.WORKING_MARKET, kind=SpawnKind.SWEEP)
+            state.residual_sweep_pending = True
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            cache.order.return_value = SimpleNamespace(
+                leaves_qty=Quantity.from_str("0.00"),
+                status=SimpleNamespace(name="FILLED"),
+            )
+
+            algo.on_order_filled(
+                SimpleNamespace(
+                    client_order_id=state.active_order_id,
+                    last_qty=Quantity.from_str("1.0"),
+                    last_px=100.0,
+                )
+            )
+
+            assert state.active_order_id is None
+            assert state.residual_sweep_pending is False
+            assert state.sweep_retry_count == 0
+
+    def test_sweep_rejected_retries_with_leaves_quantity(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.WORKING_MARKET, kind=SpawnKind.SWEEP)
+            state.residual_sweep_pending = True
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            algo._submit_market_child = MagicMock()  # type: ignore[method-assign]
+            cache.order.return_value = SimpleNamespace(
+                leaves_qty=Quantity.from_str("0.30"),
+            )
+
+            algo.on_order_rejected(
+                SimpleNamespace(
+                    client_order_id=ClientOrderId("primary001E1"),
+                    reason="exchange_reject",
+                    due_post_only=False,
+                )
+            )
+
+            assert state.sweep_retry_count == 1
+            algo._submit_market_child.assert_called_once_with(
+                state,
+                kind=SpawnKind.SWEEP,
+                quantity=Quantity.from_str("0.30"),
+            )
+            assert state.residual_sweep_pending is True
+
+    def test_sweep_rejected_exhausted_retries_stops_retrying(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.WORKING_MARKET, kind=SpawnKind.SWEEP)
+            state.residual_sweep_pending = True
+            state.sweep_retry_count = algo._config.max_sweep_retries
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            algo._submit_market_child = MagicMock()  # type: ignore[method-assign]
+            cache.order.return_value = SimpleNamespace(
+                leaves_qty=Quantity.from_str("0.30"),
+            )
+
+            algo.on_order_rejected(
+                SimpleNamespace(
+                    client_order_id=ClientOrderId("primary001E1"),
+                    reason="exchange_reject",
+                    due_post_only=False,
+                )
+            )
+
+            algo._submit_market_child.assert_not_called()
+            assert state.active_order_id is None
+            assert state.residual_sweep_pending is False
+            assert state.sweep_retry_count == 0

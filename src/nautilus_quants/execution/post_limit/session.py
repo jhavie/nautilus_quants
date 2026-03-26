@@ -8,6 +8,22 @@ from enum import Enum
 
 from nautilus_quants.execution.post_limit.state import OrderExecutionState, OrderState
 
+# Known transient error keywords from OKX and other exchanges.
+_TRANSIENT_ERROR_KEYWORDS: tuple[str, ...] = (
+    "Service temporarily unavailable",
+    "System busy",
+    "request too frequent",
+    "try again later",
+    "API is offline",
+    "endpoint request timeout",
+)
+
+
+def _is_transient_rejection(reason: str) -> bool:
+    """Return ``True`` when *reason* looks like a temporary venue error."""
+    lower = reason.lower()
+    return any(kw.lower() in lower for kw in _TRANSIENT_ERROR_KEYWORDS)
+
 
 class SessionCommand(Enum):
     """Commands emitted by the session state machine."""
@@ -17,6 +33,7 @@ class SessionCommand(Enum):
     SUBMIT_MARKET = "SUBMIT_MARKET"
     CANCEL_ACTIVE = "CANCEL_ACTIVE"
     REARM_TIMEOUT = "REARM_TIMEOUT"
+    SCHEDULE_RETRY = "SCHEDULE_RETRY"
     COMPLETE = "COMPLETE"
     FAIL = "FAIL"
 
@@ -50,7 +67,9 @@ class PostLimitSession:
         self.state.active_order_accepted = True
         return SessionCommand.NOOP
 
-    def on_timeout(self, *, max_chase_attempts: int, fallback_to_market: bool) -> SessionCommand:
+    def on_timeout(
+        self, *, max_chase_attempts: int, fallback_to_market: bool
+    ) -> SessionCommand:
         if self.state.state != OrderState.WORKING_LIMIT:
             return SessionCommand.NOOP
 
@@ -73,6 +92,8 @@ class PostLimitSession:
         due_post_only: bool,
         max_post_only_retries: int,
         fallback_to_market: bool,
+        reason: str = "",
+        max_transient_retries: int = 0,
     ) -> SessionCommand:
         if due_post_only and self.state.state in {
             OrderState.PENDING_LIMIT,
@@ -83,6 +104,17 @@ class PostLimitSession:
                 self.state.post_only_retreat_ticks += 1
                 self.state.state = OrderState.PENDING_LIMIT
                 return SessionCommand.SUBMIT_LIMIT
+
+        # Transient venue error: schedule a delayed retry instead of
+        # falling through to immediate market fallback.
+        if (
+            max_transient_retries > 0
+            and _is_transient_rejection(reason)
+            and self.state.transient_retry_count < max_transient_retries
+        ):
+            self.state.transient_retry_count += 1
+            self.state.transition_to(OrderState.RETRY_PENDING)
+            return SessionCommand.SCHEDULE_RETRY
 
         if self.state.state in {OrderState.PENDING_MARKET, OrderState.WORKING_MARKET}:
             return SessionCommand.FAIL
