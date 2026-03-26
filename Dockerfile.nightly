@@ -1,42 +1,11 @@
 # === Nightly Dockerfile ===
-# Builds nautilus_trader from GitHub develop branch to include
-# unreleased features (e.g. OKX bracket order support, commit 0970f95).
+# Uses pre-built nautilus_trader nightly wheel from Nautech's package index
+# to include unreleased features (e.g. OKX bracket order support, commit 0970f95).
 #
-# ~30-45 min build due to Rust compilation.
-# Use standard Dockerfile for production with PyPI releases.
+# No Rust compilation needed — uses pre-built wheels.
+# Use standard Dockerfile for production with PyPI stable releases.
 
-# === Stage 1: Rust + nautilus_trader build ===
-FROM python:3.12-slim AS nt-builder
-
-ENV RUSTUP_TOOLCHAIN="stable" \
-    CC="clang" \
-    BUILD_MODE="release" \
-    PYO3_PYTHON="/usr/local/bin/python3"
-ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
-WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl clang git make pkg-config capnproto libcapnp-dev build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Rust
-RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
-
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Clone nautilus_trader develop branch from GitHub (shallow for speed)
-RUN git clone --depth 1 --branch develop \
-    https://github.com/nautechsystems/nautilus_trader.git .
-
-# Build nautilus_trader wheel
-RUN uv sync --no-install-package nautilus_trader 2>/dev/null || true
-RUN cargo build --lib --release --all-features
-RUN uv build --wheel
-# Store wheel for next stage
-RUN mkdir /wheels && cp dist/*.whl /wheels/
-
-# === Stage 2: App builder (same as standard Dockerfile + NT wheel) ===
+# === Builder stage ===
 FROM python:3.12-slim AS builder
 WORKDIR /app
 
@@ -47,21 +16,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install NT wheel from stage 1
-COPY --from=nt-builder /wheels/*.whl /tmp/wheels/
-
 # Layer cache: install dependencies first
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-install-project || uv sync --no-install-project
-# Override nautilus_trader with source-built wheel
-RUN uv pip install --python .venv/bin/python /tmp/wheels/*.whl --force-reinstall --no-deps
+
+# Override nautilus_trader with nightly pre-built wheel
+RUN uv pip install --python .venv/bin/python \
+    "nautilus_trader>=1.225.0.dev0" \
+    --pre --index-url=https://packages.nautechsystems.io/simple \
+    --force-reinstall --no-deps
 
 # Install project
 COPY src/ ./src/
 RUN uv sync --no-editable --no-install-package nautilus_trader 2>/dev/null || \
     uv pip install --python .venv/bin/python -e .
 
-# === Stage 3: Runtime (identical to standard Dockerfile) ===
+# === Runtime stage ===
 FROM python:3.12-slim
 WORKDIR /app
 
