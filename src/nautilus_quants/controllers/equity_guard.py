@@ -204,23 +204,27 @@ class EquityGuardController(Controller):
 
     def _on_cooldown_expired(self, event: object) -> None:
         """Cooldown timer callback: resume previously stopped strategies."""
+        new_equity = compute_mtm_equity(
+            self.portfolio, self._venue, self._currency,
+        )
+        if new_equity is None:
+            self.log.warning(
+                "Cannot retrieve equity at cooldown expiry, staying halted.",
+            )
+            return
+
         self.log.info("Cooldown expired. Resuming strategies.")
         for strategy in self._stopped_strategies:
             strategy.resume()
             self.log.info(f"Resumed strategy: {strategy.id}")
 
-        # Reset baseline and history
-        new_equity = compute_mtm_equity(
-            self.portfolio, self._venue, self._currency,
-        )
         self._initial_balance = new_equity
         self._stopped_strategies = []
         self._halted = False
         self._equity_history.clear()
-        if new_equity is not None:
-            self._equity_history.append(
-                (self.clock.timestamp_ns(), new_equity),
-            )
+        self._equity_history.append(
+            (self.clock.timestamp_ns(), new_equity),
+        )
         self.log.info(
             f"EquityGuardController reset: new_baseline={self._initial_balance}"
         )

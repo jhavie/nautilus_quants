@@ -403,6 +403,26 @@ class TestEquityGuardControllerCooldown:
         assert mock.clock.set_time_alert_ns.call_count == 2
 
 
+    def test_cooldown_expired_stays_halted_when_equity_none(self) -> None:
+        """Test _on_cooldown_expired stays halted when equity is unavailable."""
+        mock = self._make_mock_controller(cooldown_period="24h")
+        mock._halted = True
+        mock._initial_balance = 10000.0
+        s1 = MagicMock()
+        mock._stopped_strategies = [s1]
+
+        with patch(
+            "nautilus_quants.controllers.equity_guard.compute_mtm_equity",
+            return_value=None,
+        ):
+            EquityGuardController._on_cooldown_expired(mock, MagicMock())
+
+        assert mock._halted
+        assert mock._initial_balance == 10000.0
+        assert len(mock._stopped_strategies) == 1
+        s1.resume.assert_not_called()
+
+
 class TestEquityGuardRollingDrawdown:
     """Tests for rolling window drawdown + dual-layer protection."""
 
@@ -611,12 +631,18 @@ class TestEquityGuardRollingDrawdown:
         assert not mock._halted
         assert mock._initial_balance == 3000.0
 
-        # Now absolute guard: 2000/3000 = 0.67, but 2000/10000 = 0.2 < 0.3
-        # Wait — initial_balance was reset to 3000, so 2000/3000 = 0.67 > 0.3
-        # Need initial to still be original for absolute guard to work
-        # Actually initial_balance is reset on cooldown. Let's check:
-        # The absolute guard should use the ORIGINAL initial balance, not reset one.
-        # This test validates that min_equity_ratio still uses current initial_balance.
+        # Absolute guard uses reset baseline: 800/3000 = 0.27 < 0.3 → permanent halt
+        s1.is_running = True
+        mock._halted = False
+        with patch(
+            "nautilus_quants.controllers.equity_guard.compute_mtm_equity",
+            return_value=800.0,
+        ):
+            EquityGuardController._on_check(mock, MagicMock())
+
+        assert mock._halted
+        # Permanent halt: no additional cooldown timer (only 1 from rolling drawdown)
+        assert mock.clock.set_time_alert_ns.call_count == 1
 
     def test_empty_window_uses_alltime_peak(self) -> None:
         """Test empty drawdown_window uses all-time peak (no pruning)."""
