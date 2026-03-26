@@ -69,6 +69,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self._states: dict[ClientOrderId, OrderExecutionState] = {}
         self._active_child_to_primary: dict[ClientOrderId, ClientOrderId] = {}
         self._timer_to_primary: dict[str, ClientOrderId] = {}
+        self._retry_timer_to_primary: dict[str, ClientOrderId] = {}
         self._subscribed_instruments: set[InstrumentId] = set()
 
     def on_start(self) -> None:
@@ -82,7 +83,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"post_only={self._config.post_only}, "
             f"max_post_only_retries={self._config.max_post_only_retries}, "
             f"enable_residual_sweep={self._config.enable_residual_sweep}, "
-            f"max_sweep_retries={self._config.max_sweep_retries}"
+            f"max_sweep_retries={self._config.max_sweep_retries}, "
+            f"max_transient_retries={self._config.max_transient_retries}, "
+            f"transient_retry_delay_secs={self._config.transient_retry_delay_secs}"
         )
         self._rebuild_runtime_indexes(rearm_timers=True)
 
@@ -100,6 +103,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self._states.clear()
         self._active_child_to_primary.clear()
         self._timer_to_primary.clear()
+        self._retry_timer_to_primary.clear()
         self._subscribed_instruments.clear()
         self._publish_execution_states()
 
@@ -185,6 +189,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self._publish_execution_states()
 
     def on_time_event(self, event: TimeEvent) -> None:
+        # Check retry timers first.
+        retry_primary_id = self._retry_timer_to_primary.pop(event.name, None)
+        if retry_primary_id is not None:
+            self._on_retry_timer(retry_primary_id)
+            return
+
         primary_id = self._timer_to_primary.get(event.name)
         if primary_id is None:
             return
@@ -271,6 +281,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             due_post_only=event.due_post_only,
             max_post_only_retries=self._config.max_post_only_retries,
             fallback_to_market=self._config.fallback_to_market,
+            reason=str(event.reason),
+            max_transient_retries=self._config.max_transient_retries,
         )
         self._execute_session_command(state, command)
         self._publish_execution_states()
@@ -590,6 +602,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             self._complete_session(state)
         elif command == SessionCommand.REARM_TIMEOUT:
             self._arm_timeout(state)
+        elif command == SessionCommand.SCHEDULE_RETRY:
+            self._schedule_transient_retry(state)
 
     def _record_failed_primary(self, order: Order, *, anchor_px: float) -> None:
         state = self._states.get(order.client_order_id)
@@ -643,10 +657,54 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             callback=self.on_time_event,
         )
 
+    def _schedule_transient_retry(self, state: OrderExecutionState) -> None:
+        """Schedule a delayed re-submission after a transient venue error."""
+        retry_name = f"PostLimit-Retry-{state.primary_order_id.value}"
+        # Cancel any existing retry timer for this session.
+        self._retry_timer_to_primary.pop(retry_name, None)
+        if retry_name in self.clock.timer_names:
+            self.clock.cancel_timer(retry_name)
+
+        delay = self._config.transient_retry_delay_secs
+        self._retry_timer_to_primary[retry_name] = state.primary_order_id
+        self.clock.set_timer(
+            name=retry_name,
+            interval=timedelta(seconds=delay),
+            callback=self.on_time_event,
+        )
+        self.log.warning(
+            f"PostLimit transient retry scheduled: "
+            f"primary={state.primary_order_id} "
+            f"attempt={state.transient_retry_count}/{self._config.max_transient_retries} "
+            f"delay={delay}s"
+        )
+
+    def _on_retry_timer(self, primary_id: ClientOrderId) -> None:
+        """Handle retry timer expiry: re-submit the limit child."""
+        state = self._states.get(primary_id)
+        if state is None or state.is_terminal:
+            return
+        if state.state != OrderState.RETRY_PENDING:
+            return
+
+        state.state = OrderState.PENDING_LIMIT
+        self.log.info(
+            f"PostLimit transient retry firing: "
+            f"primary={state.primary_order_id} "
+            f"retry={state.transient_retry_count}"
+        )
+        self._submit_limit_child(state)
+        self._publish_execution_states()
+
     def _cancel_timer(self, state: OrderExecutionState) -> None:
         self._timer_to_primary.pop(state.timer_name, None)
         if state.timer_name in self.clock.timer_names:
             self.clock.cancel_timer(state.timer_name)
+        # Also cancel any pending retry timer.
+        retry_name = f"PostLimit-Retry-{state.primary_order_id.value}"
+        self._retry_timer_to_primary.pop(retry_name, None)
+        if retry_name in self.clock.timer_names:
+            self.clock.cancel_timer(retry_name)
 
     def _clear_active_child(self, state: OrderExecutionState) -> None:
         if state.active_order_id is not None:
@@ -693,6 +751,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
                 self._active_child_to_primary[state.active_order_id] = state.primary_order_id
             if rearm_timers and state.state == OrderState.WORKING_LIMIT:
                 self._arm_timeout(state)
+            if rearm_timers and state.state == OrderState.RETRY_PENDING:
+                self._schedule_transient_retry(state)
 
     def _get_timeout_secs(self, state: OrderExecutionState) -> float:
         return state.timeout_secs if state.timeout_secs is not None else self._config.timeout_secs

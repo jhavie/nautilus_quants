@@ -22,6 +22,7 @@ class OrderState(Enum):
     CANCEL_PENDING_MARKET = "CANCEL_PENDING_MARKET"
     PENDING_MARKET = "PENDING_MARKET"
     WORKING_MARKET = "WORKING_MARKET"
+    RETRY_PENDING = "RETRY_PENDING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -39,6 +40,7 @@ VALID_TRANSITIONS: dict[OrderState, set[OrderState]] = {
         OrderState.WORKING_LIMIT,
         OrderState.PENDING_LIMIT,
         OrderState.PENDING_MARKET,
+        OrderState.RETRY_PENDING,
         OrderState.FAILED,
         OrderState.COMPLETED,
     },
@@ -63,11 +65,16 @@ VALID_TRANSITIONS: dict[OrderState, set[OrderState]] = {
     },
     OrderState.PENDING_MARKET: {
         OrderState.WORKING_MARKET,
+        OrderState.RETRY_PENDING,
         OrderState.COMPLETED,
         OrderState.FAILED,
     },
     OrderState.WORKING_MARKET: {
         OrderState.COMPLETED,
+        OrderState.FAILED,
+    },
+    OrderState.RETRY_PENDING: {
+        OrderState.PENDING_LIMIT,
         OrderState.FAILED,
     },
     OrderState.COMPLETED: set(),
@@ -126,6 +133,7 @@ class OrderExecutionState:
     contract_multiplier: float = 1.0
     intent: str = "UNKNOWN"
 
+    transient_retry_count: int = 0
     limit_orders_submitted: int = 0
     last_limit_price: float = 0.0
     filled_quantity: Quantity | None = None
@@ -202,6 +210,7 @@ class OrderExecutionStateSnapshot(msgspec.Struct, frozen=True):
     filled_quote_quantity: float
     contract_multiplier: float
     intent: str
+    transient_retry_count: int
     limit_orders_submitted: int
     last_limit_price: float
     filled_quantity: str
@@ -267,6 +276,7 @@ def _snapshot_from_state(state: OrderExecutionState) -> OrderExecutionStateSnaps
         filled_quote_quantity=state.filled_quote_quantity,
         contract_multiplier=state.contract_multiplier,
         intent=state.intent,
+        transient_retry_count=state.transient_retry_count,
         limit_orders_submitted=state.limit_orders_submitted,
         last_limit_price=state.last_limit_price,
         filled_quantity=str(state.filled_quantity),
@@ -300,6 +310,7 @@ def _state_from_snapshot(snapshot: OrderExecutionStateSnapshot) -> OrderExecutio
         filled_quote_quantity=snapshot.filled_quote_quantity,
         contract_multiplier=snapshot.contract_multiplier,
         intent=snapshot.intent,
+        transient_retry_count=snapshot.transient_retry_count,
         limit_orders_submitted=snapshot.limit_orders_submitted,
         last_limit_price=snapshot.last_limit_price,
         filled_quantity=Quantity.from_str(snapshot.filled_quantity),
