@@ -14,7 +14,7 @@ from nautilus_trader.config import CacheConfig, DatabaseConfig
 from nautilus_trader.config import ImportableExecAlgorithmConfig, LoggingConfig
 from nautilus_trader.live.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
-from nautilus_trader.trading.config import ImportableStrategyConfig
+from nautilus_trader.trading.config import ImportableControllerConfig, ImportableStrategyConfig
 
 from nautilus_quants.live.exceptions import LiveConfigError
 from nautilus_quants.live.utils.config_parser import (
@@ -170,6 +170,12 @@ def run_live(
         for ea in engine_dict.get("exec_algorithms", [])
     ]
 
+    # Build controller config if present
+    controller_config = None
+    controller_dict = engine_dict.get("controller")
+    if controller_dict:
+        controller_config = ImportableControllerConfig(**controller_dict)
+
     # Build node config kwargs, only include non-None engine configs
     node_kwargs: dict[str, Any] = {
         "trader_id": trader_id,
@@ -186,6 +192,8 @@ def run_live(
         node_kwargs["risk_engine"] = risk_engine_config
     if exec_engine_config is not None:
         node_kwargs["exec_engine"] = exec_engine_config
+    if controller_config is not None:
+        node_kwargs["controller"] = controller_config
 
     node_config = TradingNodeConfig(**node_kwargs)
 
