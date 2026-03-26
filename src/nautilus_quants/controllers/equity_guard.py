@@ -1,11 +1,11 @@
-"""EquityGuardController - equity drawdown protection with optional cooldown.
+"""EquityGuardController - dual-layer equity protection with rolling drawdown.
 
-Monitors MTM equity at regular intervals. When equity drops below
-min_equity_ratio × initial_balance, stops guarded strategies
-(triggering their on_stop → close_all_positions).
+Layer 1 (Rolling Drawdown): Monitors MTM equity against the peak within a
+configurable window. When current/peak drops below drawdown_ratio, stops
+guarded strategies and starts a cooldown timer for automatic restart.
 
-If cooldown_period is set, automatically restarts strategies after
-the cooldown expires, using current equity as the new baseline.
+Layer 2 (Absolute Guard): When equity drops below min_equity_ratio of the
+initial balance, permanently stops strategies (no cooldown restart).
 
 Usage (YAML engine.controller config):
     controller:
@@ -15,13 +15,16 @@ Usage (YAML engine.controller config):
         interval: "1h"
         venue_name: "OKX"
         currency: "USDT"
-        min_equity_ratio: 0.7
+        drawdown_window: "72h"
+        drawdown_ratio: 0.7
+        min_equity_ratio: 0.3
         cooldown_period: "24h"
-        guarded_strategy_ids:
-          - "CSStrategy-001"
+        guarded_strategy_ids: []
 """
 
 from __future__ import annotations
+
+from collections import deque
 
 from nautilus_trader.config import ControllerConfig
 from nautilus_trader.model.identifiers import Venue
@@ -45,32 +48,41 @@ class EquityGuardControllerConfig(ControllerConfig, kw_only=True, frozen=True):
         Venue name.
     currency : str, default "USD"
         Settlement currency.
+    drawdown_window : str, default ""
+        Rolling window for peak detection (e.g., "72h", "30d").
+        Empty string = all-time peak (no pruning).
+    drawdown_ratio : float, default 0.7
+        Drawdown threshold: halt when current/peak < this value.
     min_equity_ratio : float, default 0.1
-        Minimum equity/initial_balance ratio before halting.
+        Absolute guard: halt permanently when current/initial < this value.
     guarded_strategy_ids : list[str], default []
         Strategy IDs to stop on breach. Empty = all strategies.
     cooldown_period : str, default ""
-        Cooldown period before restarting strategies (e.g., "24h", "4h").
-        Empty string = no restart (permanent halt, backward-compatible).
+        Cooldown before restarting after drawdown halt (e.g., "24h").
+        Empty = no restart. Only applies to drawdown halt, not absolute guard.
     """
 
     interval: str = "1h"
     venue_name: str = "SIM"
     currency: str = "USD"
+    drawdown_window: str = ""
+    drawdown_ratio: float = 0.7
     min_equity_ratio: float = 0.1
     guarded_strategy_ids: list[str] = []
     cooldown_period: str = ""
 
 
 class EquityGuardController(Controller):
-    """Equity drawdown protection with optional cooldown restart.
+    """Dual-layer equity protection with rolling drawdown and absolute guard.
 
-    Monitors MTM equity at regular intervals. When equity drops below
-    min_equity_ratio × initial_balance, stops the guarded strategies
-    (triggering their on_stop → close_all_positions).
+    Layer 1 — Rolling Drawdown:
+        Tracks equity history in a deque. On each check, finds peak within
+        the configured window (or all-time if window is empty). Halts when
+        current/peak < drawdown_ratio. Sets cooldown timer for restart.
 
-    If cooldown_period is configured, sets a one-shot timer to restart
-    strategies after the cooldown expires, using current equity as new baseline.
+    Layer 2 — Absolute Guard:
+        Halts permanently when current/initial_balance < min_equity_ratio.
+        No cooldown, no restart.
     """
 
     def __init__(self, config: EquityGuardControllerConfig, trader: Trader) -> None:
@@ -80,6 +92,7 @@ class EquityGuardController(Controller):
         self._initial_balance: float | None = None
         self._halted: bool = False
         self._stopped_strategies: list[Strategy] = []
+        self._equity_history: deque[tuple[int, float]] = deque()
 
     def on_start(self) -> None:
         """Register equity check timer and record initial balance."""
@@ -89,22 +102,25 @@ class EquityGuardController(Controller):
             interval=interval_td,
             callback=self._on_check,
         )
-        # Record initial balance as baseline
         self._initial_balance = compute_mtm_equity(
-            self.portfolio,
-            self._venue,
-            self._currency,
+            self.portfolio, self._venue, self._currency,
         )
+        if self._initial_balance is not None:
+            self._equity_history.append(
+                (self.clock.timestamp_ns(), self._initial_balance),
+            )
         self.log.info(
             f"EquityGuardController started: "
             f"initial_balance={self._initial_balance}, "
+            f"drawdown_window={self.config.drawdown_window or 'all-time'}, "
+            f"drawdown_ratio={self.config.drawdown_ratio}, "
             f"min_equity_ratio={self.config.min_equity_ratio}, "
             f"cooldown={self.config.cooldown_period or 'disabled'}, "
             f"guarded={self.config.guarded_strategy_ids or 'ALL'}"
         )
 
     def _on_check(self, event: object) -> None:
-        """Timer callback: check equity ratio and halt if breached."""
+        """Timer callback: dual-layer equity check."""
         if self._halted:
             return
         if self._initial_balance is None or self._initial_balance <= 0:
@@ -114,18 +130,56 @@ class EquityGuardController(Controller):
         if equity is None:
             return
 
-        ratio = equity / self._initial_balance
-        if ratio < self.config.min_equity_ratio:
-            self._halt_guarded_strategies(equity, ratio)
+        now_ns = self.clock.timestamp_ns()
+        self._equity_history.append((now_ns, equity))
 
-    def _halt_guarded_strategies(self, equity: float, ratio: float) -> None:
-        """Stop guarded strategies when equity ratio breached."""
+        # Layer 2: Absolute guard (highest priority, permanent halt)
+        abs_ratio = equity / self._initial_balance
+        if abs_ratio < self.config.min_equity_ratio:
+            self.log.warning(
+                f"ABSOLUTE_GUARD: equity={equity:.2f}, "
+                f"ratio={abs_ratio:.4f} < {self.config.min_equity_ratio}"
+            )
+            self._halt_guarded_strategies(equity, abs_ratio, permanent=True)
+            return
+
+        # Layer 1: Rolling drawdown
+        if self.config.drawdown_window:
+            window_td = parse_interval_to_timedelta(self.config.drawdown_window)
+            window_ns = int(window_td.total_seconds() * 1_000_000_000)
+            cutoff_ns = now_ns - window_ns
+            while self._equity_history and self._equity_history[0][0] < cutoff_ns:
+                self._equity_history.popleft()
+
+        if not self._equity_history:
+            return
+
+        peak = max(eq for _, eq in self._equity_history)
+        dd_ratio = equity / peak
+        if dd_ratio < self.config.drawdown_ratio:
+            self.log.warning(
+                f"ROLLING_DRAWDOWN: equity={equity:.2f}, "
+                f"peak={peak:.2f} "
+                f"({self.config.drawdown_window or 'all-time'}), "
+                f"ratio={dd_ratio:.4f} < {self.config.drawdown_ratio}"
+            )
+            self._halt_guarded_strategies(equity, dd_ratio, permanent=False)
+
+    def _halt_guarded_strategies(
+        self,
+        equity: float,
+        ratio: float,
+        *,
+        permanent: bool = False,
+    ) -> None:
+        """Stop guarded strategies.
+
+        Parameters
+        ----------
+        permanent : bool
+            If True, no cooldown timer is set (absolute guard).
+        """
         self._halted = True
-        self.log.warning(
-            f"EquityGuardController triggered: equity={equity:.2f}, "
-            f"ratio={ratio:.4f} < {self.config.min_equity_ratio}. "
-            f"Stopping guarded strategies."
-        )
         guarded_ids = set(self.config.guarded_strategy_ids)
         self._stopped_strategies = []
         for strategy in self._trader.strategies():
@@ -135,7 +189,7 @@ class EquityGuardController(Controller):
                     self._stopped_strategies.append(strategy)
                     self.log.info(f"Stopped strategy: {strategy.id}")
 
-        if self.config.cooldown_period:
+        if not permanent and self.config.cooldown_period:
             cooldown_td = parse_interval_to_timedelta(self.config.cooldown_period)
             cooldown_ns = int(cooldown_td.total_seconds() * 1_000_000_000)
             self.clock.set_time_alert_ns(
@@ -155,13 +209,18 @@ class EquityGuardController(Controller):
             self.start_strategy(strategy)
             self.log.info(f"Restarted strategy: {strategy.id}")
 
-        # Reset baseline to current equity for next cycle
-        self._initial_balance = compute_mtm_equity(
+        # Reset baseline and history
+        new_equity = compute_mtm_equity(
             self.portfolio, self._venue, self._currency,
         )
+        self._initial_balance = new_equity
         self._stopped_strategies = []
         self._halted = False
+        self._equity_history.clear()
+        if new_equity is not None:
+            self._equity_history.append(
+                (self.clock.timestamp_ns(), new_equity),
+            )
         self.log.info(
-            f"EquityGuardController reset: "
-            f"new_baseline={self._initial_balance}"
+            f"EquityGuardController reset: new_baseline={self._initial_balance}"
         )
