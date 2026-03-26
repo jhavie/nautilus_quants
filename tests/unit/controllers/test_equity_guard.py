@@ -329,8 +329,8 @@ class TestEquityGuardControllerCooldown:
 
         assert len(mock._stopped_strategies) == 2
 
-    def test_cooldown_expired_restarts_strategies(self) -> None:
-        """Test _on_cooldown_expired restarts all previously stopped strategies."""
+    def test_cooldown_expired_resumes_strategies(self) -> None:
+        """Test _on_cooldown_expired resumes all previously stopped strategies."""
         mock = self._make_mock_controller(cooldown_period="24h")
 
         s1 = MagicMock()
@@ -346,9 +346,8 @@ class TestEquityGuardControllerCooldown:
         ):
             EquityGuardController._on_cooldown_expired(mock, MagicMock())
 
-        assert mock.start_strategy.call_count == 2
-        mock.start_strategy.assert_any_call(s1)
-        mock.start_strategy.assert_any_call(s2)
+        s1.resume.assert_called_once()
+        s2.resume.assert_called_once()
 
     def test_cooldown_expired_resets_state(self) -> None:
         """Test _on_cooldown_expired resets _halted and _initial_balance."""

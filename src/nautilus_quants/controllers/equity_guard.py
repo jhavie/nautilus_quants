@@ -203,11 +203,11 @@ class EquityGuardController(Controller):
             )
 
     def _on_cooldown_expired(self, event: object) -> None:
-        """Cooldown timer callback: restart previously stopped strategies."""
-        self.log.info("Cooldown expired. Restarting strategies.")
+        """Cooldown timer callback: resume previously stopped strategies."""
+        self.log.info("Cooldown expired. Resuming strategies.")
         for strategy in self._stopped_strategies:
-            self.start_strategy(strategy)
-            self.log.info(f"Restarted strategy: {strategy.id}")
+            strategy.resume()
+            self.log.info(f"Resumed strategy: {strategy.id}")
 
         # Reset baseline and history
         new_equity = compute_mtm_equity(
