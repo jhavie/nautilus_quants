@@ -185,11 +185,18 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
+        selection_policy: "FMZSelectionPolicy"
         n_long: 40
         n_short: 40
         position_value: 300
         composite_factor: "alpha044"
         rebalance_interval: 1
+        # --- TopK Dropout mode (uncomment to switch) ---
+        # selection_policy: "TopKDropoutSelectionPolicy"
+        # topk_long: 20
+        # topk_short: 20
+        # n_drop_long: 5
+        # n_drop_short: 5
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"

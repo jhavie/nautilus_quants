@@ -8,6 +8,10 @@ from nautilus_quants.strategies.cs.execution_policy import (
     MarketExecutionPolicy,
     PostLimitExecutionPolicy,
 )
+from nautilus_quants.strategies.cs.selection_policy import (
+    FMZSelectionPolicy,
+    TopKDropoutSelectionPolicy,
+)
 from nautilus_quants.strategies.cs.strategy import CSStrategy
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 
@@ -16,7 +20,9 @@ __all__ = [
     "CSStrategyConfig",
     "DecisionEngineActor",
     "DecisionEngineActorConfig",
+    "FMZSelectionPolicy",
     "MarketExecutionPolicy",
     "PostLimitExecutionPolicy",
     "RebalanceOrders",
+    "TopKDropoutSelectionPolicy",
 ]

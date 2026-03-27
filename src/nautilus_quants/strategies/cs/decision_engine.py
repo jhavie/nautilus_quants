@@ -4,10 +4,14 @@
 DecisionEngineActor - Transforms FactorValues into RebalanceOrders.
 
 Subscribes to FactorValues from FactorEngineActor, reads current positions
-from cache, computes FMZ-style rebalance decisions (sort + bottom N long /
-top N short), and publishes RebalanceOrders via MessageBus.
+from cache, computes rebalance decisions, and publishes RebalanceOrders
+via MessageBus.
 
 Does not submit orders. Pure decision-making.
+
+Selection algorithm is pluggable via SelectionPolicy (Strategy Pattern):
+- FMZSelectionPolicy: sort + bottom-N long / top-N short, sticky hold
+- TopKDropoutSelectionPolicy: active rotation with n_drop per leg
 
 NETTING mode: direction flips emit a single FLIP action (instead of
 separate CLOSE + OPEN). The execution layer resolves actual quantities
@@ -29,32 +33,61 @@ from nautilus_trader.model.data import DataType
 
 from nautilus_quants.factors.types import FactorValues
 from nautilus_quants.strategies.cs.config import DecisionEngineActorConfig
+from nautilus_quants.strategies.cs.selection_policy import (
+    FMZSelectionPolicy,
+    SelectionPolicy,
+    TopKDropoutSelectionPolicy,
+)
 from nautilus_quants.strategies.cs.types import RebalanceOrders
+
+_SELECTION_POLICIES: dict[str, type] = {
+    "FMZSelectionPolicy": FMZSelectionPolicy,
+    "TopKDropoutSelectionPolicy": TopKDropoutSelectionPolicy,
+}
 
 
 class DecisionEngineActor(Actor):
     """
     Decision engine: FactorValues → RebalanceOrders.
 
-    FMZ core logic:
-    1. Sort instruments by composite factor value (ascending)
-    2. Long bottom N (lowest values)
-    3. Short top N (highest values)
-    4. Only change positions when direction flips
-    5. Close positions with missing factor data (delisting protection)
+    Uses a pluggable SelectionPolicy to determine target long/short sets,
+    then diffs against current positions to produce CLOSE/OPEN/FLIP intents.
     """
 
     def __init__(self, config: DecisionEngineActorConfig) -> None:
         super().__init__(config)
         self._signal_count: int = 0
         self._bars_until_rebalance: int = 0
+        self._selection_policy: SelectionPolicy = self._build_selection_policy(config)
+
+    @staticmethod
+    def _build_selection_policy(config: DecisionEngineActorConfig) -> SelectionPolicy:
+        policy_name = config.selection_policy
+        if policy_name == "TopKDropoutSelectionPolicy":
+            for field in ("topk_long", "topk_short", "n_drop_long", "n_drop_short"):
+                if getattr(config, field) is None:
+                    raise ValueError(f"{field} required for TopKDropoutSelectionPolicy")
+            return TopKDropoutSelectionPolicy(
+                config.topk_long,  # type: ignore[arg-type]
+                config.topk_short,  # type: ignore[arg-type]
+                config.n_drop_long,  # type: ignore[arg-type]
+                config.n_drop_short,  # type: ignore[arg-type]
+            )
+        elif policy_name == "FMZSelectionPolicy":
+            return FMZSelectionPolicy(config.n_long, config.n_short)
+        else:
+            raise ValueError(
+                f"Unknown selection_policy: {policy_name}. "
+                f"Available: {list(_SELECTION_POLICIES)}"
+            )
 
     def on_start(self) -> None:
         """Subscribe to FactorValues on start."""
         self.subscribe_data(DataType(FactorValues))
+        policy_name = self.config.selection_policy
         self.log.info(
             f"DecisionEngineActor started: "
-            f"n_long={self.config.n_long}, n_short={self.config.n_short}, "
+            f"selection_policy={policy_name}, "
             f"position_value={self.config.position_value}, "
             f"rebalance_interval={self.config.rebalance_interval}"
         )
@@ -79,14 +112,6 @@ class DecisionEngineActor(Actor):
             self._bars_until_rebalance -= 1
             return
         self._bars_until_rebalance = self.config.rebalance_interval - 1
-
-        # Validate sufficient instruments
-        required = self.config.n_long + self.config.n_short
-        if len(composite) < required:
-            self.log.warning(
-                f"Skip rebalance: {len(composite)} instruments < {required} required"
-            )
-            return
 
         # Read current positions from cache
         current_long, current_short = self._get_current_positions()
@@ -121,85 +146,103 @@ class DecisionEngineActor(Actor):
         current_short: set[str],
     ) -> list[dict[str, Any]]:
         """
-        FMZ core logic: sort + target selection + diff with current positions.
+        Compute rebalance orders by diffing current positions vs policy targets.
 
         Intents:
-        - CLOSE: close existing position
+        - CLOSE: close existing position (dropped from pool or delisted)
         - OPEN: open new position
         - FLIP: one-shot direction reversal (NETTING mode)
         """
-        sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
-        rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
-        long_targets = set(s for s, _ in sorted_symbols[: self.config.n_long])
-        short_targets = set(s for s, _ in sorted_symbols[-self.config.n_short :])
-
         orders: list[dict[str, Any]] = []
         instruments_with_data = set(composite.keys())
 
         # Delisting protection: close positions with no factor data
         for inst_id in sorted(current_long - instruments_with_data):
-            orders.append(
-                self._close_order(inst_id, tags=["NO_FACTOR_DATA"])
-            )
+            orders.append(self._close_order(inst_id, tags=["NO_FACTOR_DATA"]))
         for inst_id in sorted(current_short - instruments_with_data):
-            orders.append(
-                self._close_order(inst_id, order_side="BUY", tags=["NO_FACTOR_DATA"])
-            )
+            orders.append(self._close_order(inst_id, order_side="BUY", tags=["NO_FACTOR_DATA"]))
 
-        # FMZ core: only act when direction changes
-        for inst_id in sorted(composite.keys()):
-            is_long_target = inst_id in long_targets
-            is_short_target = inst_id in short_targets
-            currently_long = inst_id in current_long
-            currently_short = inst_id in current_short
+        # Policy selection: compute target final sets
+        final_long, final_short = self._selection_policy.select(
+            composite,
+            current_long & instruments_with_data,
+            current_short & instruments_with_data,
+        )
+
+        # Build rank lookup for tags
+        sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
+        rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
+
+        # Unified diff: compare current vs final → CLOSE/OPEN/FLIP
+        for inst_id in sorted(instruments_with_data):
+            in_fl = inst_id in final_long
+            in_fs = inst_id in final_short
+            was_long = inst_id in current_long
+            was_short = inst_id in current_short
             rank = rank_lookup.get(inst_id, -1)
             comp = composite.get(inst_id)
 
-            if is_long_target and not currently_long:
-                if currently_short:
-                    # One-shot flip: short → long
+            if was_long and not in_fl:
+                if in_fs:
                     orders.append(
                         self._flip_order(
                             inst_id,
-                            order_side="BUY",
-                            tags=["FLIP_TO_LONG", f"rank:{rank}"],
-                            rank=rank,
-                            composite=comp,
+                            "SELL",
+                            ["FLIP_TO_SHORT", f"rank:{rank}"],
+                            rank,
+                            comp,
                         )
                     )
                 else:
-                    # New long entry
                     orders.append(
-                        self._open_order(
+                        self._close_order(
                             inst_id,
-                            order_side="BUY",
-                            tags=["NEW_LONG", f"rank:{rank}"],
-                            rank=rank,
-                            composite=comp,
+                            "SELL",
+                            ["DROPPED_LONG", f"rank:{rank}"],
+                            rank,
+                            comp,
                         )
                     )
-
-            elif is_short_target and not currently_short:
-                if currently_long:
-                    # One-shot flip: long → short
+            elif was_short and not in_fs:
+                if in_fl:
                     orders.append(
                         self._flip_order(
                             inst_id,
-                            order_side="SELL",
-                            tags=["FLIP_TO_SHORT", f"rank:{rank}"],
-                            rank=rank,
-                            composite=comp,
+                            "BUY",
+                            ["FLIP_TO_LONG", f"rank:{rank}"],
+                            rank,
+                            comp,
                         )
                     )
                 else:
-                    # New short entry
+                    orders.append(
+                        self._close_order(
+                            inst_id,
+                            "BUY",
+                            ["DROPPED_SHORT", f"rank:{rank}"],
+                            rank,
+                            comp,
+                        )
+                    )
+            elif not was_long and not was_short:
+                if in_fl:
                     orders.append(
                         self._open_order(
                             inst_id,
-                            order_side="SELL",
-                            tags=["NEW_SHORT", f"rank:{rank}"],
-                            rank=rank,
-                            composite=comp,
+                            "BUY",
+                            ["NEW_LONG", f"rank:{rank}"],
+                            rank,
+                            comp,
+                        )
+                    )
+                elif in_fs:
+                    orders.append(
+                        self._open_order(
+                            inst_id,
+                            "SELL",
+                            ["NEW_SHORT", f"rank:{rank}"],
+                            rank,
+                            comp,
                         )
                     )
 
