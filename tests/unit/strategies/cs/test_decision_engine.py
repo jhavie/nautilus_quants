@@ -53,6 +53,7 @@ class TestComputeOrders:
         assert len(short_opens) == 2  # C, D (highest)
 
     def test_no_change_when_already_in_target(self):
+        """Fixed mode: HOLD instruments produce no orders (qlib parity)."""
         actor = _make_actor(n_long=2, n_short=2)
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(
@@ -60,10 +61,7 @@ class TestComputeOrders:
             current_long={"A", "B"},
             current_short={"C", "D"},
         )
-        # HOLD orders are emitted but CSStrategy skips them (delta ≈ 0)
-        assert all(o["target_quote_quantity"] > 0 for o in orders)
-        holds = _holds(orders)
-        assert len(holds) == 4
+        assert orders == []
 
     def test_flip_short_to_long(self):
         """NETTING mode: D goes from short to long target."""

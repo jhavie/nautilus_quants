@@ -177,7 +177,8 @@ class DecisionEngineActor(Actor):
         sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
         rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
 
-        # Emit rebalance orders for every instrument with a target state change
+        # Emit rebalance orders: only for state changes (or all positions
+        # when rebalance_to_weights is True for continuous resizing).
         for inst_id in sorted(instruments_with_data):
             in_fl = inst_id in final_long
             in_fs = inst_id in final_short
@@ -187,15 +188,14 @@ class DecisionEngineActor(Actor):
             comp = composite.get(inst_id)
 
             if in_fl:
-                target = self._compute_target(
-                    inst_id, final_long, final_short, composite, n_positions,
+                if was_long and not self.config.rebalance_to_weights:
+                    continue  # HOLD — no order in fixed mode (qlib parity)
+                target = self._compute_target(final_long, final_short, inst_id)
+                tag = (
+                    "FLIP_TO_LONG" if was_short
+                    else "HOLD_LONG" if was_long
+                    else "NEW_LONG"
                 )
-                if was_short:
-                    tag = "FLIP_TO_LONG"
-                elif was_long:
-                    tag = "HOLD_LONG"
-                else:
-                    tag = "NEW_LONG"
                 orders.append(
                     self._rebalance_order(
                         inst_id, "BUY", target,
@@ -203,15 +203,14 @@ class DecisionEngineActor(Actor):
                     )
                 )
             elif in_fs:
-                target = self._compute_target(
-                    inst_id, final_long, final_short, composite, n_positions,
+                if was_short and not self.config.rebalance_to_weights:
+                    continue  # HOLD — no order in fixed mode (qlib parity)
+                target = self._compute_target(final_long, final_short, inst_id)
+                tag = (
+                    "FLIP_TO_SHORT" if was_long
+                    else "HOLD_SHORT" if was_short
+                    else "NEW_SHORT"
                 )
-                if was_long:
-                    tag = "FLIP_TO_SHORT"
-                elif was_short:
-                    tag = "HOLD_SHORT"
-                else:
-                    tag = "NEW_SHORT"
                 orders.append(
                     self._rebalance_order(
                         inst_id, "SELL", target,
@@ -243,13 +242,16 @@ class DecisionEngineActor(Actor):
 
     def _compute_target(
         self,
-        inst_id: str,
         final_long: set[str],
         final_short: set[str],
-        composite: dict[str, float],
-        n_positions: int,
+        inst_id: str,
     ) -> float:
-        """Compute target_quote_quantity for an instrument."""
+        """Compute target_quote_quantity for an instrument.
+
+        Fixed mode: returns position_value (equal notional per instrument).
+        Weight mode: returns NAV × long_share / n_instruments (equal weight,
+        matching qlib LongShortTopKStrategy.rebalance_to_weights behavior).
+        """
         if not self.config.rebalance_to_weights:
             return self.config.position_value
 
@@ -258,15 +260,13 @@ class DecisionEngineActor(Actor):
             self.log.warning("NAV unavailable, falling back to position_value")
             return self.config.position_value
 
-        # Score-proportional weight within the instrument's leg
-        if inst_id in final_long:
-            leg_scores = {s: -composite[s] for s in final_long}
-        else:
-            leg_scores = {s: composite[s] for s in final_short}
+        long_share = self.config.long_share
 
-        total = sum(abs(v) for v in leg_scores.values()) or 1.0
-        weight = abs(leg_scores.get(inst_id, 0)) / total * 0.5
-        return weight * nav
+        # Equal weight within each leg (qlib parity)
+        if inst_id in final_long:
+            return nav * long_share / max(len(final_long), 1)
+        else:
+            return nav * (1.0 - long_share) / max(len(final_short), 1)
 
     def _get_nav(self) -> float | None:
         """Read portfolio NAV from cache via compute_mtm_equity."""

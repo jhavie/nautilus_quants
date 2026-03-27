@@ -57,6 +57,7 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
     rebalance_to_weights: bool = False
     venue_name: str | None = None
     min_rebalance_pct: float = 0.05
+    long_share: float = 0.5
 
 
 class BracketConfig(msgspec.Struct, frozen=True):
