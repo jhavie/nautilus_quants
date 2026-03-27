@@ -14,7 +14,7 @@ from nautilus_trader.config import CacheConfig, DatabaseConfig
 from nautilus_trader.config import ImportableExecAlgorithmConfig, LoggingConfig
 from nautilus_trader.live.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
-from nautilus_trader.trading.config import ImportableStrategyConfig
+from nautilus_trader.trading.config import ImportableControllerConfig, ImportableStrategyConfig
 
 from nautilus_quants.live.exceptions import LiveConfigError
 from nautilus_quants.live.utils.config_parser import (
@@ -182,6 +182,12 @@ def run_live(
         for ea in engine_dict.get("exec_algorithms", [])
     ]
 
+    # Build controller config if present
+    controller_config = None
+    controller_dict = engine_dict.get("controller")
+    if controller_dict:
+        controller_config = ImportableControllerConfig(**controller_dict)
+
     # Build node config kwargs, only include non-None engine configs
     node_kwargs: dict[str, Any] = {
         "trader_id": trader_id,
@@ -198,8 +204,8 @@ def run_live(
         node_kwargs["risk_engine"] = risk_engine_config
     if exec_engine_config is not None:
         node_kwargs["exec_engine"] = exec_engine_config
-    if cache_config is not None:
-        node_kwargs["cache"] = cache_config
+    if controller_config is not None:
+        node_kwargs["controller"] = controller_config
 
     node_config = TradingNodeConfig(**node_kwargs)
 
@@ -217,7 +223,10 @@ def run_live(
     _register_signal_handlers(node)
 
     node.build()
-    node.run()
+    try:
+        node.run()
+    finally:
+        node.dispose()
 
 
 def _dry_run_validate(
@@ -243,16 +252,32 @@ def _dry_run_validate(
 
 
 def _register_signal_handlers(node: TradingNode) -> None:
-    """Register signal handlers for graceful shutdown."""
+    """Register signal handlers for graceful shutdown.
+
+    Sequence: SIGTERM → node.stop() schedules stop_async on the event loop
+    → trader.stop → strategy.on_stop → close positions → await fills
+    → disconnect → node.dispose() runs after loop exits naturally.
+
+    IMPORTANT: node.stop() only *schedules* stop_async() when the loop is
+    running. We must NOT call sys.exit() or node.dispose() here — let the
+    event loop finish stop_async() and exit run_async() naturally.
+    """
+    _shutdown_in_progress = False
 
     def _handle_signal(signum: int, frame: Any) -> None:
+        nonlocal _shutdown_in_progress
+        if _shutdown_in_progress:
+            print("\nForce exit (second signal).")
+            sys.exit(1)
+
+        _shutdown_in_progress = True
         sig_name = signal.Signals(signum).name
         print(f"\nReceived {sig_name}, shutting down gracefully...")
         try:
-            node.dispose()
-        except Exception:
-            pass
-        sys.exit(0)
+            node.stop()  # Schedules stop_async on event loop; do NOT sys.exit
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
+            sys.exit(1)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)

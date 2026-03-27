@@ -79,3 +79,41 @@ class TestCSStrategyOrderTranslation:
         assert kwargs["target_quote_quantity"] == 2000.0
         assert kwargs["intent"] == "FLIP"
 
+
+class TestCSStrategyExternalOrderClaims:
+    """external_order_claims auto-population from instrument_ids."""
+
+    def test_auto_populated_from_instrument_ids(self) -> None:
+        strategy = CSStrategy(
+            CSStrategyConfig(
+                instrument_ids=["LINK-USDT-SWAP.OKX", "BTC-USDT-SWAP.OKX"],
+                execution_policy="PostLimitExecutionPolicy",
+            ),
+        )
+        expected = [
+            InstrumentId.from_str("LINK-USDT-SWAP.OKX"),
+            InstrumentId.from_str("BTC-USDT-SWAP.OKX"),
+        ]
+        assert strategy.external_order_claims == expected
+
+    def test_explicit_claims_not_overridden(self) -> None:
+        strategy = CSStrategy(
+            CSStrategyConfig(
+                instrument_ids=["LINK-USDT-SWAP.OKX", "BTC-USDT-SWAP.OKX"],
+                execution_policy="PostLimitExecutionPolicy",
+                external_order_claims=["LINK-USDT-SWAP.OKX"],
+            ),
+        )
+        assert strategy.external_order_claims == [
+            InstrumentId.from_str("LINK-USDT-SWAP.OKX"),
+        ]
+
+    def test_empty_instrument_ids(self) -> None:
+        strategy = CSStrategy(
+            CSStrategyConfig(
+                instrument_ids=[],
+                execution_policy="PostLimitExecutionPolicy",
+            ),
+        )
+        assert strategy.external_order_claims == []
+

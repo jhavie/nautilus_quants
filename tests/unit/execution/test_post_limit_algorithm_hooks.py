@@ -404,3 +404,249 @@ class TestPostLimitExecAlgorithmHooks:
             assert state.active_order_id is None
             assert state.residual_sweep_pending is False
             assert state.sweep_retry_count == 0
+
+
+class TestStaleChildEventGuard:
+    """Tests for stale child event guard — events from replaced children must not
+    corrupt the session of the currently active child."""
+
+    # ── helpers ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _setup_stale_scenario(
+        algo: PostLimitExecAlgorithm,
+        cache: MagicMock,
+        *,
+        session_state: OrderState = OrderState.WORKING_LIMIT,
+        active_kind: SpawnKind = SpawnKind.LIMIT,
+    ) -> OrderExecutionState:
+        """Set up state with E2 active; E1 is the stale (replaced) child."""
+        state = OrderExecutionState(
+            primary_order_id=ClientOrderId("primary001"),
+            instrument_id=InstrumentId.from_str("LINK-USDT-SWAP.OKX"),
+            side=OrderSide.BUY,
+            total_quantity=Quantity.from_str("223.21"),
+            anchor_px=8.965,
+            state=session_state,
+            timer_name="PostLimit-primary001",
+            created_ns=100,
+        )
+        # E2 is the currently active child
+        state.activate_order(
+            client_order_id=ClientOrderId("primary001E2"),
+            kind=active_kind,
+            reserved_quantity=Quantity.from_str("223.11"),
+        )
+        algo._states[state.primary_order_id] = state
+        algo._active_child_to_primary[ClientOrderId("primary001E2")] = (
+            state.primary_order_id
+        )
+        # E1 is the stale child — resolvable via exec_spawn_id fallback
+        stale_order = SimpleNamespace(
+            exec_spawn_id=state.primary_order_id,
+            leaves_qty=Quantity.from_str("208.36"),
+        )
+        active_order = SimpleNamespace(
+            is_closed=False,
+            leaves_qty=Quantity.from_str("223.11"),
+        )
+
+        def order_lookup(order_id):
+            if order_id == ClientOrderId("primary001E1"):
+                return stale_order
+            if order_id == ClientOrderId("primary001E2"):
+                return active_order
+            if order_id == state.primary_order_id:
+                return SimpleNamespace(
+                    client_order_id=state.primary_order_id,
+                    leaves_qty=Quantity.from_str("0.10"),
+                    is_closed=False,
+                )
+            return None
+
+        cache.order.side_effect = order_lookup
+        return state
+
+    # ── stale terminal events (cancel / expire) ─────────────────────────
+
+    def test_stale_canceled_event_ignored(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, log = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(algo, cache)
+            algo._restore_primary_from_active = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_canceled(
+                SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+            )
+
+            assert state.active_order_id == ClientOrderId("primary001E2")
+            assert state.state == OrderState.WORKING_LIMIT
+            algo._restore_primary_from_active.assert_not_called()
+            log.warning.assert_called()
+
+    def test_stale_expired_event_ignored(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, log = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(algo, cache)
+            algo._restore_primary_from_active = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_expired(
+                SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+            )
+
+            assert state.active_order_id == ClientOrderId("primary001E2")
+            assert state.state == OrderState.WORKING_LIMIT
+            algo._restore_primary_from_active.assert_not_called()
+
+    # ── stale accepted ──────────────────────────────────────────────────
+
+    def test_stale_accepted_event_ignored(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(
+                algo, cache, session_state=OrderState.PENDING_LIMIT
+            )
+            algo._arm_timeout = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_accepted(
+                SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+            )
+
+            assert state.active_order_id == ClientOrderId("primary001E2")
+            assert state.state == OrderState.PENDING_LIMIT
+            algo._arm_timeout.assert_not_called()
+
+    # ── stale rejected / denied ─────────────────────────────────────────
+
+    def test_stale_rejected_event_ignored(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(
+                algo, cache, session_state=OrderState.PENDING_LIMIT
+            )
+            algo._restore_primary_from_active = MagicMock()  # type: ignore[method-assign]
+            algo._execute_session_command = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_rejected(
+                SimpleNamespace(
+                    client_order_id=ClientOrderId("primary001E1"),
+                    reason="post_only",
+                    due_post_only=True,
+                )
+            )
+
+            assert state.active_order_id == ClientOrderId("primary001E2")
+            algo._restore_primary_from_active.assert_not_called()
+            algo._execute_session_command.assert_not_called()
+
+    def test_stale_denied_event_ignored(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(
+                algo, cache, session_state=OrderState.PENDING_LIMIT
+            )
+            algo._restore_primary_from_active = MagicMock()  # type: ignore[method-assign]
+            algo._execute_session_command = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_denied(
+                SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+            )
+
+            assert state.active_order_id == ClientOrderId("primary001E2")
+            algo._restore_primary_from_active.assert_not_called()
+            algo._execute_session_command.assert_not_called()
+
+    # ── stale cancel_rejected ───────────────────────────────────────────
+
+    def test_stale_cancel_rejected_event_ignored(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(
+                algo, cache, session_state=OrderState.CANCEL_PENDING_REPRICE
+            )
+            algo._arm_timeout = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_cancel_rejected(
+                SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+            )
+
+            assert state.state == OrderState.CANCEL_PENDING_REPRICE
+            algo._arm_timeout.assert_not_called()
+
+    # ── stale fill — track + cancel active child ────────────────────────
+
+    def test_stale_fill_tracked_and_active_child_canceled(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, log = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(algo, cache)
+            algo.cancel_order = MagicMock()  # type: ignore[method-assign]
+
+            with patch(
+                "nautilus_quants.execution.post_limit.algorithm.compute_remaining_quantity",
+                return_value=Quantity.from_str("208.36"),
+            ):
+                algo.on_order_filled(
+                    SimpleNamespace(
+                        client_order_id=ClientOrderId("primary001E1"),
+                        last_qty=Quantity.from_str("14.75"),
+                        last_px=8.967,
+                    )
+                )
+
+            # Fill tracked in state
+            assert float(state.filled_quantity) == 14.75
+            assert state.fill_cost > 0
+            # Active child E2 canceled for resubmit
+            algo.cancel_order.assert_called_once()
+            log.warning.assert_called()
+
+    def test_stale_fill_completes_session_when_remaining_zero(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = self._setup_stale_scenario(algo, cache)
+            algo.cancel_order = MagicMock()  # type: ignore[method-assign]
+            algo._complete_session = MagicMock()  # type: ignore[method-assign]
+
+            with patch(
+                "nautilus_quants.execution.post_limit.algorithm.compute_remaining_quantity",
+                return_value=Quantity.zero(2),
+            ):
+                algo.on_order_filled(
+                    SimpleNamespace(
+                        client_order_id=ClientOrderId("primary001E1"),
+                        last_qty=Quantity.from_str("223.21"),
+                        last_px=8.967,
+                    )
+                )
+
+            algo.cancel_order.assert_called_once()
+            algo._complete_session.assert_called_once_with(state)
+
+    # ── regression: active child events still work normally ─────────────
+
+    def test_active_child_events_still_processed_normally(self) -> None:
+        algo = PostLimitExecAlgorithm()
+        stack, cache, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.PENDING_LIMIT)
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = (
+                state.primary_order_id
+            )
+            algo._arm_timeout = MagicMock()  # type: ignore[method-assign]
+
+            # Event from E1 which IS the active child → should process normally
+            algo.on_order_accepted(
+                SimpleNamespace(client_order_id=ClientOrderId("primary001E1"))
+            )
+
+            assert state.state == OrderState.WORKING_LIMIT
+            algo._arm_timeout.assert_called_once_with(state)
