@@ -60,6 +60,12 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
 
     def __init__(self, config: CSStrategyConfig) -> None:
         super().__init__(config)
+        # Auto-claim instruments so reconciled positions use this strategy's ID
+        # instead of EXTERNAL after restart. (cdef readonly list — mutate, not reassign)
+        if not self.external_order_claims:
+            self.external_order_claims.extend(
+                InstrumentId.from_str(iid) for iid in config.instrument_ids
+            )
         self._execution_policy: ExecutionPolicy = self._create_execution_policy(config)
         self._instruments: dict[InstrumentId, Instrument] = {}
 

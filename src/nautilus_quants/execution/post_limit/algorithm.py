@@ -174,6 +174,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         state = self._lookup_state_by_child(event.client_order_id)
         if state is None:
             return
+        if self._is_stale_child(event.client_order_id, state):
+            return
         state.active_order_accepted = True
 
         if state.active_order_kind == SpawnKind.SWEEP:
@@ -222,6 +224,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         state = self._lookup_state_by_child(event.client_order_id)
         if state is None:
             return
+        if self._is_stale_child(event.client_order_id, state):
+            self._handle_stale_fill(event, state)
+            return
 
         if state.active_order_kind == SpawnKind.SWEEP:
             sweep_order = self.cache.order(event.client_order_id)
@@ -251,6 +256,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
     def on_order_rejected(self, event: OrderRejected) -> None:
         state = self._lookup_state_by_child(event.client_order_id)
         if state is None:
+            return
+        if self._is_stale_child(event.client_order_id, state):
+            self.log.warning(
+                f"PostLimit ignoring stale rejected for {event.client_order_id}: "
+                f"active={state.active_order_id} primary={state.primary_order_id}"
+            )
             return
 
         if state.active_order_kind == SpawnKind.SWEEP:
@@ -291,6 +302,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         state = self._lookup_state_by_child(event.client_order_id)
         if state is None:
             return
+        if self._is_stale_child(event.client_order_id, state):
+            self.log.warning(
+                f"PostLimit ignoring stale denied for {event.client_order_id}: "
+                f"active={state.active_order_id} primary={state.primary_order_id}"
+            )
+            return
 
         if state.active_order_kind == SpawnKind.SWEEP:
             self.log.warning(f"PostLimit sweep order denied: {event.client_order_id}")
@@ -325,6 +342,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
     def on_order_cancel_rejected(self, event: OrderCancelRejected) -> None:
         state = self._lookup_state_by_child(event.client_order_id)
         if state is None or state.active_order_kind != SpawnKind.LIMIT:
+            return
+        if self._is_stale_child(event.client_order_id, state):
             return
 
         self.log.warning(
@@ -566,6 +585,12 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         state = self._lookup_state_by_child(child_order_id)
         if state is None:
             return
+        if self._is_stale_child(child_order_id, state):
+            self.log.warning(
+                f"PostLimit ignoring stale terminal event for {child_order_id}: "
+                f"active={state.active_order_id} primary={state.primary_order_id}"
+            )
+            return
 
         if state.active_order_kind == SpawnKind.SWEEP:
             sweep_order = self.cache.order(child_order_id)
@@ -720,6 +745,57 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             return
         mirror = PrimaryMirror(cache=self.cache, clock=self.clock, logger=self.log)
         mirror.restore_primary(primary, child_order, state.active_reserved_quantity)
+
+    def _is_stale_child(
+        self,
+        child_order_id: ClientOrderId,
+        state: OrderExecutionState,
+    ) -> bool:
+        """Return True when event is for a child that is no longer active."""
+        if state.active_order_id is None:
+            return True
+        return state.active_order_id != child_order_id
+
+    def _handle_stale_fill(
+        self,
+        event: OrderFilled,
+        state: OrderExecutionState,
+    ) -> None:
+        """Track a late fill from a deactivated child and cancel-resubmit active child."""
+        if state.is_terminal:
+            return
+
+        fill_qty = event.last_qty
+        fill_px = float(event.last_px)
+        state.fill_cost += fill_px * float(fill_qty)
+        state.filled_quantity = Quantity(
+            state.filled_quantity + fill_qty,
+            state.filled_quantity.precision,
+        )
+        if state.target_quote_quantity is not None:
+            state.filled_quote_quantity += fill_px * float(fill_qty) * state.contract_multiplier
+
+        self.log.warning(
+            f"PostLimit stale fill tracked: child={event.client_order_id} "
+            f"active={state.active_order_id} primary={state.primary_order_id} "
+            f"last_qty={fill_qty} filled={state.filled_quantity}/{state.total_quantity}"
+        )
+
+        remaining = compute_remaining_quantity(self.cache, state, self.log)
+        if remaining <= Quantity.zero(remaining.precision):
+            if state.active_order_id is not None:
+                active_order = self.cache.order(state.active_order_id)
+                if active_order is not None and not active_order.is_closed:
+                    self.cancel_order(active_order)
+            self._complete_session(state)
+            return
+
+        if state.active_order_id is not None:
+            active_order = self.cache.order(state.active_order_id)
+            if active_order is not None and not active_order.is_closed:
+                self.cancel_order(active_order)
+
+        self._publish_execution_states()
 
     def _lookup_state_by_child(
         self,
