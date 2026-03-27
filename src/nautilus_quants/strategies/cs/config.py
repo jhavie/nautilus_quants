@@ -34,6 +34,14 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
         TopK: max instruments to rotate out of long pool per rebalance.
     n_drop_short : int | None
         TopK: max instruments to rotate out of short pool per rebalance.
+    rebalance_to_weights : bool, default False
+        When True, rebalance positions to target weights proportional to
+        factor scores (qlib-style). When False, use fixed position_value.
+    venue_name : str | None
+        Venue name for NAV lookup (required when rebalance_to_weights=True).
+    min_rebalance_pct : float, default 0.05
+        Minimum position value delta (as fraction of current value) to
+        trigger a resize. Prevents excessive micro-adjustments.
     """
 
     position_value: float = 300.0
@@ -46,6 +54,9 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
     topk_short: int | None = None
     n_drop_long: int | None = None
     n_drop_short: int | None = None
+    rebalance_to_weights: bool = False
+    venue_name: str | None = None
+    min_rebalance_pct: float = 0.05
 
 
 class BracketConfig(msgspec.Struct, frozen=True):
@@ -97,3 +108,4 @@ class CSStrategyConfig(StrategyConfig, frozen=True):
     bar_types: list[str] = []
     execution_policy: str = "PostLimitExecutionPolicy"
     bracket: BracketConfig | None = None
+    min_rebalance_pct: float = 0.05

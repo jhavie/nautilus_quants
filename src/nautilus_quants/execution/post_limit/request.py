@@ -23,7 +23,6 @@ class PostLimitRequest:
     post_only: bool | None = None
     target_quote_quantity: float | None = None
     contract_multiplier: float = 1.0
-    intent: str = "UNKNOWN"
 
     @classmethod
     def parse(cls, params: Mapping[str, object] | None) -> PostLimitRequest:
@@ -48,11 +47,6 @@ class PostLimitRequest:
             minimum=0.0,
             strictly_positive=True,
         )
-        intent = (
-            str(params.get("intent", "UNKNOWN")).upper()
-            if params.get("intent") is not None
-            else "UNKNOWN"
-        )
 
         return cls(
             anchor_px=anchor_px,
@@ -62,7 +56,6 @@ class PostLimitRequest:
             post_only=post_only,
             target_quote_quantity=target_quote_quantity,
             contract_multiplier=contract_multiplier or 1.0,
-            intent=intent,
         )
 
 

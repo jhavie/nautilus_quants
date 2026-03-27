@@ -20,7 +20,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from nautilus_trader.model.data import DataType
-from nautilus_trader.model.enums import OrderSide
+from nautilus_trader.model.enums import OrderSide, PositionSide
+from nautilus_trader.model.orders.base import Order
 from nautilus_trader.model.events.position import (
     PositionChanged,
     PositionClosed,
@@ -155,13 +156,10 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             return
 
         all_orders = data.orders
-        self.log.info(
-            f"Received RebalanceOrders: {len(data.closes)} closes, "
-            f"{len(data.opens)} opens, {len(data.flips)} flips"
-        )
+        self.log.info(f"Received RebalanceOrders: {len(all_orders)} orders")
 
         for order_dict in all_orders:
-            self._execute_order(order_dict)
+            self._execute_rebalance(order_dict)
 
     # -------------------------------------------------------------------------
     # Nautilus position hooks — logging only (NETTING mode)
@@ -186,121 +184,134 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         self.log.info(f"Position closed: {event.instrument_id}")
 
     # -------------------------------------------------------------------------
-    # Order execution dispatch
+    # Order execution — unified rebalance
     # -------------------------------------------------------------------------
 
-    def _execute_order(self, order_dict: dict[str, Any]) -> None:
-        """Route order to appropriate execution method based on decision intent."""
-        intent = order_dict["intent"]
-        if intent == "CLOSE":
-            self._execute_close(order_dict["instrument_id"], order_dict.get("tags"))
-        elif intent == "OPEN":
-            self._execute_open(order_dict)
-        elif intent == "FLIP":
-            self._execute_flip(order_dict)
-        else:
-            self.log.error(f"Unknown intent: {intent}")
+    def _execute_rebalance(self, order_dict: dict[str, Any]) -> None:
+        """Execute a rebalance order by computing delta from cache state.
 
-    def _execute_flip(self, order_dict: dict[str, Any]) -> None:
-        """Execute one-shot NETTING flip: actual_position_qty + target_qty.
-
-        1. Read actual position quantity from cache (reflects PnL/ADL)
-        2. Calculate target quantity from quote_tick BBO price
-        3. Flip quantity = actual + target
+        Derives the operation (open/close/flip/resize) from the difference
+        between the target position value and the current position in cache.
         """
         inst_id = InstrumentId.from_str(order_dict["instrument_id"])
         instrument = self._instruments.get(inst_id)
         if instrument is None:
-            self.log.warning(f"Skip FLIP: instrument not cached: {inst_id}")
+            self.log.warning(f"Skip rebalance: instrument not cached: {inst_id}")
             return
 
-        side = OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
+        target_value = float(order_dict.get("target_quote_quantity", 0))
+        target_side = (
+            OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
+        )
 
-        # 1. Read actual position quantity from cache
-        current_qty = Decimal(0)
-        for position in self.cache.positions_open(
+        # Read current position from cache
+        position = None
+        for p in self.cache.positions_open(
             instrument_id=inst_id, strategy_id=self.id,
         ):
-            current_qty = Decimal(str(position.quantity))
+            position = p
             break
 
-        if current_qty <= 0:
-            self.log.warning(
-                f"FLIP {inst_id}: no open position found, falling back to OPEN"
-            )
-            self._execute_open(order_dict)
+        # --- No current position ---
+        if position is None or position.is_closed:
+            if target_value <= 0:
+                return
+            self._submit_new_position(inst_id, instrument, target_side, target_value)
             return
 
-        # 2. Calculate target quantity from BBO price
-        exec_price = self._get_exec_price(inst_id, side)
+        # --- Target = 0 → close ---
+        if target_value <= 0:
+            tags = order_dict.get("tags")
+            self._execution_policy.submit_close(position, tags=tags)
+            self.log.debug(f"CLOSE {inst_id} tags={tags}")
+            return
+
+        current_is_long = position.side == PositionSide.LONG
+        target_is_long = target_side == OrderSide.BUY
+
+        exec_price = self._get_exec_price(inst_id, target_side)
         if exec_price is None or exec_price <= 0:
-            self.log.warning(f"Skip FLIP {inst_id}: no price available")
+            self.log.warning(f"Skip rebalance {inst_id}: no price available")
             return
 
-        target_quote_quantity = float(order_dict["target_quote_quantity"])
         multiplier = float(instrument.multiplier)
-        target_qty = Decimal(str(target_quote_quantity / (exec_price * multiplier)))
-
-        # 3. Flip quantity = actual position + target
-        total_qty = instrument.make_qty(current_qty + target_qty)
-        total_target_quote_quantity = float(total_qty) * exec_price * multiplier
+        current_value = float(position.quantity) * exec_price * multiplier
         tags = order_dict.get("tags")
 
-        self._execution_policy.submit_open(
-            instrument_id=inst_id,
-            order_side=side,
-            quantity=total_qty,
-            tags=tags,
-            target_quote_quantity=total_target_quote_quantity,
-            contract_multiplier=multiplier,
-            intent="FLIP",
-        )
-        self.log.info(
-            f"FLIP {side.name} {inst_id}: current={current_qty} + "
-            f"target={target_qty} = {total_qty} (price={exec_price}, "
-            f"target_quote_quantity={total_target_quote_quantity:.6f})"
-        )
-
-    def _execute_open(self, order_dict: dict[str, Any]) -> None:
-        """Convert a RebalanceOrders open instruction into an actual order."""
-        inst_id = InstrumentId.from_str(order_dict["instrument_id"])
-        instrument = self._instruments.get(inst_id)
-        if instrument is None:
-            self.log.warning(f"Skip OPEN: instrument not cached: {inst_id}")
-            return
-
-        target_quote_quantity = float(order_dict.get("target_quote_quantity", 0))
-        if target_quote_quantity <= 0:
-            self.log.warning(
-                f"Skip OPEN {inst_id}: target_quote_quantity={target_quote_quantity}"
+        # --- Direction flip → one-shot NETTING flip ---
+        if current_is_long != target_is_long:
+            target_qty = Decimal(str(target_value / (exec_price * multiplier)))
+            flip_qty = instrument.make_qty(Decimal(str(position.quantity)) + target_qty)
+            flip_notional = float(flip_qty) * exec_price * multiplier
+            self._execution_policy.submit_open(
+                instrument_id=inst_id,
+                order_side=target_side,
+                quantity=flip_qty,
+                tags=tags,
+                target_quote_quantity=flip_notional,
+                contract_multiplier=multiplier,
+            )
+            self.log.info(
+                f"FLIP {target_side.name} {inst_id}: "
+                f"current={position.quantity} + target_qty "
+                f"= {flip_qty} (price={exec_price})"
             )
             return
 
-        side = OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
+        # --- Same direction → resize (skip if delta too small) ---
+        delta_value = target_value - current_value
+        if abs(delta_value) / max(current_value, 1) < self.config.min_rebalance_pct:
+            return
 
-        # Use BBO price for quantity calculation at execution time
+        delta_qty = instrument.make_qty(
+            Decimal(str(abs(delta_value) / (exec_price * multiplier)))
+        )
+        if delta_value > 0:
+            self._execution_policy.submit_open(
+                instrument_id=inst_id,
+                order_side=target_side,
+                quantity=delta_qty,
+                tags=tags,
+                target_quote_quantity=abs(delta_value),
+                contract_multiplier=multiplier,
+            )
+            self.log.debug(f"RESIZE_UP {inst_id}: +{delta_qty}")
+        else:
+            reduce_side = Order.closing_side(position.side)
+            self._execution_policy.submit_open(
+                instrument_id=inst_id,
+                order_side=reduce_side,
+                quantity=delta_qty,
+                tags=tags,
+                target_quote_quantity=abs(delta_value),
+                contract_multiplier=multiplier,
+            )
+            self.log.debug(f"RESIZE_DOWN {inst_id}: -{delta_qty}")
+
+    def _submit_new_position(
+        self,
+        inst_id: InstrumentId,
+        instrument: Instrument,
+        side: OrderSide,
+        target_value: float,
+    ) -> None:
+        """Submit an order to open a new position."""
         exec_price = self._get_exec_price(inst_id, side)
         if exec_price is None or exec_price <= 0:
             self.log.warning(f"Skip OPEN {inst_id}: no price available")
             return
-
         multiplier = float(instrument.multiplier)
-        raw_qty = Decimal(str(target_quote_quantity / (exec_price * multiplier)))
+        raw_qty = Decimal(str(target_value / (exec_price * multiplier)))
         quantity = instrument.make_qty(raw_qty)
-        tags = order_dict.get("tags")
-
         self._execution_policy.submit_open(
             instrument_id=inst_id,
             order_side=side,
             quantity=quantity,
-            tags=tags,
-            target_quote_quantity=target_quote_quantity,
+            target_quote_quantity=target_value,
             contract_multiplier=multiplier,
-            intent="OPEN",
         )
         self.log.debug(
-            "OPEN "
-            f"{side.name} {inst_id}: target_quote_quantity={target_quote_quantity} "
+            f"OPEN {side.name} {inst_id}: target={target_value} "
             f"price={exec_price} qty={quantity}"
         )
 
@@ -325,21 +336,6 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
                 if bar is not None:
                     return float(bar.close)
         return None
-
-    def _execute_close(
-        self,
-        instrument_id_str: str,
-        tags: list[str] | None = None,
-    ) -> None:
-        """Close all open positions for an instrument."""
-        inst_id = InstrumentId.from_str(instrument_id_str)
-        for position in self.cache.positions_open(
-            instrument_id=inst_id, strategy_id=self.id,
-        ):
-            if position.is_closed:
-                continue
-            self._execution_policy.submit_close(position, tags=tags)
-        self.log.debug(f"CLOSE {inst_id} tags={tags}")
 
     def _close_all_positions(self) -> None:
         """Close all open positions on strategy stop."""

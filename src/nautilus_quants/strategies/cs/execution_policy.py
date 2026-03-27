@@ -41,7 +41,6 @@ class ExecutionPolicy(Protocol):
         tags: list[str] | None = None,
         target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
-        intent: str | None = None,
     ) -> None:
         """Submit an opening order."""
         ...
@@ -71,7 +70,6 @@ class MarketExecutionPolicy:
         tags: list[str] | None = None,
         target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
-        intent: str | None = None,
     ) -> None:
         order = self._strategy.order_factory.market(
             instrument_id=instrument_id,
@@ -125,7 +123,6 @@ class PostLimitExecutionPolicy:
         tags: list[str] | None = None,
         target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
-        intent: str | None = None,
     ) -> None:
         anchor_px = self._get_anchor_price(instrument_id, order_side)
         params: dict[str, str] = {}
@@ -134,8 +131,6 @@ class PostLimitExecutionPolicy:
         if target_quote_quantity is not None:
             params["target_quote_quantity"] = str(target_quote_quantity)
             params["contract_multiplier"] = str(contract_multiplier)
-        if intent is not None:
-            params["intent"] = intent
 
         order = self._strategy.order_factory.market(
             instrument_id=instrument_id,
@@ -205,8 +200,7 @@ class BracketExecutionPolicyWrapper:
         order_factory.bracket() + submit_order_list().
     submit_close: cancels active TP/SL orders, then delegates to inner policy.
 
-    When intent is FLIP, active contingent orders for the instrument are
-    cancelled before submitting the new bracket.
+    Always cancels existing contingent orders before submitting a new bracket.
     """
 
     def __init__(
@@ -241,10 +235,8 @@ class BracketExecutionPolicyWrapper:
         tags: list[str] | None = None,
         target_quote_quantity: float | None = None,
         contract_multiplier: float = 1.0,
-        intent: str | None = None,
     ) -> None:
-        if intent == "FLIP":
-            self._cancel_contingent_orders(instrument_id)
+        self._cancel_contingent_orders(instrument_id)
 
         if not self._has_bracket:
             self._inner.submit_open(
@@ -256,7 +248,6 @@ class BracketExecutionPolicyWrapper:
                 tags=tags,
                 target_quote_quantity=target_quote_quantity,
                 contract_multiplier=contract_multiplier,
-                intent=intent,
             )
             return
 
@@ -275,7 +266,6 @@ class BracketExecutionPolicyWrapper:
                 tags=tags,
                 target_quote_quantity=target_quote_quantity,
                 contract_multiplier=contract_multiplier,
-                intent=intent,
             )
             return
 
@@ -299,7 +289,7 @@ class BracketExecutionPolicyWrapper:
             bracket_kwargs["entry_exec_algorithm_id"] = self._entry_algo_id
             entry_params = self._build_entry_exec_params(
                 instrument_id, order_side, target_quote_quantity,
-                contract_multiplier, intent,
+                contract_multiplier,
             )
             if entry_params:
                 bracket_kwargs["entry_exec_algorithm_params"] = entry_params
@@ -334,7 +324,7 @@ class BracketExecutionPolicyWrapper:
         self._strategy.log.info(
             f"BracketWrapper: submitted bracket {bracket_list.id} "
             f"for {instrument_id} {order_side.name} qty={quantity} "
-            f"entry_price={entry_price} intent={intent}"
+            f"entry_price={entry_price}"
         )
 
     def submit_close(
@@ -390,7 +380,6 @@ class BracketExecutionPolicyWrapper:
         side: OrderSide,
         target_quote_quantity: float | None,
         contract_multiplier: float,
-        intent: str | None,
     ) -> dict[str, str] | None:
         params: dict[str, str] = {}
         anchor_px = self._get_entry_price(instrument_id, side)
@@ -399,8 +388,6 @@ class BracketExecutionPolicyWrapper:
         if target_quote_quantity is not None:
             params["target_quote_quantity"] = str(target_quote_quantity)
             params["contract_multiplier"] = str(contract_multiplier)
-        if intent is not None:
-            params["intent"] = intent
         return params or None
 
     # ------------------------------------------------------------------

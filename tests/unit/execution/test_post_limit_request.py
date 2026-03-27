@@ -23,7 +23,6 @@ class TestPostLimitRequest:
                 "post_only": "true",
                 "target_quote_quantity": "1000",
                 "contract_multiplier": "0.1",
-                "intent": "open",
             },
         )
 
@@ -34,7 +33,6 @@ class TestPostLimitRequest:
         assert request.post_only is True
         assert request.target_quote_quantity == 1000.0
         assert request.contract_multiplier == 0.1
-        assert request.intent == "OPEN"
 
     def test_missing_anchor_px_fails(self) -> None:
         with pytest.raises(PostLimitRequestError, match="Missing required"):

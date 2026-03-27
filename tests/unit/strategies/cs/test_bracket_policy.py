@@ -110,7 +110,6 @@ class TestSubmitOpenBracket:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=qty,
-            intent="OPEN",
         )
 
         strategy.order_factory.bracket.assert_called_once()
@@ -124,7 +123,6 @@ class TestSubmitOpenBracket:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         kwargs = strategy.order_factory.bracket.call_args.kwargs
@@ -143,7 +141,6 @@ class TestSubmitOpenBracket:
             instrument_id=inst_id,
             order_side=OrderSide.SELL,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         kwargs = strategy.order_factory.bracket.call_args.kwargs
@@ -160,7 +157,6 @@ class TestSubmitOpenBracket:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         kwargs = strategy.order_factory.bracket.call_args.kwargs
@@ -175,7 +171,6 @@ class TestSubmitOpenBracket:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         kwargs = strategy.order_factory.bracket.call_args.kwargs
@@ -197,7 +192,6 @@ class TestSubmitOpenWithPostLimit:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
             target_quote_quantity=1000.0,
             contract_multiplier=1.0,
         )
@@ -207,7 +201,6 @@ class TestSubmitOpenWithPostLimit:
         params = kwargs["entry_exec_algorithm_params"]
         assert "anchor_px" in params
         assert params["target_quote_quantity"] == "1000.0"
-        assert params["intent"] == "OPEN"
 
     def test_no_entry_algo_when_not_configured(self) -> None:
         strategy, inst_id = _make_strategy()
@@ -217,7 +210,6 @@ class TestSubmitOpenWithPostLimit:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         kwargs = strategy.order_factory.bracket.call_args.kwargs
@@ -240,7 +232,6 @@ class TestSubmitOpenNoBracket:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         inner.submit_open.assert_called_once()
@@ -257,7 +248,6 @@ class TestSubmitOpenNoBracket:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         inner.submit_open.assert_called_once()
@@ -265,12 +255,12 @@ class TestSubmitOpenNoBracket:
 
 
 # ---------------------------------------------------------------------------
-# submit_open — FLIP cancels existing contingent orders
+# submit_open — always cancels existing contingent orders
 # ---------------------------------------------------------------------------
 
 
-class TestSubmitOpenFlip:
-    def test_flip_cancels_contingent_orders_before_bracket(self) -> None:
+class TestSubmitOpenCancelsContingent:
+    def test_always_cancels_contingent_orders_before_bracket(self) -> None:
         strategy, inst_id = _make_strategy()
         wrapper = _make_wrapper(strategy)
 
@@ -283,13 +273,12 @@ class TestSubmitOpenFlip:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="FLIP",
         )
 
         strategy.cancel_order.assert_called_once_with(oco_order)
         strategy.submit_order_list.assert_called_once()
 
-    def test_flip_skips_already_closed_orders(self) -> None:
+    def test_skips_already_closed_orders(self) -> None:
         strategy, inst_id = _make_strategy()
         wrapper = _make_wrapper(strategy)
 
@@ -302,25 +291,6 @@ class TestSubmitOpenFlip:
             instrument_id=inst_id,
             order_side=OrderSide.BUY,
             quantity=Quantity.from_str("1.00"),
-            intent="FLIP",
-        )
-
-        strategy.cancel_order.assert_not_called()
-
-    def test_open_intent_does_not_cancel(self) -> None:
-        strategy, inst_id = _make_strategy()
-        wrapper = _make_wrapper(strategy)
-
-        oco_order = MagicMock()
-        oco_order.contingency_type = ContingencyType.OCO
-        oco_order.is_closed = False
-        strategy.cache.orders_open.return_value = [oco_order]
-
-        wrapper.submit_open(
-            instrument_id=inst_id,
-            order_side=OrderSide.BUY,
-            quantity=Quantity.from_str("1.00"),
-            intent="OPEN",
         )
 
         strategy.cancel_order.assert_not_called()

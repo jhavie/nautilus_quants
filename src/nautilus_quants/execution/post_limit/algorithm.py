@@ -155,7 +155,6 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             post_only=request.post_only,
             target_quote_quantity=request.target_quote_quantity,
             contract_multiplier=request.contract_multiplier,
-            intent=request.intent,
         )
         self._states[state.primary_order_id] = state
         self._ensure_quote_subscription(state.instrument_id)
@@ -164,7 +163,6 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"PostLimit on_order: {order.client_order_id} "
             f"{order.side.name} {order.quantity} {order.instrument_id} "
             f"anchor_px={request.anchor_px} "
-            f"intent={state.intent} "
             f"target_quote_quantity={state.target_quote_quantity}"
         )
         self._submit_limit_child(state)
