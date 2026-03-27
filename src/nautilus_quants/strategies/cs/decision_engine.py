@@ -31,7 +31,7 @@ from typing import Any
 
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.model.data import DataType
-from nautilus_trader.model.identifiers import Venue
+from nautilus_trader.model.identifiers import ClientId, Venue
 from nautilus_trader.model.objects import Currency
 
 from nautilus_quants.factors.types import FactorValues
@@ -86,7 +86,7 @@ class DecisionEngineActor(Actor):
 
     def on_start(self) -> None:
         """Subscribe to FactorValues on start."""
-        self.subscribe_data(DataType(FactorValues))
+        self.subscribe_data(DataType(FactorValues), client_id=ClientId(self.id.value))
         policy_name = self.config.selection_policy
         self.log.info(
             f"DecisionEngineActor started: "

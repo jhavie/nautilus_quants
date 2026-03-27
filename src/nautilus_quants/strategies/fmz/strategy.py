@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import Bar, DataType
 from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.identifiers import ClientId, InstrumentId
 from nautilus_trader.model.objects import Quantity
 from nautilus_trader.trading.strategy import Strategy
 
@@ -162,7 +162,7 @@ class FMZFactorStrategy(
             )
 
         # Subscribe to factor data
-        self.subscribe_data(DataType(FactorValues))
+        self.subscribe_data(DataType(FactorValues), client_id=ClientId(self.id.value))
         self.log.info("Subscribed to FactorValues Data")
 
         # Reconcile internal state with actual exchange positions

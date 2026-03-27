@@ -15,7 +15,7 @@ authors = [
 
 dependencies = [
     # Core: live trading runtime
-    "nautilus_trader==1.224.0",
+    "nautilus_trader>=1.225.0.dev0",
     "numpy>=1.26.4",
     "pandas>=2.3.3,<3.0.0",
     "pyyaml>=6.0",
@@ -72,3 +72,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "network: marks tests as requiring network access (deselect with '-m \"not network\"')",
 ]
+
+[tool.uv]
+extra-index-url = ["https://packages.nautechsystems.io/simple"]
+prerelease = "allow"

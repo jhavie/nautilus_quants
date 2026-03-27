@@ -143,7 +143,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-10-31"
+    end_time: "2022-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -160,8 +160,8 @@ engine:
       venue_name: "BINANCE"
       currency: "USDT"
       drawdown_window: "30d"
-      drawdown_ratio: 0.95
-      min_equity_ratio: 0.3
+      drawdown_ratio: 0.8
+      min_equity_ratio: 0.5
       cooldown_period: "72h"
       guarded_strategy_ids: []
 
@@ -185,18 +185,18 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        selection_policy: "FMZSelectionPolicy"
-        n_long: 40
-        n_short: 40
+        # selection_policy: "FMZSelectionPolicy"
+        # n_long: 40
+        # n_short: 40
         position_value: 300
         composite_factor: "alpha044"
         rebalance_interval: 1
         # --- TopK Dropout mode (uncomment to switch) ---
-        # selection_policy: "TopKDropoutSelectionPolicy"
-        # topk_long: 20
-        # topk_short: 20
-        # n_drop_long: 5
-        # n_drop_short: 5
+        selection_policy: "TopKDropoutSelectionPolicy"
+        topk_long: 40
+        topk_short: 40
+        n_drop_long: 4
+        n_drop_short: 4
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"

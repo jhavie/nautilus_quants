@@ -27,7 +27,7 @@ from nautilus_trader.model.events.position import (
     PositionClosed,
     PositionOpened,
 )
-from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.identifiers import ClientId, InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
@@ -121,7 +121,7 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         if self.config.bar_types:
             self._subscribe_bar_types(self.config.bar_types)
 
-        self.subscribe_data(DataType(RebalanceOrders))
+        self.subscribe_data(DataType(RebalanceOrders), client_id=ClientId(self.id.value))
         self.log.info(
             f"CSStrategy started: execution_policy={self.config.execution_policy}"
         )

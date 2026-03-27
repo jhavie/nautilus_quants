@@ -115,7 +115,11 @@ def get_nautilus_config_dict(config_dict: dict) -> dict:
     """
     # Keys that Nautilus BacktestRunConfig expects
     nautilus_keys = {"venues", "data", "engine", "batch_size_bytes"}
-    return {k: v for k, v in config_dict.items() if k in nautilus_keys}
+    result = {k: v for k, v in config_dict.items() if k in nautilus_keys}
+    # Keep engine alive after run so report generation can access cache data
+    # (accounts, positions, equity snapshots). Runner will dispose manually.
+    result["dispose_on_completion"] = False
+    return result
 
 
 def extract_data_configs(config_dict: dict) -> list[dict]:

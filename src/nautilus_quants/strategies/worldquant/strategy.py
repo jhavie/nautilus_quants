@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import Bar, DataType
 from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.identifiers import InstrumentId, PositionId
+from nautilus_trader.model.identifiers import ClientId, InstrumentId, PositionId
 from nautilus_trader.trading.strategy import Strategy
 
 from nautilus_quants.utils.cache_keys import POSITION_METADATA_CACHE_KEY
@@ -208,7 +208,7 @@ class WorldQuantAlphaStrategy(
         self.log.debug(f"Subscribed to {len(self.config.bar_types)} bar type(s)")
 
         # Subscribe to factor signals
-        self.subscribe_data(DataType(FactorValues))
+        self.subscribe_data(DataType(FactorValues), client_id=ClientId(self.id.value))
         self.log.info("Subscribed to FactorValues")
 
         self.log.info(
