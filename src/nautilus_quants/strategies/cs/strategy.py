@@ -263,9 +263,14 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         if abs(delta_value) / max(current_value, 1) < self.config.min_rebalance_pct:
             return
 
-        delta_qty = instrument.make_qty(
-            Decimal(str(abs(delta_value) / (exec_price * multiplier)))
-        )
+        try:
+            delta_qty = instrument.make_qty(
+                Decimal(str(abs(delta_value) / (exec_price * multiplier)))
+            )
+        except ValueError:
+            self.log.debug(f"SKIP resize {inst_id}: delta below size increment")
+            return
+
         if delta_value > 0:
             self._execution_policy.submit_open(
                 instrument_id=inst_id,
@@ -278,13 +283,11 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             self.log.debug(f"RESIZE_UP {inst_id}: +{delta_qty}")
         else:
             reduce_side = Order.closing_side(position.side)
-            self._execution_policy.submit_open(
+            self._execution_policy.submit_reduce(
                 instrument_id=inst_id,
                 order_side=reduce_side,
                 quantity=delta_qty,
                 tags=tags,
-                target_quote_quantity=abs(delta_value),
-                contract_multiplier=multiplier,
             )
             self.log.debug(f"RESIZE_DOWN {inst_id}: -{delta_qty}")
 

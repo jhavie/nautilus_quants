@@ -337,6 +337,65 @@ class TestSubmitClose:
 
 
 # ---------------------------------------------------------------------------
+# submit_reduce — pure pass-through, no cancel, no bracket
+# ---------------------------------------------------------------------------
+
+
+class TestSubmitReduce:
+    def test_does_not_cancel_contingent_orders(self) -> None:
+        """submit_reduce must NOT cancel existing TP/SL."""
+        strategy, inst_id = _make_strategy()
+        wrapper = _make_wrapper(strategy)
+
+        oco_order = MagicMock()
+        oco_order.contingency_type = ContingencyType.OCO
+        oco_order.is_closed = False
+        strategy.cache.orders_open.return_value = [oco_order]
+
+        wrapper.submit_reduce(
+            instrument_id=inst_id,
+            order_side=OrderSide.SELL,
+            quantity=Quantity.from_str("1.00"),
+            tags=["RESIZE_DOWN"],
+        )
+
+        strategy.cancel_order.assert_not_called()
+
+    def test_does_not_create_bracket(self) -> None:
+        """submit_reduce must NOT create bracket orders."""
+        strategy, inst_id = _make_strategy()
+        wrapper = _make_wrapper(strategy)
+
+        wrapper.submit_reduce(
+            instrument_id=inst_id,
+            order_side=OrderSide.SELL,
+            quantity=Quantity.from_str("1.00"),
+        )
+
+        strategy.order_factory.bracket.assert_not_called()
+        strategy.submit_order_list.assert_not_called()
+
+    def test_delegates_to_inner_submit_reduce(self) -> None:
+        """submit_reduce delegates to inner.submit_reduce."""
+        strategy, inst_id = _make_strategy()
+        wrapper = _make_wrapper(strategy)
+
+        wrapper.submit_reduce(
+            instrument_id=inst_id,
+            order_side=OrderSide.SELL,
+            quantity=Quantity.from_str("1.00"),
+            tags=["REDUCE"],
+        )
+
+        wrapper._inner.submit_reduce.assert_called_once_with(
+            instrument_id=inst_id,
+            order_side=OrderSide.SELL,
+            quantity=Quantity.from_str("1.00"),
+            tags=["REDUCE"],
+        )
+
+
+# ---------------------------------------------------------------------------
 # CSStrategy factory wiring
 # ---------------------------------------------------------------------------
 

@@ -182,7 +182,7 @@ class TestExecuteRebalance:
         assert kwargs["quantity"] == Quantity.from_str("5.00")  # 500/100
 
     def test_resize_down(self) -> None:
-        """Same direction, negative delta → resize down with closing side."""
+        """Same direction, negative delta → resize down via submit_reduce."""
         strategy, _ = _make_strategy()
         # current = 1000, target = 500 → -50% delta → resize down
         order_dict = {
@@ -199,9 +199,37 @@ class TestExecuteRebalance:
             with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
                 strategy._execute_rebalance(order_dict)
 
-        strategy._execution_policy.submit_open.assert_called_once()
-        kwargs = strategy._execution_policy.submit_open.call_args.kwargs
+        strategy._execution_policy.submit_open.assert_not_called()
+        strategy._execution_policy.submit_reduce.assert_called_once()
+        kwargs = strategy._execution_policy.submit_reduce.call_args.kwargs
         assert kwargs["order_side"] == OrderSide.SELL  # closing side for long
+        assert kwargs["quantity"] == Quantity.from_str("5.00")  # 500/100
+
+    def test_resize_skips_when_make_qty_raises(self) -> None:
+        """Resize skips gracefully when qty rounds to zero."""
+        strategy, _ = _make_strategy()
+        inst_id = InstrumentId.from_str("LINK-USDT-SWAP.OKX")
+        bad_instrument = MagicMock()
+        bad_instrument.multiplier = 1.0
+        bad_instrument.make_qty.side_effect = ValueError("below size increment")
+        strategy._instruments = {inst_id: bad_instrument}
+
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "BUY",
+            "target_quote_quantity": 1500.0,
+            "tags": ["HOLD_LONG"],
+        }
+
+        pos = _long_position(qty=10.0)
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
+                strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_open.assert_not_called()
+        strategy._execution_policy.submit_reduce.assert_not_called()
 
 
 class TestCSStrategyExternalOrderClaims:

@@ -53,6 +53,16 @@ class ExecutionPolicy(Protocol):
         """Submit a closing order for an existing position."""
         ...
 
+    def submit_reduce(
+        self,
+        instrument_id: InstrumentId,
+        order_side: OrderSide,
+        quantity: Quantity,
+        tags: list[str] | None = None,
+    ) -> None:
+        """Submit a reduce-only order to partially reduce an existing position."""
+        ...
+
 
 class MarketExecutionPolicy:
     """Direct market order execution."""
@@ -93,6 +103,22 @@ class MarketExecutionPolicy:
             tags=tags,
         )
         self._strategy.submit_order(order, position_id=position.id)
+
+    def submit_reduce(
+        self,
+        instrument_id: InstrumentId,
+        order_side: OrderSide,
+        quantity: Quantity,
+        tags: list[str] | None = None,
+    ) -> None:
+        order = self._strategy.order_factory.market(
+            instrument_id=instrument_id,
+            order_side=order_side,
+            quantity=quantity,
+            reduce_only=True,
+            tags=tags,
+        )
+        self._strategy.submit_order(order)
 
 
 class PostLimitExecutionPolicy:
@@ -162,6 +188,26 @@ class PostLimitExecutionPolicy:
             tags=tags,
         )
         self._strategy.submit_order(order, position_id=position.id)
+
+    def submit_reduce(
+        self,
+        instrument_id: InstrumentId,
+        order_side: OrderSide,
+        quantity: Quantity,
+        tags: list[str] | None = None,
+    ) -> None:
+        anchor_px = self._get_anchor_price(instrument_id, order_side)
+        params = {"anchor_px": str(anchor_px)} if anchor_px else None
+        order = self._strategy.order_factory.market(
+            instrument_id=instrument_id,
+            order_side=order_side,
+            quantity=quantity,
+            reduce_only=True,
+            exec_algorithm_id=_POST_LIMIT_ID,
+            exec_algorithm_params=params,
+            tags=tags,
+        )
+        self._strategy.submit_order(order)
 
     def _get_anchor_price(
         self,
@@ -334,6 +380,21 @@ class BracketExecutionPolicyWrapper:
     ) -> None:
         self._cancel_contingent_orders(position.instrument_id)
         self._inner.submit_close(position, tags=tags)
+
+    def submit_reduce(
+        self,
+        instrument_id: InstrumentId,
+        order_side: OrderSide,
+        quantity: Quantity,
+        tags: list[str] | None = None,
+    ) -> None:
+        # Reduction: do NOT cancel existing TP/SL, do NOT create new brackets.
+        self._inner.submit_reduce(
+            instrument_id=instrument_id,
+            order_side=order_side,
+            quantity=quantity,
+            tags=tags,
+        )
 
     # ------------------------------------------------------------------
     # Price computation
