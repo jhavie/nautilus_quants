@@ -1,0 +1,51 @@
+# Copyright (c) 2025 nautilus_quants
+# SPDX-License-Identifier: MIT
+#
+# Cross-sectional alpha composite: market-neutral momentum + vol-price correlation + skewness.
+# All intermediate factors use BRAIN-compatible operators.
+
+metadata:
+  name: cs_alpha_neutral_momentum
+  version: "1.0"
+  description: "Market-neutral alpha composite (momentum + vol-price corr + skewness)"
+
+variables:
+  ret1: "delta(close, 1) / delay(close, 1)"
+  ret5: "delta(close, 5) / delay(close, 5)"
+  ret20: "delta(close, 20) / delay(close, 20)"
+
+factors:
+  # Phase 1: Time-Series features
+  vp_corr:
+    expression: "correlation(close, volume, 20)"
+    description: "Volume-price correlation (20-bar)"
+    category: "volume"
+  skew_raw:
+    expression: "ts_skew(ret1, 20)"
+    description: "Return skewness (20-bar)"
+    category: "distribution"
+
+  # Phase 2: Cross-Sectional neutralization
+  alpha_mom:
+    expression: "vector_neut(ret5, ret20)"
+    description: "Market-neutral momentum (5d ret orthogonal to 20d ret)"
+    category: "momentum"
+  mom_z:
+    expression: "normalize(alpha_mom, true, 0)"
+    description: "Z-scored momentum residual"
+  corr_z:
+    expression: "normalize(vp_corr, true, 0)"
+    description: "Z-scored volume-price correlation"
+  skew_z:
+    expression: "normalize(-1 * skew_raw, true, 0)"
+    description: "Z-scored negative skewness (negative skew -> positive score)"
+
+  # Phase 3: Composite
+  alpha_score:
+    expression: "mom_z * 0.4 + corr_z * 0.3 + skew_z * 0.3"
+    description: "Cross-sectional alpha composite (long high, short low)"
+    category: "composite"
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 5.0

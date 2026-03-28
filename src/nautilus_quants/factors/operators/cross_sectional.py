@@ -699,6 +699,94 @@ def quantile(
     return CsQuantile().compute(values, driver=driver, sigma=sigma)
 
 
+@register_operator
+class CsVectorNeut(CrossSectionalOperator):
+    """Cross-sectional orthogonalization (BRAIN vector_neut).
+
+    vector_neut(x, y) — returns residual of x regressed on y in cross-section.
+    x* = x - mean_x - beta * (y - mean_y), where beta = dot(x_d, y_d) / dot(y_d, y_d).
+
+    This removes linear dependence on y from x at each timestamp,
+    extracting the pure alpha component orthogonal to the risk factor y.
+    """
+
+    name = "vector_neut"
+    min_args = 2
+    max_args = 2
+
+    def compute(
+        self,
+        values: dict[str, float],
+        y_values: dict[str, float] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        """Compute cross-sectional orthogonalization (scalar context)."""
+        if not values or y_values is None:
+            return values if values else {}
+
+        # Collect valid (non-NaN) pairs
+        common_keys = [
+            k for k in values
+            if k in y_values and not np.isnan(values[k]) and not np.isnan(y_values[k])
+        ]
+        if len(common_keys) < 3:
+            return {k: float("nan") for k in values}
+
+        x_vals = np.array([values[k] for k in common_keys])
+        y_vals = np.array([y_values[k] for k in common_keys])
+
+        x_mean = np.mean(x_vals)
+        y_mean = np.mean(y_vals)
+        x_d = x_vals - x_mean
+        y_d = y_vals - y_mean
+
+        dot_yy = np.dot(y_d, y_d)
+        if dot_yy == 0:
+            # y is constant → residual = x - mean(x)
+            beta = 0.0
+        else:
+            beta = np.dot(x_d, y_d) / dot_yy
+
+        result: dict[str, float] = {}
+        for i, k in enumerate(common_keys):
+            result[k] = float(x_d[i] - beta * y_d[i])
+
+        # NaN for keys not in common
+        for k in values:
+            if k not in result:
+                result[k] = float("nan")
+
+        return result
+
+    def compute_vectorized(
+        self, df: pd.DataFrame, y_df: pd.DataFrame | None = None, **kwargs: Any
+    ) -> pd.DataFrame:
+        """Vectorized cross-sectional orthogonalization over panel."""
+        if y_df is None:
+            return df
+
+        valid = df.notna() & y_df.notna()
+        n = valid.sum(axis=1)
+
+        x_m = df.where(valid).mean(axis=1)
+        y_m = y_df.where(valid).mean(axis=1)
+
+        x_d = df.sub(x_m, axis=0).where(valid)
+        y_d = y_df.sub(y_m, axis=0).where(valid)
+
+        dot_xy = (x_d * y_d).sum(axis=1)
+        dot_yy = (y_d ** 2).sum(axis=1)
+        beta = dot_xy / dot_yy.replace(0, np.nan)
+
+        residual = df.sub(x_m, axis=0) - y_df.sub(y_m, axis=0).mul(beta, axis=0)
+        # Rows with fewer than 3 valid instruments → NaN
+        residual[n < 3] = np.nan
+        # Instruments with NaN in either input → NaN
+        residual = residual.where(valid)
+
+        return residual
+
+
 # ============================================================================
 # Aliases for WorldQuant BRAIN compatibility (无前缀版本)
 # ============================================================================
@@ -819,6 +907,14 @@ def demean(values: dict[str, float]) -> dict[str, float]:
     return CsDemeanAlias().compute(values)
 
 
+def vector_neut(
+    values: dict[str, float],
+    y_values: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Cross-sectional orthogonalization (BRAIN vector_neut)."""
+    return CsVectorNeut().compute(values, y_values=y_values)
+
+
 # Export all function wrappers
 CROSS_SECTIONAL_OPERATORS = {
     # Original cs_ prefixed operators
@@ -834,11 +930,14 @@ CROSS_SECTIONAL_OPERATORS = {
     "scale_down": scale_down,
     "quantile": quantile,
     "clip_quantile": clip_quantile,  # FMZ style
+    # BRAIN operators
+    "vector_neut": vector_neut,
     # Aliases for backward compatibility
     "rank": rank,
     "scale": scale,
     "zscore": zscore,
     "demean": demean,
+    "c_residual": vector_neut,
 }
 
 # Instance registry for vectorized evaluator (lookup by operator name)
@@ -858,4 +957,6 @@ CS_OPERATOR_INSTANCES: dict[str, CrossSectionalOperator] = {
     "scale": CsScaleAlias(),
     "zscore": CsZscoreAlias(),
     "demean": CsDemeanAlias(),
+    "vector_neut": CsVectorNeut(),
+    "c_residual": CsVectorNeut(),
 }
