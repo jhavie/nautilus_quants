@@ -600,8 +600,12 @@ class TsSkew(TimeSeriesOperator):
         for t in range(w - 1, T):
             win = values[t - w + 1:t + 1]  # [w, N]
             has_nan = np.any(np.isnan(win), axis=0)
-            # Suppress RuntimeWarning for all-NaN columns (warmup period)
-            with np.errstate(invalid='ignore'):
+            # Suppress RuntimeWarning for all-NaN columns (warmup period).
+            # np.errstate only handles floating-point exceptions; nanmean/nanstd
+            # use warnings.warn() for empty slices, so we need both.
+            import warnings
+            with warnings.catch_warnings(), np.errstate(invalid='ignore'):
+                warnings.simplefilter('ignore', RuntimeWarning)
                 mean = np.nanmean(win, axis=0)
                 std = np.nanstd(win, axis=0, ddof=1)
                 # Guard: zero std → NaN
