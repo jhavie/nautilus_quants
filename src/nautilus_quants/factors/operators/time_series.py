@@ -564,6 +564,8 @@ class TsSkew(TimeSeriesOperator):
 
     def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
         """Compute rolling skewness (Fisher-corrected, bias=False)."""
+        import warnings
+
         w = int(window)
         if len(data) < w or w < 3:
             return float("nan")
@@ -572,7 +574,10 @@ class TsSkew(TimeSeriesOperator):
         arr = data[-w:]
         if np.any(np.isnan(arr)):
             return float("nan")
-        result = float(scipy_skew(arr, bias=False))
+        # Constant series → zero std → scipy warns; result is NaN anyway
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            result = float(scipy_skew(arr, bias=False))
         return result if np.isfinite(result) else float("nan")
 
     def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
@@ -597,10 +602,11 @@ class TsSkew(TimeSeriesOperator):
             has_nan = np.any(np.isnan(win), axis=0)
             mean = np.nanmean(win, axis=0)
             std = np.nanstd(win, axis=0, ddof=1)
-            # Guard: zero std → NaN
+            # Guard: zero std → NaN; suppress RuntimeWarning for all-NaN slices
             std_safe = np.where(std == 0, np.nan, std)
-            z = (win - mean) / std_safe
-            m3 = np.nanmean(z ** 3, axis=0)
+            with np.errstate(invalid='ignore'):
+                z = (win - mean) / std_safe
+                m3 = np.nanmean(z ** 3, axis=0)
             # Fisher correction: n / ((n-1)(n-2)) * n * m3
             # = n^2 / ((n-1)(n-2)) * m3
             fisher = (w * w) / ((w - 1) * (w - 2)) * m3
