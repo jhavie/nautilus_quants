@@ -42,7 +42,7 @@ factors:
 
   # 量价rank相关因子 — 全局最高 ICIR=0.265
   alpha044:
-    expression: "correlation(high, rank(volume), 5)"
+    expression: "-correlation(high, rank(volume), 5)"
     description: "Alpha#44: High-price vs volume rank correlation"
     category: "volume"
 

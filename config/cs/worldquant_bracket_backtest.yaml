@@ -15,7 +15,7 @@ venues:
     base_currency: "USDT"
     starting_balances:
       - "100000 USDT"
-    default_leverage: 5
+    default_leverage: 1
 
 data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
@@ -68,7 +68,7 @@ data:
       - "EGLDUSDT.BINANCE"
       - "ENJUSDT.BINANCE"
       - "ENSUSDT.BINANCE"
-      - "EOSUSDT.BINANCE"
+      # - "EOSUSDT.BINANCE"
       - "ETCUSDT.BINANCE"
       - "ETHUSDT.BINANCE"
       - "FILUSDT.BINANCE"
@@ -78,7 +78,7 @@ data:
       - "GRTUSDT.BINANCE"
       - "GTCUSDT.BINANCE"
       - "HBARUSDT.BINANCE"
-      - "HNTUSDT.BINANCE"
+      # - "HNTUSDT.BINANCE"
       - "HOTUSDT.BINANCE"
       - "ICXUSDT.BINANCE"
       - "IOSTUSDT.BINANCE"
@@ -86,7 +86,7 @@ data:
       - "IOTXUSDT.BINANCE"
       - "KAVAUSDT.BINANCE"
       - "KLAYUSDT.BINANCE"
-      - "KNCUSDT.BINANCE"
+      # - "KNCUSDT.BINANCE"
       - "KSMUSDT.BINANCE"
       - "LINAUSDT.BINANCE"
       - "LINKUSDT.BINANCE"
@@ -125,7 +125,7 @@ data:
       - "SUSHIUSDT.BINANCE"
       - "SXPUSDT.BINANCE"
       - "THETAUSDT.BINANCE"
-      - "TOMOUSDT.BINANCE"
+      # - "TOMOUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
@@ -173,7 +173,7 @@ engine:
       config:
         selection_policy: "WorldQuantSelectionPolicy"
         position_mode: "weighted"
-        position_value: 100000
+        total_capital: 100000
         composite_factor: "alpha044"
         rebalance_interval: 1
         # WorldQuant BRAIN params
@@ -188,10 +188,10 @@ engine:
       config:
         instrument_ids: *instrument_ids
         execution_policy: "MarketExecutionPolicy"
-        bracket:
-          stop_loss_pct: 0.02
-          take_profit_pct: null
-          sl_order_type: "STOP_MARKET"
+        # bracket:
+        #   stop_loss_pct: 0.02
+        #   take_profit_pct: null
+        #   sl_order_type: "STOP_MARKET"
 
 report:
   output_dir: "logs/performance"

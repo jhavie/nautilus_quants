@@ -1,0 +1,104 @@
+# Verification Backtest — 6 coins, target first trade at 2025-03-01 00:00 UTC
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "100000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/12coin_catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "4h"
+    instrument_ids: &instrument_ids
+      - "BNBUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+    start_time: "2025-01-01"
+    end_time: "2025-03-07"
+
+engine:
+  trader_id: "BACKTESTER-VERIFY-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cs/factors_alpha_cs.yaml"
+        interval: "4h"
+        signal_prefix: "factor"
+        max_history: 0
+        publish_signals: true
+
+    - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
+      config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
+      config:
+        interval: "4h"
+        venue_name: "BINANCE"
+        currency: "USDT"
+
+    - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
+      config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
+      config:
+        venue_name: "BINANCE"
+        selection_policy: "TopKDropoutSelectionPolicy"
+        composite_factor: "alpha_score"
+        rebalance_interval: 1
+        rebalance_to_weights: false
+        position_value: 25000
+        topk_long: 2
+        topk_short: 2
+        n_drop_long: 1
+        n_drop_short: 1
+        warmup_bars: 4
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: *instrument_ids
+        execution_policy: "MarketExecutionPolicy"
+        bracket:
+          take_profit_pct: 0.05
+          stop_loss_pct: 0.1
+
+report:
+  output_dir: "logs/verify_backtest"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "CS Strategy Backtest (2022-01 to 2022-03)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "CS Strategy QuantStats Analysis"
+    output_format:
+      - html
+      - png
+  position_viz:
+    enabled: true
+    title: "CS Strategy Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "4h"

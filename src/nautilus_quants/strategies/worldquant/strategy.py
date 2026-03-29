@@ -158,7 +158,7 @@ class WorldQuantAlphaStrategy(
         self._alpha_history: list[dict[str, float]] = []    # decay window
 
         # Signal counting
-        self._signal_count: int = 0
+        self._signal_count: int = -1
         self._rebalance_count: int = 0
         self._bar_count: int = 0
 

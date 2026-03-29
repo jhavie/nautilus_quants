@@ -16,6 +16,10 @@ variables:
 
 factors:
   # Phase 1: Time-Series features
+  alpha044:
+    expression: "correlation(high, rank(volume), 5)"
+    description: "Alpha#44: High-price vs volume rank correlation (negated)"
+    category: "volume"
   vp_corr:
     expression: "correlation(close, volume, 20)"
     description: "Volume-price correlation (20-bar)"
@@ -37,12 +41,14 @@ factors:
     expression: "normalize(vp_corr, true, 0)"
     description: "Z-scored volume-price correlation"
   skew_z:
-    expression: "normalize(-1 * skew_raw, true, 0)"
+    expression: "normalize(skew_raw, true, 0)"
     description: "Z-scored negative skewness (negative skew -> positive score)"
-
-  # Phase 3: Composite
+  a044_z:
+    expression: "normalize(alpha044, true, 0)"
+    description: "Z-scored alpha044"
+  # Phase 3: Composite (weights: a044=0.35, corr=0.35, skew=0.30)
   alpha_score:
-    expression: "mom_z * 0.4 + corr_z * 0.3 + skew_z * 0.3"
+    expression: "(a044_z * 0.35 + corr_z * 0.35 + skew_z * 0.3)"
     description: "Cross-sectional alpha composite (long high, short low)"
     category: "composite"
 

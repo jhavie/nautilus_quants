@@ -309,8 +309,7 @@ class DecisionEngineActor(Actor):
             return nav * share / max(n, 1)
 
         if mode == "weighted":
-            n_total = len(target_longs) + len(target_shorts)
-            return self.config.position_value * abs(t.weight) * max(n_total, 1)
+            return self.config.total_capital * abs(t.weight)
 
         return self.config.position_value
 

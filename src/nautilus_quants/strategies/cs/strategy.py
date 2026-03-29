@@ -241,7 +241,13 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         # --- Direction flip → one-shot NETTING flip ---
         if current_is_long != target_is_long:
             target_qty = Decimal(str(target_value / (exec_price * multiplier)))
-            flip_qty = instrument.make_qty(Decimal(str(position.quantity)) + target_qty)
+            try:
+                flip_qty = instrument.make_qty(
+                    Decimal(str(position.quantity)) + target_qty
+                )
+            except ValueError:
+                self.log.debug(f"SKIP FLIP {inst_id}: qty below size increment")
+                return
             flip_notional = float(flip_qty) * exec_price * multiplier
             self._execution_policy.submit_open(
                 instrument_id=inst_id,
@@ -305,7 +311,11 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             return
         multiplier = float(instrument.multiplier)
         raw_qty = Decimal(str(target_value / (exec_price * multiplier)))
-        quantity = instrument.make_qty(raw_qty)
+        try:
+            quantity = instrument.make_qty(raw_qty)
+        except ValueError:
+            self.log.debug(f"SKIP OPEN {inst_id}: qty below size increment")
+            return
         self._execution_policy.submit_open(
             instrument_id=inst_id,
             order_side=side,

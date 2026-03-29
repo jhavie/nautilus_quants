@@ -15,7 +15,10 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
     ----------
     position_value : float, default 300.0
         Fixed position value per instrument in quote currency (USDT).
-        In "weighted" position_mode, used as capital base.
+        Used in "fixed" position_mode.
+    total_capital : float, default 100_000.0
+        Total capital for portfolio allocation in quote currency (USDT).
+        Used in "weighted" position_mode: target = total_capital × |weight|.
     composite_factor : str, default "composite"
         Name of the composite factor to use for ranking.
     rebalance_interval : int, default 1
@@ -28,7 +31,7 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
         Position sizing mode:
         - "fixed": use position_value per instrument, skip HOLD (no resize).
         - "equal_weight": NAV × long_share / N, continuous resize.
-        - "weighted": capital × |weight| from policy, continuous resize.
+        - "weighted": total_capital × |weight| from policy, continuous resize.
     n_long : int, default 40
         FMZ: number of instruments to long (lowest composite values).
     n_short : int, default 40
@@ -63,6 +66,7 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
     """
 
     position_value: float = 300.0
+    total_capital: float = 100_000.0
     composite_factor: str = "composite"
     rebalance_interval: int = 1
     selection_policy: str = "FMZSelectionPolicy"
