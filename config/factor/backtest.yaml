@@ -26,13 +26,13 @@ data:
     start_time: "2025-01-01"
     end_time: "2025-12-31"
 
-  - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
-    data_cls: "nautilus_trader.model.data:Bar"
-    instrument_ids:
-      - "ETHUSDT.BINANCE"
-    bar_spec: "1m"
-    start_time: "2025-01-01"
-    end_time: "2025-12-31"
+  # - catalog_path: "/Users/joe/Sync/worktrees/nautilus_quants2-feature-016/data/catalog"
+  #   data_cls: "nautilus_trader.model.data:Bar"
+  #   instrument_ids:
+  #     - "ETHUSDT.BINANCE"
+  #   bar_spec: "1m"
+  #   start_time: "2025-01-01"
+  #   end_time: "2025-12-31"
 
 engine:
   trader_id: "BACKTESTER-001"
@@ -43,7 +43,7 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/factors.yaml"
+        factor_config_path: "config/factor/tardis_factors.yaml"
         data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
         bar_spec: "1h"
         signal_prefix: "factor"

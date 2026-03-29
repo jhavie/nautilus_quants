@@ -341,3 +341,76 @@ class TestBrainAliases:
         r1 = _evaluate("stddev(close, 10)", panel)
         r2 = _evaluate("ts_std_dev(close, 10)", panel)
         pd.testing.assert_frame_equal(r1, r2)
+
+
+# ---------------------------------------------------------------------------
+# Alpha CS pipeline (vector_neut + ts_skew end-to-end)
+# ---------------------------------------------------------------------------
+
+
+class TestAlphaCsPipeline:
+    """End-to-end test for the cross-sectional alpha composite pipeline."""
+
+    def test_ts_skew_evaluator(self) -> None:
+        """ts_skew should work through the evaluator."""
+        panel = _make_panel(n_timestamps=30, n_instruments=5)
+        result = _evaluate("ts_skew(returns, 10)", panel)
+        assert isinstance(result, pd.DataFrame)
+        assert result.shape == panel["returns"].shape
+        # After warmup, values should be finite
+        valid_rows = result.iloc[10:]
+        assert valid_rows.notna().any().any()
+
+    def test_vector_neut_evaluator(self) -> None:
+        """vector_neut(x, y) should produce orthogonal residuals."""
+        panel = _make_panel(n_timestamps=30, n_instruments=5)
+        # Compute returns at two horizons
+        panel["ret5"] = panel["close"].pct_change(5)
+        panel["ret20"] = panel["close"].pct_change(20)
+
+        result = _evaluate("vector_neut(ret5, ret20)", panel)
+        assert isinstance(result, pd.DataFrame)
+
+        # Verify orthogonality at a row with valid data
+        t = 25  # Should have data for both ret5 and ret20
+        r = result.iloc[t].dropna().values
+        y = panel["ret20"].iloc[t].dropna().values
+        if len(r) > 0 and len(y) > 0:
+            # Align lengths
+            min_len = min(len(r), len(y))
+            y_d = y[:min_len] - np.mean(y[:min_len])
+            dot_val = np.dot(r[:min_len], y_d)
+            assert dot_val == pytest.approx(0.0, abs=1e-8)
+
+    def test_alpha_score_pipeline(self) -> None:
+        """Full alpha_score pipeline: variables → factors → composite."""
+        panel = _make_panel(n_timestamps=50, n_instruments=8, seed=123)
+
+        # Step 1: Evaluate variables (injected into panel)
+        panel["ret1"] = _evaluate("delta(close, 1) / delay(close, 1)", panel)
+        panel["ret5"] = _evaluate("delta(close, 5) / delay(close, 5)", panel)
+        panel["ret20"] = _evaluate("delta(close, 20) / delay(close, 20)", panel)
+
+        # Step 2: Time-series factors
+        panel["vp_corr"] = _evaluate("correlation(close, volume, 20)", panel)
+        panel["skew_raw"] = _evaluate("ts_skew(ret1, 20)", panel)
+
+        # Step 3: Cross-sectional factors
+        panel["alpha_mom"] = _evaluate("vector_neut(ret5, ret20)", panel)
+        panel["mom_z"] = _evaluate("normalize(alpha_mom, true, 0)", panel)
+        panel["corr_z"] = _evaluate("normalize(vp_corr, true, 0)", panel)
+        panel["skew_z"] = _evaluate("normalize(-1 * skew_raw, true, 0)", panel)
+
+        # Step 4: Composite
+        result = _evaluate("mom_z * 0.4 + corr_z * 0.3 + skew_z * 0.3", panel)
+
+        assert isinstance(result, pd.DataFrame)
+        # Last row should have valid values for most instruments
+        last_row = result.iloc[-1]
+        n_valid = last_row.notna().sum()
+        assert n_valid >= 5, f"Expected >= 5 valid instruments, got {n_valid}"
+
+        # Alpha score should have both positive and negative values (cross-sectional)
+        valid_vals = last_row.dropna().values
+        assert valid_vals.max() > 0, "Should have positive alpha scores"
+        assert valid_vals.min() < 0, "Should have negative alpha scores"

@@ -150,9 +150,10 @@ class FactorStrategy(LimitOrderExecutionMixin, Strategy):
 
         # Subscribe to FactorValues Data (now a proper Nautilus Data subclass)
         from nautilus_trader.model.data import DataType
+        from nautilus_trader.model.identifiers import ClientId
         from nautilus_quants.factors.types import FactorValues
 
-        self.subscribe_data(DataType(FactorValues))
+        self.subscribe_data(DataType(FactorValues), client_id=ClientId(self.id.value))
         self.log.info("Subscribed to FactorValues Data")
 
         self.log.info(

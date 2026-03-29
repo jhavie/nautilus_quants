@@ -143,6 +143,10 @@ def run_backtest(
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
 
+    # Dispose engine now that reports are generated (we set
+    # dispose_on_completion=False to keep cache data alive for reports).
+    engine.dispose()
+
     return RunnerResult(
         run_id=run_id,
         output_dir=output_dir,

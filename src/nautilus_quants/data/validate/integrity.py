@@ -105,6 +105,7 @@ def validate_schema(df: pd.DataFrame) -> list[ValidationIssue]:
 def validate_file(
     file_path: Path | str,
     checks: Optional[list[ValidationCheckType]] = None,
+    max_gap_bars: int = 3,
 ) -> ValidationReport:
     """Validate a raw data CSV file.
 
@@ -209,7 +210,7 @@ def validate_file(
         issues.extend(check_duplicates(df))
 
     if ValidationCheckType.GAPS in checks:
-        issues.extend(check_gaps(df, timeframe))
+        issues.extend(check_gaps(df, timeframe, max_gap_bars=max_gap_bars))
 
     if ValidationCheckType.MONOTONIC in checks:
         issues.extend(check_monotonic(df))

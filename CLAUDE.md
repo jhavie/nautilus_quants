@@ -16,7 +16,7 @@
 | improvement | `improvement/{description}` | 无编号 | `improvement/docker-size-optimize` |
 | chore | `chore/{description}` | 无编号 | `chore/update-claude-md` |
 
-**只有 feature 分支使用递增编号**，当前最新编号：027
+**只有 feature 分支使用递增编号**，当前最新编号：031
 
 ### 合并流程
 

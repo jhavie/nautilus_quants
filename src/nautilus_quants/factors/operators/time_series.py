@@ -550,6 +550,77 @@ class TsProduct(TimeSeriesOperator):
         return pd.DataFrame(result, index=data.index, columns=data.columns)
 
 
+@register_operator
+class TsSkew(TimeSeriesOperator):
+    """Rolling skewness (Fisher's unbiased, bias=False).
+
+    ts_skew(x, d) — Fisher-corrected sample skewness over window d.
+    Formula: [n / ((n-1)(n-2))] * sum[(xi - mean) / std]^3
+    """
+
+    name = "ts_skew"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        """Compute rolling skewness (Fisher-corrected, bias=False)."""
+        import warnings
+
+        w = int(window)
+        if len(data) < w or w < 3:
+            return float("nan")
+        from scipy.stats import skew as scipy_skew
+
+        arr = data[-w:]
+        if np.any(np.isnan(arr)):
+            return float("nan")
+        # Constant series → zero std → scipy warns; result is NaN anyway
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            result = float(scipy_skew(arr, bias=False))
+        return result if np.isfinite(result) else float("nan")
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.rolling(int(window), min_periods=int(window)).skew()
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        """Optimized: numpy batch Fisher-corrected skewness.
+
+        Fisher unbiased skewness = [n/((n-1)(n-2))] * sum[(xi - mean)/s]^3
+        where s = sample std (ddof=1).
+        """
+        w = int(window)
+        if w < 3:
+            return pd.DataFrame(np.nan, index=data.index, columns=data.columns)
+
+        values = data.values  # [T, N]
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]  # [w, N]
+            has_nan = np.any(np.isnan(win), axis=0)
+            # Suppress RuntimeWarning for all-NaN columns (warmup period).
+            # np.errstate only handles floating-point exceptions; nanmean/nanstd
+            # use warnings.warn() for empty slices, so we need both.
+            import warnings
+            with warnings.catch_warnings(), np.errstate(invalid='ignore'):
+                warnings.simplefilter('ignore', RuntimeWarning)
+                mean = np.nanmean(win, axis=0)
+                std = np.nanstd(win, axis=0, ddof=1)
+                # Guard: zero std → NaN
+                std_safe = np.where(std == 0, np.nan, std)
+                z = (win - mean) / std_safe
+                m3 = np.nanmean(z ** 3, axis=0)
+            # Fisher correction: n / ((n-1)(n-2)) * n * m3
+            # = n^2 / ((n-1)(n-2)) * m3
+            fisher = (w * w) / ((w - 1) * (w - 2)) * m3
+            fisher[has_nan] = np.nan
+            result[t] = fisher
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
+
+
 # ---------------------------------------------------------------------------
 # WorldQuant BRAIN operators (wq_ prefix) — BRAIN platform semantics
 # ---------------------------------------------------------------------------
@@ -935,6 +1006,11 @@ def ts_product(data: np.ndarray, window: int) -> float:
     return TsProduct().compute(data, int(window))  # type: ignore
 
 
+def ts_skew(data: np.ndarray, window: int) -> float:
+    """Wrapper for TsSkew operator."""
+    return TsSkew().compute(data, int(window))  # type: ignore
+
+
 def wq_ts_rank(data: np.ndarray, window: int) -> float:
     """Wrapper for WqTsRank operator (BRAIN semantics)."""
     return WqTsRank().compute(data, int(window))  # type: ignore
@@ -966,6 +1042,7 @@ TIME_SERIES_OPERATORS = {
     "covariance": covariance,
     "decay_linear": decay_linear,
     "ts_product": ts_product,
+    "ts_skew": ts_skew,
     # Aliases (direct references, no wrapper functions)
     "stddev": ts_std,
     "sma": ts_mean,
@@ -978,6 +1055,7 @@ TIME_SERIES_OPERATORS = {
     "product": ts_product,
     "ts_arg_max": ts_argmax,
     "ts_arg_min": ts_argmin,
+    "skewness": ts_skew,
     # WorldQuant BRAIN operators (wq_ prefix)
     "wq_ts_rank": wq_ts_rank,
     "wq_ts_argmax": wq_ts_argmax,
@@ -1000,6 +1078,7 @@ TS_OPERATOR_INSTANCES: dict[str, TimeSeriesOperator] = {
     "covariance": Covariance(),
     "decay_linear": DecayLinear(),
     "ts_product": TsProduct(),
+    "ts_skew": TsSkew(),
     # Aliases pointing to canonical operator instances
     "stddev": TsStd(),
     "sma": TsMean(),
@@ -1012,6 +1091,7 @@ TS_OPERATOR_INSTANCES: dict[str, TimeSeriesOperator] = {
     "product": TsProduct(),
     "ts_arg_max": TsArgmax(),
     "ts_arg_min": TsArgmin(),
+    "skewness": TsSkew(),
     # WorldQuant BRAIN operators (wq_ prefix)
     "wq_ts_rank": WqTsRank(),
     "wq_ts_argmax": WqTsArgmax(),

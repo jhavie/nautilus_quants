@@ -112,7 +112,6 @@ class TestStateSnapshots:
         state.filled_quantity = Quantity.from_str("0.75")
         state.filled_quote_quantity = 37500.0
         state.contract_multiplier = 1.0
-        state.intent = "OPEN"
         state.limit_orders_submitted = 2
         state.last_limit_price = 49999.5
         state.fill_cost = 37499.625

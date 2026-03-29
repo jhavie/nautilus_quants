@@ -12,6 +12,7 @@ on:
           - testnet
           - pre-release
           - prod
+          - nightly
       image_tag:
         description: 'Optional image tag to build and deploy (e.g. 0.2.3-rc.1)'
         required: false
@@ -65,9 +66,18 @@ jobs:
             TAGS="${TAGS},${{ env.IMAGE }}:${{ inputs.image_tag }}"
           fi
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+      - name: Select Dockerfile
+        id: dockerfile
+        run: |
+          if [ "${{ inputs.environment }}" = "nightly" ]; then
+            echo "file=Dockerfile.nightly" >> $GITHUB_OUTPUT
+          else
+            echo "file=Dockerfile" >> $GITHUB_OUTPUT
+          fi
       - uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ steps.dockerfile.outputs.file }}
           push: true
           tags: ${{ steps.tags.outputs.tags }}
 
@@ -104,6 +114,12 @@ jobs:
               echo "config=config/live/okx_fmz_demo.yaml" >> $GITHUB_OUTPUT
               echo "env_file=/root/workspace/nautilus_quants/.env.pre" >> $GITHUB_OUTPUT
               echo "github_environment=pre-release" >> $GITHUB_OUTPUT
+              ;;
+            nightly)
+              echo "container=nautilus-nightly" >> $GITHUB_OUTPUT
+              echo "config=config/live/okx_testnet_nightly.yaml" >> $GITHUB_OUTPUT
+              echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
+              echo "github_environment=nightly" >> $GITHUB_OUTPUT
               ;;
             *)
               echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT

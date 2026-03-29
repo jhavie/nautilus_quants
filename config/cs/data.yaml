@@ -1,0 +1,98 @@
+# Copyright (c) 2025 nautilus_quants
+# SPDX-License-Identifier: MIT
+#
+# CS Alpha Universe — 40 coins listed on Binance before 2021-01
+# Factor research start date: 2021-01-01
+version: "1.0"
+
+download:
+  exchange: binance
+  market_type: spot
+  symbols:
+      # --- L1 (2017) ---
+      - "BTCUSDT"
+      - "ETHUSDT"
+      - "LTCUSDT"
+      - "BNBUSDT"
+      - "XRPUSDT"
+      - "ETCUSDT"
+      - "EOSUSDT"
+      - "XLMUSDT"
+      - "TRXUSDT"
+      - "BCHUSDT"
+      - "LINKUSDT"
+      - "ADAUSDT"
+      # --- Privacy (2017) ---
+      - "XMRUSDT"
+      - "DASHUSDT"
+      - "ZECUSDT"
+      # --- L1 / L2 / Fan (2018-2019) ---
+      - "VETUSDT"
+      - "THETAUSDT"
+      - "FETUSDT"
+      - "ATOMUSDT"
+      - "MATICUSDT"       # POL, futures ticker still MATIC
+      - "CHZUSDT"
+      - "DOGEUSDT"
+      - "HBARUSDT"
+      - "STXUSDT"
+      - "ALGOUSDT"
+      # --- DeFi / L1 / GameFi (2020) ---
+      - "COMPUSDT"
+      - "SOLUSDT"
+      - "CRVUSDT"
+      - "SANDUSDT"
+      - "DOTUSDT"
+      - "UNIUSDT"
+      - "AVAXUSDT"
+      - "AAVEUSDT"
+      - "FILUSDT"
+      - "NEARUSDT"
+      - "INJUSDT"
+      - "RUNEUSDT"
+      - "MKRUSDT"
+      - "GRTUSDT"
+      - "AXSUSDT"
+  timeframes:
+    - 15m
+  start_date: "2021-01-01"
+  end_date: "2024-12-31"
+
+  rate_limit:
+    max_retries: 5
+    initial_delay_seconds: 1
+    max_delay_seconds: 60
+    backoff_multiplier: 2
+
+  checkpoint:
+    enabled: true
+    batch_size: 1000
+
+validate:
+  check_duplicates: true
+  check_gaps: true
+  check_ohlc: true
+  fail_on_warnings: false
+
+process:
+  remove_duplicates: true
+  keep_duplicate: "last"
+  fill_small_gaps: true
+  max_gap_bars: 40
+  remove_invalid_ohlc: true
+
+transform:
+  output_format: parquet
+  merge_files: true
+  catalog_path: "data/"
+  maker_fee: "0.0002"
+  taker_fee: "0.0002"
+  margin_init: "0.05"
+  margin_maint: "0.025"
+  bar_class: "Bar"
+
+paths:
+  raw_data: "data/cs_alpha_spot_backtest_15m/raw"
+  processed_data: "data/cs_alpha_spot_backtest_15m/processed"
+  catalog: "data/cs_alpha_spot_backtest_15m/catalog"
+  logs: "logs/cs_alpha_spot_backtest_15m_pipeline"

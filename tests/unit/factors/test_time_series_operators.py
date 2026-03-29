@@ -7,6 +7,8 @@ import math
 import numpy as np
 import pytest
 
+import pandas as pd
+
 from nautilus_quants.factors.operators.time_series import (
     Delay,
     Delta,
@@ -16,6 +18,7 @@ from nautilus_quants.factors.operators.time_series import (
     TsMean,
     TsMin,
     TsRank,
+    TsSkew,
     TsStd,
     TsSum,
     WqTsArgmax,
@@ -29,6 +32,7 @@ from nautilus_quants.factors.operators.time_series import (
     ts_mean,
     ts_min,
     ts_rank,
+    ts_skew,
     ts_std,
     ts_sum,
     wq_ts_argmax,
@@ -354,4 +358,73 @@ class TestWqTsArgmin:
     def test_insufficient_data(self):
         data = np.array([1.0])
         result = wq_ts_argmin(data, 5)
+        assert math.isnan(result)
+
+
+class TestTsSkew:
+    """Tests for ts_skew operator."""
+
+    def test_positive_skew(self):
+        """Right-skewed data should produce positive skewness."""
+        # Exponential-like: many small values, few large values
+        data = np.array([1.0, 1.1, 1.2, 1.0, 1.1, 1.0, 1.3, 5.0, 1.0, 1.1])
+        result = ts_skew(data, 10)
+        assert result > 0, "Right-skewed data should have positive skewness"
+
+    def test_symmetric_near_zero(self):
+        """Symmetric data should have skewness close to 0."""
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+        result = ts_skew(data, 10)
+        assert abs(result) < 0.5, f"Symmetric data skewness={result}, expected ~0"
+
+    def test_negative_skew(self):
+        """Left-skewed data should produce negative skewness."""
+        data = np.array([5.0, 4.9, 4.8, 5.0, 4.9, 5.0, 4.7, 1.0, 5.0, 4.9])
+        result = ts_skew(data, 10)
+        assert result < 0, "Left-skewed data should have negative skewness"
+
+    def test_warmup_nan(self):
+        """Insufficient data should return NaN."""
+        data = np.array([1.0, 2.0])
+        result = ts_skew(data, 5)
+        assert math.isnan(result)
+
+    def test_window_less_than_3(self):
+        """Window < 3 should return NaN (Fisher correction undefined)."""
+        data = np.array([1.0, 2.0, 3.0])
+        result = ts_skew(data, 2)
+        assert math.isnan(result)
+
+    def test_matches_scipy(self):
+        """Panel skewness should match scipy reference."""
+        from scipy.stats import skew as scipy_skew
+
+        rng = np.random.RandomState(42)
+        data = rng.randn(20)
+        window = 10
+
+        expected = float(scipy_skew(data[-window:], bias=False))
+        result = ts_skew(data, window)
+        assert result == pytest.approx(expected, rel=1e-6)
+
+    def test_panel(self):
+        """Test panel (multi-instrument) computation."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(
+            rng.randn(30, 3),
+            columns=["A", "B", "C"],
+        )
+        op = TsSkew()
+        result = op.compute_panel(df, 10)
+
+        assert result.shape == df.shape
+        # First 9 rows should be NaN (warmup)
+        assert result.iloc[:9].isna().all().all()
+        # Row 9+ should have values
+        assert result.iloc[9:].notna().all().all()
+
+    def test_constant_series_nan(self):
+        """Constant values should produce NaN (zero std)."""
+        data = np.array([3.0, 3.0, 3.0, 3.0, 3.0])
+        result = ts_skew(data, 5)
         assert math.isnan(result)

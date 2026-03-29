@@ -131,7 +131,6 @@ class OrderExecutionState:
     target_quote_quantity: float | None = None
     filled_quote_quantity: float = 0.0
     contract_multiplier: float = 1.0
-    intent: str = "UNKNOWN"
 
     transient_retry_count: int = 0
     limit_orders_submitted: int = 0
@@ -209,7 +208,6 @@ class OrderExecutionStateSnapshot(msgspec.Struct, frozen=True):
     target_quote_quantity: float | None
     filled_quote_quantity: float
     contract_multiplier: float
-    intent: str
     transient_retry_count: int
     limit_orders_submitted: int
     last_limit_price: float
@@ -275,7 +273,6 @@ def _snapshot_from_state(state: OrderExecutionState) -> OrderExecutionStateSnaps
         target_quote_quantity=state.target_quote_quantity,
         filled_quote_quantity=state.filled_quote_quantity,
         contract_multiplier=state.contract_multiplier,
-        intent=state.intent,
         transient_retry_count=state.transient_retry_count,
         limit_orders_submitted=state.limit_orders_submitted,
         last_limit_price=state.last_limit_price,
@@ -309,7 +306,6 @@ def _state_from_snapshot(snapshot: OrderExecutionStateSnapshot) -> OrderExecutio
         target_quote_quantity=snapshot.target_quote_quantity,
         filled_quote_quantity=snapshot.filled_quote_quantity,
         contract_multiplier=snapshot.contract_multiplier,
-        intent=snapshot.intent,
         transient_retry_count=snapshot.transient_retry_count,
         limit_orders_submitted=snapshot.limit_orders_submitted,
         last_limit_price=snapshot.last_limit_price,

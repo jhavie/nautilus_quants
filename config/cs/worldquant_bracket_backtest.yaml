@@ -1,13 +1,12 @@
-# CS Strategy Backtest Configuration
-# FMZ 逻辑 via DecisionEngineActor (NETTING mode, one-shot flip)
+# WorldQuant BRAIN + Bracket TP/SL Backtest Configuration
+# 验证 WorldQuantSelectionPolicy + BracketConfig 集成
 #
-# 125 Symbols
-# 时间范围: 2022-01-01 ~ 2022-03-31
-# 初始资金: 10000 USDT
-# 持仓数量: 多空各40个
-# 单品种仓位: 300 USDT
-# 调仓周期: 每根 bar (4h)
-# 因子: alpha044 (correlation(high, rank(volume), 5))
+# 使用与 CS backtest 相同的 125 Symbols 和 4h Bar 数据
+# WorldQuant BRAIN pipeline: delay=1, neutralize, scale, no decay/truncation
+# Bracket: stop_loss_pct=0.02, no take_profit
+#
+# 运行:
+#   python -m nautilus_quants.backtest run config/cs/worldquant_bracket_backtest.yaml
 
 venues:
   - name: "BINANCE"
@@ -15,7 +14,7 @@ venues:
     account_type: "MARGIN"
     base_currency: "USDT"
     starting_balances:
-      - "10000 USDT"
+      - "100000 USDT"
     default_leverage: 1
 
 data:
@@ -69,7 +68,7 @@ data:
       - "EGLDUSDT.BINANCE"
       - "ENJUSDT.BINANCE"
       - "ENSUSDT.BINANCE"
-      - "EOSUSDT.BINANCE"
+      # - "EOSUSDT.BINANCE"
       - "ETCUSDT.BINANCE"
       - "ETHUSDT.BINANCE"
       - "FILUSDT.BINANCE"
@@ -79,7 +78,7 @@ data:
       - "GRTUSDT.BINANCE"
       - "GTCUSDT.BINANCE"
       - "HBARUSDT.BINANCE"
-      - "HNTUSDT.BINANCE"
+      # - "HNTUSDT.BINANCE"
       - "HOTUSDT.BINANCE"
       - "ICXUSDT.BINANCE"
       - "IOSTUSDT.BINANCE"
@@ -87,7 +86,7 @@ data:
       - "IOTXUSDT.BINANCE"
       - "KAVAUSDT.BINANCE"
       - "KLAYUSDT.BINANCE"
-      - "KNCUSDT.BINANCE"
+      # - "KNCUSDT.BINANCE"
       - "KSMUSDT.BINANCE"
       - "LINAUSDT.BINANCE"
       - "LINKUSDT.BINANCE"
@@ -126,7 +125,7 @@ data:
       - "SUSHIUSDT.BINANCE"
       - "SXPUSDT.BINANCE"
       - "THETAUSDT.BINANCE"
-      - "TOMOUSDT.BINANCE"
+      # - "TOMOUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
@@ -143,27 +142,14 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-03-31"
+    end_time: "2022-12-31"
 
 engine:
-  trader_id: "BACKTESTER-CS-001"
+  trader_id: "BACKTESTER-WQ-001"
   logging:
     log_level: "INFO"
   risk_engine:
     bypass: true
-
-  controller:
-    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
-    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
-    config:
-      interval: "1h"
-      venue_name: "BINANCE"
-      currency: "USDT"
-      drawdown_window: "30d"
-      drawdown_ratio: 0.8
-      min_equity_ratio: 0.5
-      cooldown_period: "72h"
-      guarded_strategy_ids: []
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
@@ -185,19 +171,16 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        # selection_policy: "FMZSelectionPolicy"
-        position_mode: "fixed"
-        position_value: 300
-        # n_long: 40
-        # n_short: 40
+        selection_policy: "WorldQuantSelectionPolicy"
+        position_mode: "weighted"
+        total_capital: 100000
         composite_factor: "alpha044"
         rebalance_interval: 1
-        # --- TopK Dropout mode (uncomment to switch) ---
-        selection_policy: "TopKDropoutSelectionPolicy"
-        topk_long: 15
-        topk_short: 15
-        n_drop_long: 3
-        n_drop_short: 3
+        # WorldQuant BRAIN params
+        delay: 1
+        decay: 0
+        neutralization: "MARKET"
+        truncation: 0.0
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
@@ -206,9 +189,9 @@ engine:
         instrument_ids: *instrument_ids
         execution_policy: "MarketExecutionPolicy"
         # bracket:
-        #   take_profit_pct: 0.05
-        #   stop_loss_pct: 0.1
-
+        #   stop_loss_pct: 0.02
+        #   take_profit_pct: null
+        #   sl_order_type: "STOP_MARKET"
 
 report:
   output_dir: "logs/performance"
@@ -217,7 +200,7 @@ report:
     - html
   tearsheet:
     enabled: true
-    title: "CS Strategy Backtest (2022-01 to 2022-03)"
+    title: "WorldQuant BRAIN + Bracket SL Backtest"
     theme: "nautilus"
     height: 1500
     charts:
@@ -231,13 +214,7 @@ report:
       - yearly_returns
   quantstats:
     enabled: true
-    title: "CS Strategy QuantStats Analysis"
+    title: "WorldQuant BRAIN QuantStats Analysis"
     output_format:
       - html
       - png
-  position_viz:
-    enabled: true
-    title: "CS Strategy Position Timeline"
-    output_subdir: "echarts"
-    chart_height: 500
-    interval: "4h"

@@ -1,12 +1,13 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""Tests for CSStrategy order translation semantics."""
+"""Tests for CSStrategy._execute_rebalance unified execution."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, patch
 
+from nautilus_trader.model.enums import OrderSide, PositionSide
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.objects import Quantity
 
@@ -36,48 +37,199 @@ def _make_strategy() -> tuple[CSStrategy, InstrumentId]:
     return strategy, inst_id
 
 
-class TestCSStrategyOrderTranslation:
-    def test_open_uses_target_quote_quantity_directly(self) -> None:
+def _no_position_cache():
+    cache = MagicMock()
+    cache.positions_open.return_value = []
+    return cache
+
+
+def _long_position(qty: float = 10.0):
+    return SimpleNamespace(
+        quantity=qty,
+        side=PositionSide.LONG,
+        is_closed=False,
+        instrument_id=InstrumentId.from_str("LINK-USDT-SWAP.OKX"),
+    )
+
+
+def _short_position(qty: float = 10.0):
+    return SimpleNamespace(
+        quantity=qty,
+        side=PositionSide.SHORT,
+        is_closed=False,
+        instrument_id=InstrumentId.from_str("LINK-USDT-SWAP.OKX"),
+    )
+
+
+class TestExecuteRebalance:
+    """Test unified _execute_rebalance method."""
+
+    def test_open_new_position(self) -> None:
         strategy, _ = _make_strategy()
         order_dict = {
             "instrument_id": "LINK-USDT-SWAP.OKX",
             "order_side": "BUY",
-            "intent": "OPEN",
             "target_quote_quantity": 1000.0,
             "tags": ["NEW_LONG"],
         }
 
-        with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
-            strategy._execute_open(order_dict)
+        cache = _no_position_cache()
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
+                strategy._execute_rebalance(order_dict)
 
         strategy._execution_policy.submit_open.assert_called_once()
         kwargs = strategy._execution_policy.submit_open.call_args.kwargs
         assert kwargs["quantity"] == Quantity.from_str("10.00")
         assert kwargs["target_quote_quantity"] == 1000.0
-        assert kwargs["intent"] == "OPEN"
 
-    def test_flip_uses_current_plus_target_and_passes_total_target_quote_quantity(self) -> None:
+    def test_close_position(self) -> None:
+        strategy, _ = _make_strategy()
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "SELL",
+            "target_quote_quantity": 0,
+            "tags": ["DROPPED_LONG"],
+        }
+
+        pos = _long_position()
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_close.assert_called_once()
+
+    def test_flip_uses_current_plus_target(self) -> None:
         strategy, _ = _make_strategy()
         order_dict = {
             "instrument_id": "LINK-USDT-SWAP.OKX",
             "order_side": "BUY",
-            "intent": "FLIP",
             "target_quote_quantity": 1000.0,
             "tags": ["FLIP_TO_LONG"],
         }
-        cache = MagicMock()
-        cache.positions_open.return_value = [SimpleNamespace(quantity=10.0)]
 
-        with patch.object(CSStrategy, "cache", new_callable=PropertyMock) as cache_prop:
-            cache_prop.return_value = cache
+        pos = _short_position(qty=10.0)
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
             with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
-                strategy._execute_flip(order_dict)
+                strategy._execute_rebalance(order_dict)
 
         strategy._execution_policy.submit_open.assert_called_once()
         kwargs = strategy._execution_policy.submit_open.call_args.kwargs
+        # flip_qty = current(10) + target(10) = 20
         assert kwargs["quantity"] == Quantity.from_str("20.00")
-        assert kwargs["target_quote_quantity"] == 2000.0
-        assert kwargs["intent"] == "FLIP"
+        assert kwargs["order_side"] == OrderSide.BUY
+
+    def test_skip_when_no_position_and_target_zero(self) -> None:
+        strategy, _ = _make_strategy()
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "SELL",
+            "target_quote_quantity": 0,
+        }
+
+        cache = _no_position_cache()
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_open.assert_not_called()
+        strategy._execution_policy.submit_close.assert_not_called()
+
+    def test_skip_small_delta(self) -> None:
+        """Same direction, delta < min_rebalance_pct → skip."""
+        strategy, _ = _make_strategy()
+        # min_rebalance_pct default is 0.05 (5%)
+        # current value = 10 * 100 * 1 = 1000, target = 1020 → 2% delta → skip
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "BUY",
+            "target_quote_quantity": 1020.0,
+            "tags": ["HOLD_LONG"],
+        }
+
+        pos = _long_position(qty=10.0)
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
+                strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_open.assert_not_called()
+
+    def test_resize_up(self) -> None:
+        """Same direction, delta > min_rebalance_pct → resize up."""
+        strategy, _ = _make_strategy()
+        # current = 1000, target = 1500 → 50% delta → resize
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "BUY",
+            "target_quote_quantity": 1500.0,
+            "tags": ["HOLD_LONG"],
+        }
+
+        pos = _long_position(qty=10.0)
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
+                strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_open.assert_called_once()
+        kwargs = strategy._execution_policy.submit_open.call_args.kwargs
+        assert kwargs["order_side"] == OrderSide.BUY
+        assert kwargs["quantity"] == Quantity.from_str("5.00")  # 500/100
+
+    def test_resize_down(self) -> None:
+        """Same direction, negative delta → resize down via submit_reduce."""
+        strategy, _ = _make_strategy()
+        # current = 1000, target = 500 → -50% delta → resize down
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "BUY",
+            "target_quote_quantity": 500.0,
+            "tags": ["HOLD_LONG"],
+        }
+
+        pos = _long_position(qty=10.0)
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
+                strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_open.assert_not_called()
+        strategy._execution_policy.submit_reduce.assert_called_once()
+        kwargs = strategy._execution_policy.submit_reduce.call_args.kwargs
+        assert kwargs["order_side"] == OrderSide.SELL  # closing side for long
+        assert kwargs["quantity"] == Quantity.from_str("5.00")  # 500/100
+
+    def test_resize_skips_when_make_qty_raises(self) -> None:
+        """Resize skips gracefully when qty rounds to zero."""
+        strategy, _ = _make_strategy()
+        inst_id = InstrumentId.from_str("LINK-USDT-SWAP.OKX")
+        bad_instrument = MagicMock()
+        bad_instrument.multiplier = 1.0
+        bad_instrument.make_qty.side_effect = ValueError("below size increment")
+        strategy._instruments = {inst_id: bad_instrument}
+
+        order_dict = {
+            "instrument_id": "LINK-USDT-SWAP.OKX",
+            "order_side": "BUY",
+            "target_quote_quantity": 1500.0,
+            "tags": ["HOLD_LONG"],
+        }
+
+        pos = _long_position(qty=10.0)
+        cache = MagicMock()
+        cache.positions_open.return_value = [pos]
+        with patch.object(CSStrategy, "cache", new_callable=PropertyMock, return_value=cache):
+            with patch.object(CSStrategy, "_get_exec_price", return_value=100.0):
+                strategy._execute_rebalance(order_dict)
+
+        strategy._execution_policy.submit_open.assert_not_called()
+        strategy._execution_policy.submit_reduce.assert_not_called()
 
 
 class TestCSStrategyExternalOrderClaims:
@@ -116,4 +268,3 @@ class TestCSStrategyExternalOrderClaims:
             ),
         )
         assert strategy.external_order_claims == []
-

@@ -12,7 +12,7 @@ variables:
 
 factors:
   alpha044:
-    expression: "correlation(high, rank(volume), 5)"
+    expression: "-correlation(high, rank(volume), 5)"
     description: "Alpha#44: High-price vs volume rank correlation"
     category: "volume"
 
