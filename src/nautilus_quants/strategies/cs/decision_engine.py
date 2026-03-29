@@ -128,18 +128,29 @@ class DecisionEngineActor(Actor):
         if not composite:
             return
 
-        # Rebalance gate
+        # Read current positions from cache
+        current_long, current_short = self._get_current_positions()
+
+        # Always call SelectionPolicy so stateful policies (WorldQuant delay/
+        # decay) update their internal buffers on every bar.
+        # rebalance_interval only controls how often we ACT on the targets.
+        targets = self._selection_policy.select(
+            composite,
+            current_long & set(composite.keys()),
+            current_short & set(composite.keys()),
+        )
+
+        # Rebalance gate: controls trading frequency, not signal computation
         self._signal_count += 1
         if self._bars_until_rebalance > 0:
             self._bars_until_rebalance -= 1
             return
         self._bars_until_rebalance = self.config.rebalance_interval - 1
 
-        # Read current positions from cache
-        current_long, current_short = self._get_current_positions()
-
-        # Compute rebalance orders
-        orders = self._compute_orders(composite, current_long, current_short)
+        # Compute rebalance orders from latest targets
+        orders = self._compute_orders_from_targets(
+            targets, composite, current_long, current_short,
+        )
 
         if orders:
             rebalance = RebalanceOrders.create(ts_event=data.ts_event, orders=orders)
@@ -167,6 +178,27 @@ class DecisionEngineActor(Actor):
         current_long: set[str],
         current_short: set[str],
     ) -> list[dict[str, Any]]:
+        """Convenience wrapper: select + compute orders in one call.
+
+        Used by tests that call _compute_orders directly.
+        """
+        instruments_with_data = set(composite.keys())
+        targets = self._selection_policy.select(
+            composite,
+            current_long & instruments_with_data,
+            current_short & instruments_with_data,
+        )
+        return self._compute_orders_from_targets(
+            targets, composite, current_long, current_short,
+        )
+
+    def _compute_orders_from_targets(
+        self,
+        targets: list[TargetPosition],
+        composite: dict[str, float],
+        current_long: set[str],
+        current_short: set[str],
+    ) -> list[dict[str, Any]]:
         """Compute rebalance orders by diffing current vs target positions."""
         orders: list[dict[str, Any]] = []
         instruments_with_data = set(composite.keys())
@@ -176,13 +208,6 @@ class DecisionEngineActor(Actor):
             orders.append(self._rebalance_order(inst_id, "SELL", 0, ["NO_FACTOR_DATA"]))
         for inst_id in sorted(current_short - instruments_with_data):
             orders.append(self._rebalance_order(inst_id, "BUY", 0, ["NO_FACTOR_DATA"]))
-
-        # Policy selection: get target portfolio
-        targets = self._selection_policy.select(
-            composite,
-            current_long & instruments_with_data,
-            current_short & instruments_with_data,
-        )
 
         target_longs = {t.symbol for t in targets if t.weight > 0}
         target_shorts = {t.symbol for t in targets if t.weight < 0}
