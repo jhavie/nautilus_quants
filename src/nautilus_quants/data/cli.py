@@ -256,7 +256,10 @@ def validate(
 
             for file_path in files:
                 click.echo(f"Validating {file_path.name}...")
-                report = validate_file(file_path)
+                report = validate_file(
+                    file_path,
+                    max_gap_bars=config.process.max_gap_bars,
+                )
                 reports.append(report)
 
                 if report.passed:
@@ -610,7 +613,10 @@ def run(
                 files = list(data_dir.glob(pattern)) if data_dir.exists() else []
 
                 for file_path in files:
-                    report = validate_file(file_path)
+                    report = validate_file(
+                        file_path,
+                        max_gap_bars=config.process.max_gap_bars,
+                    )
                     validation_reports.append(report)
                     if report.passed:
                         click.echo(f"  ✓ {sym} {tf}: {report.total_rows} rows")
