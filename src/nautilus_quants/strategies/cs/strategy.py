@@ -203,6 +203,7 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         target_side = (
             OrderSide.BUY if order_dict["order_side"] == "BUY" else OrderSide.SELL
         )
+        tags = order_dict.get("tags")
 
         # Read current position from cache
         position = None
@@ -216,12 +217,13 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         if position is None or position.is_closed:
             if target_value <= 0:
                 return
-            self._submit_new_position(inst_id, instrument, target_side, target_value)
+            self._submit_new_position(
+                inst_id, instrument, target_side, target_value, tags=tags,
+            )
             return
 
         # --- Target = 0 → close ---
         if target_value <= 0:
-            tags = order_dict.get("tags")
             self._execution_policy.submit_close(position, tags=tags)
             self.log.debug(f"CLOSE {inst_id} tags={tags}")
             return
@@ -236,7 +238,6 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
 
         multiplier = float(instrument.multiplier)
         current_value = float(position.quantity) * exec_price * multiplier
-        tags = order_dict.get("tags")
 
         # --- Direction flip → one-shot NETTING flip ---
         if current_is_long != target_is_long:
@@ -303,6 +304,7 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
         instrument: Instrument,
         side: OrderSide,
         target_value: float,
+        tags: list[str] | None = None,
     ) -> None:
         """Submit an order to open a new position."""
         exec_price = self._get_exec_price(inst_id, side)
@@ -320,6 +322,7 @@ class CSStrategy(BarSubscriptionMixin, Strategy):
             instrument_id=inst_id,
             order_side=side,
             quantity=quantity,
+            tags=tags,
             target_quote_quantity=target_value,
             contract_multiplier=multiplier,
         )

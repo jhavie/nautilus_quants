@@ -65,21 +65,15 @@ class WorldQuantSelectionPolicy:
         factor_values: dict[str, float],
         current_long: set[str],
         current_short: set[str],
-    ) -> list[TargetPosition]:
+    ) -> list[TargetPosition] | None:
         """Run BRAIN pipeline and return target portfolio.
 
-        During warmup (delay buffer not filled), returns current positions
-        unchanged with minimal weights to signal HOLD.
+        Returns None during warmup (delay buffer not filled) to signal
+        "no opinion" — caller should hold all positions as-is.
         """
         alpha = self._apply_delay(factor_values)
         if alpha is None:
-            # Warmup: hold current positions
-            result: list[TargetPosition] = []
-            for s in current_long:
-                result.append(TargetPosition(s, 1e-9, factor_values.get(s, 0.0)))
-            for s in current_short:
-                result.append(TargetPosition(s, -1e-9, factor_values.get(s, 0.0)))
-            return sorted(result, key=lambda t: t.factor)
+            return None
 
         weights = self._process_alpha(alpha)
         if not weights:

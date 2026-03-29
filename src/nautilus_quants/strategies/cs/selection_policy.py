@@ -52,7 +52,7 @@ class SelectionPolicy(Protocol):
         factor_values: dict[str, float],
         current_long: set[str],
         current_short: set[str],
-    ) -> list[TargetPosition]:
+    ) -> list[TargetPosition] | None:
         """
         Select instruments and assign weights.
 
@@ -67,8 +67,9 @@ class SelectionPolicy(Protocol):
 
         Returns
         -------
-        list[TargetPosition]
-            Target portfolio sorted by factor value.
+        list[TargetPosition] | None
+            Target portfolio sorted by factor value, or None to signal
+            "no opinion" (e.g. warmup) — caller should hold all positions as-is.
         """
         ...
 

@@ -388,7 +388,12 @@ class BracketExecutionPolicyWrapper:
         quantity: Quantity,
         tags: list[str] | None = None,
     ) -> None:
-        # Reduction: do NOT cancel existing TP/SL, do NOT create new brackets.
+        # TODO(bracket-reduce): After partial reduce, existing TP/SL orders still
+        # reference the original entry quantity. In NETTING mode, if TP/SL triggers
+        # with qty > remaining position, it will REVERSE the position (e.g. +700 → -300).
+        # Current risk: zero — fixed position_mode never triggers resize.
+        # Fix needed when weighted/equal_weight + bracket is used: cancel old TP/SL
+        # and recreate with remaining_qty. Complex due to PostLimit chase/partial fills.
         self._inner.submit_reduce(
             instrument_id=instrument_id,
             order_side=order_side,

@@ -190,13 +190,12 @@ class TestTopKDropoutSelectionPolicy:
 
 
 class TestWorldQuantSelectionPolicy:
-    def test_delay_warmup_returns_current(self):
-        """delay=1: first call returns current positions (warmup)."""
+    def test_delay_warmup_returns_none(self):
+        """delay=1: first call returns None (warmup, no opinion)."""
         policy = WorldQuantSelectionPolicy(delay=1)
         scores = {"A": 1.0, "B": -1.0}
         targets = policy.select(scores, current_long={"A"}, current_short={"B"})
-        assert _longs(targets) == {"A"}
-        assert _shorts(targets) == {"B"}
+        assert targets is None
 
     def test_delay_zero_no_warmup(self):
         """delay=0: first call produces targets immediately."""

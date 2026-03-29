@@ -140,6 +140,10 @@ class DecisionEngineActor(Actor):
             current_short & set(composite.keys()),
         )
 
+        # None = "no opinion" (e.g. warmup) — hold all positions as-is
+        if targets is None:
+            return
+
         # Rebalance gate: controls trading frequency, not signal computation
         self._signal_count += 1
         if self._bars_until_rebalance > 0:
@@ -188,6 +192,8 @@ class DecisionEngineActor(Actor):
             current_long & instruments_with_data,
             current_short & instruments_with_data,
         )
+        if targets is None:
+            return []
         return self._compute_orders_from_targets(
             targets, composite, current_long, current_short,
         )
@@ -259,7 +265,7 @@ class DecisionEngineActor(Actor):
 
         # Close dropped positions (currently held but not in targets)
         for inst_id in sorted(
-            (current_long | current_short) & instruments_with_data
+            ((current_long | current_short) & instruments_with_data)
             - target_longs - target_shorts
         ):
             side = "SELL" if inst_id in current_long else "BUY"
