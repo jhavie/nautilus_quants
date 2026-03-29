@@ -3,6 +3,10 @@
 """
 SelectionPolicy — pluggable instrument selection for DecisionEngineActor.
 
+Each policy returns a list of TargetPosition (sorted by factor) representing
+the desired portfolio. Weight sign encodes direction: positive = long,
+negative = short.
+
 Implementations:
 - FMZSelectionPolicy: sort + bottom-N long / top-N short, sticky hold
 - TopKDropoutSelectionPolicy: active rotation with n_drop per leg
@@ -10,28 +14,51 @@ Implementations:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 
-class SelectionPolicy(Protocol):
-    """Protocol for instrument selection algorithms.
+@dataclass(frozen=True)
+class TargetPosition:
+    """Single target position in the desired portfolio.
 
-    Returns the desired final portfolio state as two sets.
-    DecisionEngineActor diffs against current positions to produce intents.
+    Attributes
+    ----------
+    symbol : str
+        Instrument ID string (e.g. "BTCUSDT.BINANCE").
+    weight : float
+        Allocation weight. Positive = long, negative = short.
+        For equal-weight policies: ±1/N.
+        For weighted policies (WorldQuant): heterogeneous, sum(|w|) = 1.
+    factor : float
+        Raw factor value for this instrument (used for sorting and logging).
+    """
+
+    symbol: str
+    weight: float
+    factor: float
+
+
+class SelectionPolicy(Protocol):
+    """Protocol for instrument selection + weight allocation.
+
+    Returns a list of TargetPosition sorted by factor value.
+    DecisionEngineActor diffs against current positions and applies
+    position_mode to derive target_quote_quantity.
     """
 
     def select(
         self,
-        scores: dict[str, float],
+        factor_values: dict[str, float],
         current_long: set[str],
         current_short: set[str],
-    ) -> tuple[set[str], set[str]]:
+    ) -> list[TargetPosition]:
         """
-        Select instruments for long and short legs.
+        Select instruments and assign weights.
 
         Parameters
         ----------
-        scores : dict[str, float]
+        factor_values : dict[str, float]
             Composite factor values keyed by instrument ID.
         current_long : set[str]
             Currently held long positions (with factor data).
@@ -40,8 +67,8 @@ class SelectionPolicy(Protocol):
 
         Returns
         -------
-        tuple[set[str], set[str]]
-            (final_long_set, final_short_set)
+        list[TargetPosition]
+            Target portfolio sorted by factor value.
         """
         ...
 
@@ -51,6 +78,8 @@ class FMZSelectionPolicy:
 
     Instruments that drop out of target range but don't flip to the opposite
     side remain in their current leg (no active rotation).
+
+    Returns equal weight ±1/(n_long + n_short) for all selected instruments.
     """
 
     def __init__(self, n_long: int, n_short: int) -> None:
@@ -59,17 +88,36 @@ class FMZSelectionPolicy:
 
     def select(
         self,
-        scores: dict[str, float],
+        factor_values: dict[str, float],
         current_long: set[str],
         current_short: set[str],
-    ) -> tuple[set[str], set[str]]:
-        sorted_symbols = sorted(scores.items(), key=lambda x: (x[1], x[0]))
+    ) -> list[TargetPosition]:
+        sorted_symbols = sorted(factor_values.items(), key=lambda x: (x[1], x[0]))
         long_targets = set(s for s, _ in sorted_symbols[: self._n_long])
-        short_targets = set(s for s, _ in sorted_symbols[-self._n_short :])
+        short_targets = (
+            set(s for s, _ in sorted_symbols[-self._n_short :])
+            if self._n_short > 0
+            else set()
+        )
         # Sticky: keep current positions unless they should flip
         final_long = (current_long - short_targets) | long_targets
         final_short = (current_short - long_targets) | short_targets
-        return final_long, final_short
+
+        n_total = max(len(final_long) + len(final_short), 1)
+        result: list[TargetPosition] = []
+        for symbol in final_long:
+            result.append(TargetPosition(
+                symbol=symbol,
+                weight=1.0 / n_total,
+                factor=factor_values.get(symbol, 0.0),
+            ))
+        for symbol in final_short:
+            result.append(TargetPosition(
+                symbol=symbol,
+                weight=-1.0 / n_total,
+                factor=factor_values.get(symbol, 0.0),
+            ))
+        return sorted(result, key=lambda t: t.factor)
 
 
 class TopKDropoutSelectionPolicy:
@@ -80,6 +128,8 @@ class TopKDropoutSelectionPolicy:
     candidates not currently in the pool.
 
     Ported from qlib LongShortTopKStrategy (incremental mode, no hold_thresh).
+
+    Returns equal weight ±1/(topk_long + topk_short) for all selected instruments.
     """
 
     def __init__(
@@ -96,26 +146,41 @@ class TopKDropoutSelectionPolicy:
 
     def select(
         self,
-        scores: dict[str, float],
+        factor_values: dict[str, float],
         current_long: set[str],
         current_short: set[str],
-    ) -> tuple[set[str], set[str]]:
+    ) -> list[TargetPosition]:
         final_long = self._select_leg(
-            scores,
+            factor_values,
             current_long,
             self._topk_long,
             self._n_drop_long,
             ascending=False,
         )
         final_short = self._select_leg(
-            scores,
+            factor_values,
             current_short,
             self._topk_short,
             self._n_drop_short,
             ascending=True,
             exclude=final_long,
         )
-        return final_long, final_short
+
+        n_total = max(len(final_long) + len(final_short), 1)
+        result: list[TargetPosition] = []
+        for symbol in final_long:
+            result.append(TargetPosition(
+                symbol=symbol,
+                weight=1.0 / n_total,
+                factor=factor_values.get(symbol, 0.0),
+            ))
+        for symbol in final_short:
+            result.append(TargetPosition(
+                symbol=symbol,
+                weight=-1.0 / n_total,
+                factor=factor_values.get(symbol, 0.0),
+            ))
+        return sorted(result, key=lambda t: t.factor)
 
     @staticmethod
     def _select_leg(
@@ -152,7 +217,9 @@ class TopKDropoutSelectionPolicy:
         available = {k: v for k, v in scores.items() if k not in exclude}
 
         # Sort: for long leg descending (best=highest), for short ascending (best=lowest)
-        sorted_all = sorted(available.items(), key=lambda x: (x[1], x[0]), reverse=not ascending)
+        sorted_all = sorted(
+            available.items(), key=lambda x: (x[1], x[0]), reverse=not ascending,
+        )
 
         # Current held instruments that still have scores (not delisted)
         last = [s for s, _ in sorted_all if s in current_held]
@@ -177,13 +244,15 @@ class TopKDropoutSelectionPolicy:
         to_add = candidates[: max(0, n_buy)]
 
         # Guard: don't shrink pool below topk when no candidates can replace drops.
-        # Only allow drops that are covered by adds, or that trim an over-full pool.
         excess_over_topk = max(0, len(last) - topk)
         max_effective_drops = len(to_add) + excess_over_topk
         if len(to_drop) > max_effective_drops:
-            # Keep the worst (furthest from head in combined) — drop_list is best-first
             drop_list = [s for s in combined if s in to_drop]
-            to_drop = set(drop_list[-max_effective_drops:]) if max_effective_drops > 0 else set()
+            to_drop = (
+                set(drop_list[-max_effective_drops:])
+                if max_effective_drops > 0
+                else set()
+            )
 
         final = (set(last) - to_drop) | set(to_add)
         return final

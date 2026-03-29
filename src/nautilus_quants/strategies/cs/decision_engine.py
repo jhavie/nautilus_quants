@@ -14,9 +14,12 @@ derives the actual operation (open/close/flip/resize) from cache state.
 Selection algorithm is pluggable via SelectionPolicy (Strategy Pattern):
 - FMZSelectionPolicy: sort + bottom-N long / top-N short, sticky hold
 - TopKDropoutSelectionPolicy: active rotation with n_drop per leg
+- WorldQuantSelectionPolicy: BRAIN 7-step pipeline with heterogeneous weights
 
-When rebalance_to_weights is True, target_quote_quantity is computed from
-normalized factor scores × NAV (qlib-style). Otherwise, fixed position_value.
+Position sizing is controlled by position_mode:
+- "fixed": position_value per instrument, HOLD without resize
+- "equal_weight": NAV × long_share / N, continuous resize
+- "weighted": capital × |weight| from policy, continuous resize
 
 Constitution Compliance:
     - Extends Nautilus Actor base class (Principle I)
@@ -39,13 +42,18 @@ from nautilus_quants.strategies.cs.config import DecisionEngineActorConfig
 from nautilus_quants.strategies.cs.selection_policy import (
     FMZSelectionPolicy,
     SelectionPolicy,
+    TargetPosition,
     TopKDropoutSelectionPolicy,
 )
 from nautilus_quants.strategies.cs.types import RebalanceOrders
+from nautilus_quants.strategies.cs.worldquant_selection_policy import (
+    WorldQuantSelectionPolicy,
+)
 
 _SELECTION_POLICIES: dict[str, type] = {
     "FMZSelectionPolicy": FMZSelectionPolicy,
     "TopKDropoutSelectionPolicy": TopKDropoutSelectionPolicy,
+    "WorldQuantSelectionPolicy": WorldQuantSelectionPolicy,
 }
 
 
@@ -53,8 +61,9 @@ class DecisionEngineActor(Actor):
     """
     Decision engine: FactorValues → RebalanceOrders.
 
-    Uses a pluggable SelectionPolicy to determine target long/short sets,
-    then diffs against current positions to produce CLOSE/OPEN/FLIP intents.
+    Uses a pluggable SelectionPolicy to determine target portfolio
+    (list[TargetPosition]), then diffs against current positions to
+    produce rebalance orders.
     """
 
     def __init__(self, config: DecisionEngineActorConfig) -> None:
@@ -76,6 +85,15 @@ class DecisionEngineActor(Actor):
                 config.n_drop_long,  # type: ignore[arg-type]
                 config.n_drop_short,  # type: ignore[arg-type]
             )
+        elif policy_name == "WorldQuantSelectionPolicy":
+            return WorldQuantSelectionPolicy(
+                delay=config.delay,
+                decay=config.decay,
+                neutralization=config.neutralization,
+                truncation=config.truncation,
+                enable_long=config.enable_long,
+                enable_short=config.enable_short,
+            )
         elif policy_name == "FMZSelectionPolicy":
             return FMZSelectionPolicy(config.n_long, config.n_short)
         else:
@@ -91,6 +109,7 @@ class DecisionEngineActor(Actor):
         self.log.info(
             f"DecisionEngineActor started: "
             f"selection_policy={policy_name}, "
+            f"position_mode={self.config.position_mode}, "
             f"position_value={self.config.position_value}, "
             f"rebalance_interval={self.config.rebalance_interval}"
         )
@@ -148,13 +167,7 @@ class DecisionEngineActor(Actor):
         current_long: set[str],
         current_short: set[str],
     ) -> list[dict[str, Any]]:
-        """Compute rebalance orders by diffing current vs target positions.
-
-        Each order carries (instrument_id, order_side, target_quote_quantity).
-        target_quote_quantity > 0 means "target position at this value";
-        target_quote_quantity = 0 means "close position".
-        The execution layer derives the operation from cache state.
-        """
+        """Compute rebalance orders by diffing current vs target positions."""
         orders: list[dict[str, Any]] = []
         instruments_with_data = set(composite.keys())
 
@@ -164,75 +177,76 @@ class DecisionEngineActor(Actor):
         for inst_id in sorted(current_short - instruments_with_data):
             orders.append(self._rebalance_order(inst_id, "BUY", 0, ["NO_FACTOR_DATA"]))
 
-        # Policy selection: compute target final sets
-        final_long, final_short = self._selection_policy.select(
+        # Policy selection: get target portfolio
+        targets = self._selection_policy.select(
             composite,
             current_long & instruments_with_data,
             current_short & instruments_with_data,
         )
 
-        n_positions = max(len(final_long) + len(final_short), 1)
+        target_longs = {t.symbol for t in targets if t.weight > 0}
+        target_shorts = {t.symbol for t in targets if t.weight < 0}
+        target_map = {t.symbol: t for t in targets}
 
-        # Build rank lookup for tags
-        sorted_symbols = sorted(composite.items(), key=lambda x: (x[1], x[0]))
-        rank_lookup = {s: i for i, (s, _) in enumerate(sorted_symbols)}
+        # Build rank from sorted factor order
+        rank_counter = 0
+        rank_lookup: dict[str, int] = {}
+        for t in targets:
+            rank_lookup[t.symbol] = rank_counter
+            rank_counter += 1
 
-        # Emit rebalance orders: only for state changes (or all positions
-        # when rebalance_to_weights is True for continuous resizing).
-        for inst_id in sorted(instruments_with_data):
-            in_fl = inst_id in final_long
-            in_fs = inst_id in final_short
-            was_long = inst_id in current_long
-            was_short = inst_id in current_short
-            rank = rank_lookup.get(inst_id, -1)
-            comp = composite.get(inst_id)
+        is_fixed = self.config.position_mode == "fixed"
 
-            if in_fl:
-                if was_long and not self.config.rebalance_to_weights:
-                    continue  # HOLD — no order in fixed mode (qlib parity)
-                target = self._compute_target(final_long, final_short, inst_id)
+        # Emit orders for target positions
+        for t in targets:
+            is_long = t.weight > 0
+            was_long = t.symbol in current_long
+            was_short = t.symbol in current_short
+            same_dir = (is_long and was_long) or (not is_long and was_short)
+
+            # HOLD: fixed mode skips same-direction positions (no resize)
+            if same_dir and is_fixed:
+                continue
+
+            target_value = self._compute_target(t, target_longs, target_shorts)
+            side = "BUY" if is_long else "SELL"
+            rank = rank_lookup.get(t.symbol, -1)
+
+            if is_long:
                 tag = (
                     "FLIP_TO_LONG" if was_short
                     else "HOLD_LONG" if was_long
                     else "NEW_LONG"
                 )
-                orders.append(
-                    self._rebalance_order(
-                        inst_id, "BUY", target,
-                        [tag, f"rank:{rank}"], rank, comp,
-                    )
-                )
-            elif in_fs:
-                if was_short and not self.config.rebalance_to_weights:
-                    continue  # HOLD — no order in fixed mode (qlib parity)
-                target = self._compute_target(final_long, final_short, inst_id)
+            else:
                 tag = (
                     "FLIP_TO_SHORT" if was_long
                     else "HOLD_SHORT" if was_short
                     else "NEW_SHORT"
                 )
-                orders.append(
-                    self._rebalance_order(
-                        inst_id, "SELL", target,
-                        [tag, f"rank:{rank}"], rank, comp,
-                    )
+
+            orders.append(
+                self._rebalance_order(
+                    t.symbol, side, target_value,
+                    [tag, f"rank:{rank}"], rank, t.factor,
                 )
-            else:
-                # Not in any target set → close if currently held
-                if was_long:
-                    orders.append(
-                        self._rebalance_order(
-                            inst_id, "SELL", 0,
-                            ["DROPPED_LONG", f"rank:{rank}"], rank, comp,
-                        )
-                    )
-                elif was_short:
-                    orders.append(
-                        self._rebalance_order(
-                            inst_id, "BUY", 0,
-                            ["DROPPED_SHORT", f"rank:{rank}"], rank, comp,
-                        )
-                    )
+            )
+
+        # Close dropped positions (currently held but not in targets)
+        for inst_id in sorted(
+            (current_long | current_short) & instruments_with_data
+            - target_longs - target_shorts
+        ):
+            side = "SELL" if inst_id in current_long else "BUY"
+            rank = -1
+            comp = composite.get(inst_id)
+            tag = "DROPPED_LONG" if inst_id in current_long else "DROPPED_SHORT"
+            orders.append(
+                self._rebalance_order(
+                    inst_id, side, 0,
+                    [tag, f"rank:{rank}"], rank, comp,
+                )
+            )
 
         return orders
 
@@ -242,31 +256,38 @@ class DecisionEngineActor(Actor):
 
     def _compute_target(
         self,
-        final_long: set[str],
-        final_short: set[str],
-        inst_id: str,
+        t: TargetPosition,
+        target_longs: set[str],
+        target_shorts: set[str],
     ) -> float:
-        """Compute target_quote_quantity for an instrument.
+        """Compute target_quote_quantity based on position_mode.
 
-        Fixed mode: returns position_value (equal notional per instrument).
-        Weight mode: returns NAV × long_share / n_instruments (equal weight,
-        matching qlib LongShortTopKStrategy.rebalance_to_weights behavior).
+        - fixed: position_value (equal notional, no resize)
+        - equal_weight: NAV × long_share / N (qlib parity)
+        - weighted: position_value × |weight| × N (heterogeneous weights)
         """
-        if not self.config.rebalance_to_weights:
+        mode = self.config.position_mode
+        if mode == "fixed":
             return self.config.position_value
 
-        nav = self._get_nav()
-        if nav is None or nav <= 0:
-            self.log.warning("NAV unavailable, falling back to position_value")
-            return self.config.position_value
+        if mode == "equal_weight":
+            nav = self._get_nav()
+            if nav is None or nav <= 0:
+                self.log.warning("NAV unavailable, falling back to position_value")
+                return self.config.position_value
+            is_long = t.weight > 0
+            n = len(target_longs) if is_long else len(target_shorts)
+            share = (
+                self.config.long_share if is_long
+                else (1.0 - self.config.long_share)
+            )
+            return nav * share / max(n, 1)
 
-        long_share = self.config.long_share
+        if mode == "weighted":
+            n_total = len(target_longs) + len(target_shorts)
+            return self.config.position_value * abs(t.weight) * max(n_total, 1)
 
-        # Equal weight within each leg (qlib parity)
-        if inst_id in final_long:
-            return nav * long_share / max(len(final_long), 1)
-        else:
-            return nav * (1.0 - long_share) / max(len(final_short), 1)
+        return self.config.position_value
 
     def _get_nav(self) -> float | None:
         """Read portfolio NAV from cache via compute_mtm_equity."""

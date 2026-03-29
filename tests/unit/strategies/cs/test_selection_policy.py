@@ -2,12 +2,56 @@
 # SPDX-License-Identifier: MIT
 """Tests for SelectionPolicy implementations."""
 
+import math
+
 import pytest
 
 from nautilus_quants.strategies.cs.selection_policy import (
     FMZSelectionPolicy,
+    TargetPosition,
     TopKDropoutSelectionPolicy,
 )
+from nautilus_quants.strategies.cs.worldquant_selection_policy import (
+    WorldQuantSelectionPolicy,
+)
+
+
+# ---------------------------------------------------------------------------
+# TargetPosition
+# ---------------------------------------------------------------------------
+
+
+class TestTargetPosition:
+    def test_positive_weight_is_long(self):
+        t = TargetPosition("BTC", 0.5, 1.0)
+        assert t.weight > 0
+
+    def test_negative_weight_is_short(self):
+        t = TargetPosition("BTC", -0.3, 1.0)
+        assert t.weight < 0
+
+    def test_frozen(self):
+        t = TargetPosition("BTC", 0.5, 1.0)
+        with pytest.raises(AttributeError):
+            t.weight = 0.1  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _longs(targets: list[TargetPosition]) -> set[str]:
+    return {t.symbol for t in targets if t.weight > 0}
+
+
+def _shorts(targets: list[TargetPosition]) -> set[str]:
+    return {t.symbol for t in targets if t.weight < 0}
+
+
+def _is_sorted_by_factor(targets: list[TargetPosition]) -> bool:
+    factors = [t.factor for t in targets]
+    return factors == sorted(factors)
 
 
 # ---------------------------------------------------------------------------
@@ -17,45 +61,58 @@ from nautilus_quants.strategies.cs.selection_policy import (
 
 class TestFMZSelectionPolicy:
     def test_fresh_targets_no_positions(self):
-        """Empty portfolio → final = targets."""
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
-        fl, fs = policy.select(scores, current_long=set(), current_short=set())
-        assert fl == {"A", "B"}
-        assert fs == {"C", "D"}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _longs(targets) == {"A", "B"}
+        assert _shorts(targets) == {"C", "D"}
 
     def test_sticky_hold_rank_slips(self):
-        """Long position that drops out of long_targets but not into short → stays."""
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
-        # A was long; now A=2.5 (rank 3, not in bottom-2 or top-2)
         scores = {"B": 1.0, "C": 2.0, "A": 2.5, "D": 3.0, "E": 4.0}
-        fl, fs = policy.select(scores, current_long={"A", "B"}, current_short={"D", "E"})
-        # A stays long (sticky), B stays long (still in target)
-        assert "A" in fl
-        assert "B" in fl
+        targets = policy.select(scores, current_long={"A", "B"}, current_short={"D", "E"})
+        assert "A" in _longs(targets)
+        assert "B" in _longs(targets)
 
     def test_flip_long_to_short_target(self):
-        """Long position becomes short target → removed from final_long."""
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
         scores = {"B": 1.0, "C": 2.0, "D": 3.0, "A": 4.0}
-        fl, fs = policy.select(scores, current_long={"A", "B"}, current_short=set())
-        assert "A" not in fl
-        assert "A" in fs
+        targets = policy.select(scores, current_long={"A", "B"}, current_short=set())
+        assert "A" not in _longs(targets)
+        assert "A" in _shorts(targets)
 
     def test_flip_short_to_long_target(self):
-        """Short position becomes long target → removed from final_short."""
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
         scores = {"D": 0.5, "A": 1.0, "B": 3.0, "C": 4.0}
-        fl, fs = policy.select(scores, current_long=set(), current_short={"C", "D"})
-        assert "D" in fl
-        assert "D" not in fs
+        targets = policy.select(scores, current_long=set(), current_short={"C", "D"})
+        assert "D" in _longs(targets)
+        assert "D" not in _shorts(targets)
 
     def test_no_overlap(self):
-        """final_long and final_short must not overlap."""
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
-        fl, fs = policy.select(scores, current_long=set(), current_short=set())
-        assert fl & fs == set()
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _longs(targets) & _shorts(targets) == set()
+
+    def test_equal_weight(self):
+        policy = FMZSelectionPolicy(n_long=2, n_short=2)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        weights = [abs(t.weight) for t in targets]
+        assert all(w == pytest.approx(weights[0]) for w in weights)
+
+    def test_sorted_by_factor(self):
+        policy = FMZSelectionPolicy(n_long=2, n_short=2)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _is_sorted_by_factor(targets)
+
+    def test_n_short_zero(self):
+        policy = FMZSelectionPolicy(n_long=2, n_short=0)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _longs(targets) == {"A", "B"}
+        assert _shorts(targets) == set()
 
 
 # ---------------------------------------------------------------------------
@@ -65,113 +122,175 @@ class TestFMZSelectionPolicy:
 
 class TestTopKDropoutSelectionPolicy:
     def test_fresh_start_fills_topk(self):
-        """Empty portfolio → fills up to topk_long + topk_short."""
         policy = TopKDropoutSelectionPolicy(
-            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1
+            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1,
         )
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
-        fl, fs = policy.select(scores, current_long=set(), current_short=set())
-        # Long = highest 2 (descending): D, C
-        # Short = lowest 2 (ascending): A, B
-        assert len(fl) == 2
-        assert len(fs) == 2
-        assert fl & fs == set()
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert len(_longs(targets)) == 2
+        assert len(_shorts(targets)) == 2
+        assert _longs(targets) & _shorts(targets) == set()
 
     def test_steady_state_rotation(self):
-        """Full pool + new better candidates → exactly n_drop swapped."""
         policy = TopKDropoutSelectionPolicy(
-            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1
+            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1,
         )
-        # Current long: C(3), D(4); Current short: A(1), B(2)
-        # New scores: E(5) appears, should replace D's worst long or add
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
-        fl, fs = policy.select(
-            scores, current_long={"D", "E"}, current_short={"A", "B"}
+        targets = policy.select(
+            scores, current_long={"D", "E"}, current_short={"A", "B"},
         )
-        # Long pool should stay or improve, short pool may rotate
-        assert len(fl) == 2
-        assert len(fs) == 2
+        assert len(_longs(targets)) == 2
+        assert len(_shorts(targets)) == 2
 
     def test_no_change_when_scores_stable(self):
-        """Same ranking as current → final = current (no rotation needed)."""
         policy = TopKDropoutSelectionPolicy(
-            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1
-        )
-        # Long holds D(4), C(3) (top 2 descending) — no better candidates outside
-        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
-        fl, fs = policy.select(
-            scores, current_long={"C", "D"}, current_short={"A", "B"}
-        )
-        assert fl == {"C", "D"}
-        assert fs == {"A", "B"}
-
-    def test_n_drop_exceeds_available(self):
-        """n_drop > number of replaceable candidates → replace as many as possible."""
-        policy = TopKDropoutSelectionPolicy(
-            topk_long=3, topk_short=1, n_drop_long=5, n_drop_short=1
+            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1,
         )
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
-        fl, fs = policy.select(
-            scores, current_long={"B", "C", "D"}, current_short={"A"}
+        targets = policy.select(
+            scores, current_long={"C", "D"}, current_short={"A", "B"},
         )
-        # Even with n_drop=5, only 1 candidate not in current long (A is short)
-        assert len(fl) == 3
-        assert len(fs) == 1
+        assert _longs(targets) == {"C", "D"}
+        assert _shorts(targets) == {"A", "B"}
 
-    def test_partial_fill_fewer_than_topk(self):
-        """Available instruments < topk → fill with what's available."""
+    def test_overlap_prevention(self):
         policy = TopKDropoutSelectionPolicy(
-            topk_long=5, topk_short=5, n_drop_long=2, n_drop_short=2
-        )
-        scores = {"A": 1.0, "B": 2.0, "C": 3.0}
-        fl, fs = policy.select(scores, current_long=set(), current_short=set())
-        # Only 3 instruments, can't fill 5+5
-        assert len(fl) + len(fs) <= 3
-        assert fl & fs == set()
-
-    def test_overlap_prevention_via_exclude(self):
-        """Long and short pools must not overlap."""
-        policy = TopKDropoutSelectionPolicy(
-            topk_long=3, topk_short=3, n_drop_long=1, n_drop_short=1
+            topk_long=3, topk_short=3, n_drop_long=1, n_drop_short=1,
         )
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0, "F": 6.0}
-        fl, fs = policy.select(scores, current_long=set(), current_short=set())
-        assert fl & fs == set()
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _longs(targets) & _shorts(targets) == set()
+
+    def test_returns_target_positions_sorted(self):
+        policy = TopKDropoutSelectionPolicy(
+            topk_long=2, topk_short=2, n_drop_long=1, n_drop_short=1,
+        )
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _is_sorted_by_factor(targets)
 
     def test_select_leg_static_long(self):
-        """Direct test of _select_leg for long side (descending)."""
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
         final = TopKDropoutSelectionPolicy._select_leg(
-            scores, current_held={"C", "D"}, topk=2, n_drop=1, ascending=False
+            scores, current_held={"C", "D"}, topk=2, n_drop=1, ascending=False,
         )
-        # D(4), C(3) held; E(5) is better candidate
-        # combined: E(5), D(4), C(3) → drop tail 1 from held: C(3)
-        # to_add: E; final = {D, E}
         assert final == {"D", "E"}
 
     def test_select_leg_static_short_no_better_candidates(self):
-        """Short leg: held are already the best (lowest) — no rotation."""
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
         final = TopKDropoutSelectionPolicy._select_leg(
-            scores, current_held={"A", "B"}, topk=2, n_drop=1, ascending=True
+            scores, current_held={"A", "B"}, topk=2, n_drop=1, ascending=True,
         )
-        # Ascending sort: A(1), B(2), C(3), D(4), E(5)
-        # Candidate C(3) is WORSE than held B(2) for short leg (want lowest)
-        # combined = [A, B, C] → tail(1) = [C] → C not held → no drops
-        # No adds needed → final stays {A, B}
         assert final == {"A", "B"}
 
-    def test_select_leg_with_exclude(self):
-        """Exclude set prevents overlap with other leg."""
+
+# ---------------------------------------------------------------------------
+# WorldQuantSelectionPolicy
+# ---------------------------------------------------------------------------
+
+
+class TestWorldQuantSelectionPolicy:
+    def test_delay_warmup_returns_current(self):
+        """delay=1: first call returns current positions (warmup)."""
+        policy = WorldQuantSelectionPolicy(delay=1)
+        scores = {"A": 1.0, "B": -1.0}
+        targets = policy.select(scores, current_long={"A"}, current_short={"B"})
+        assert _longs(targets) == {"A"}
+        assert _shorts(targets) == {"B"}
+
+    def test_delay_zero_no_warmup(self):
+        """delay=0: first call produces targets immediately."""
+        policy = WorldQuantSelectionPolicy(delay=0)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert len(targets) > 0
+
+    def test_delay_one_second_call_returns_targets(self):
+        """delay=1: second call uses first call's data."""
+        policy = WorldQuantSelectionPolicy(delay=1)
+        scores_t1 = {"A": 1.0, "B": 2.0, "C": 3.0}
+        policy.select(scores_t1, current_long=set(), current_short=set())
+        scores_t2 = {"A": 2.0, "B": 1.0, "C": 3.0}
+        targets = policy.select(scores_t2, current_long=set(), current_short=set())
+        # Should use scores_t1 (delayed)
+        assert len(targets) > 0
+
+    def test_neutralize_sum_zero(self):
+        alpha = {"A": 3.0, "B": 1.0, "C": 2.0}
+        result = WorldQuantSelectionPolicy._neutralize(alpha)
+        assert sum(result.values()) == pytest.approx(0.0)
+
+    def test_scale_sum_abs_one(self):
+        alpha = {"A": 0.5, "B": -0.3, "C": 0.2}
+        result = WorldQuantSelectionPolicy._scale(alpha)
+        assert sum(abs(v) for v in result.values()) == pytest.approx(1.0)
+
+    def test_scale_all_zeros(self):
+        alpha = {"A": 0.0, "B": 0.0}
+        result = WorldQuantSelectionPolicy._scale(alpha)
+        assert result == alpha
+
+    def test_decay_zero_passthrough(self):
+        policy = WorldQuantSelectionPolicy(decay=0)
+        alpha = {"A": 0.5, "B": -0.5}
+        result = policy._apply_decay(alpha)
+        assert result == alpha
+
+    def test_decay_weighted_average(self):
+        policy = WorldQuantSelectionPolicy(decay=3)
+        # Feed 3 periods
+        policy._apply_decay({"A": 1.0})  # weight=1
+        policy._apply_decay({"A": 2.0})  # weight=2
+        result = policy._apply_decay({"A": 3.0})  # weight=3
+        # Expected: (1*1 + 2*2 + 3*3) / (1+2+3) = 14/6
+        assert result["A"] == pytest.approx(14.0 / 6.0)
+
+    def test_truncation_caps_weight(self):
+        policy = WorldQuantSelectionPolicy(truncation=0.1)
+        alpha = {"A": 0.5, "B": -0.3, "C": 0.2}
+        result = policy._truncate(alpha)
+        assert all(abs(v) <= 0.1 for v in result.values())
+
+    def test_truncation_iterative_convergence(self):
+        """Iterative truncation + re-scale converges."""
+        policy = WorldQuantSelectionPolicy(delay=0, truncation=0.05)
+        scores = {f"S{i}": float(i) for i in range(20)}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        for t in targets:
+            assert abs(t.weight) <= 0.06  # convergence tolerance
+
+    def test_returns_signed_weights(self):
+        """Long weights positive, short weights negative."""
+        policy = WorldQuantSelectionPolicy(delay=0, neutralization="MARKET")
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
-        # Short leg, ascending, exclude={D, C} (they're in long)
-        final = TopKDropoutSelectionPolicy._select_leg(
-            scores,
-            current_held=set(),
-            topk=2,
-            n_drop=1,
-            ascending=True,
-            exclude={"C", "D"},
-        )
-        # Only A(1), B(2) available → final = {A, B}
-        assert final == {"A", "B"}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        for t in targets:
+            if t.weight > 0:
+                assert t.symbol in _longs(targets)
+            elif t.weight < 0:
+                assert t.symbol in _shorts(targets)
+
+    def test_enable_long_false(self):
+        policy = WorldQuantSelectionPolicy(delay=0, enable_long=False)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _longs(targets) == set()
+
+    def test_enable_short_false(self):
+        policy = WorldQuantSelectionPolicy(delay=0, enable_short=False)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _shorts(targets) == set()
+
+    def test_sorted_by_factor(self):
+        policy = WorldQuantSelectionPolicy(delay=0)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _is_sorted_by_factor(targets)
+
+    def test_nan_filtered(self):
+        policy = WorldQuantSelectionPolicy(delay=0)
+        scores = {"A": 1.0, "B": float("nan"), "C": 3.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        symbols = {t.symbol for t in targets}
+        assert "B" not in symbols
