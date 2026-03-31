@@ -356,12 +356,12 @@ engine:
           - "ZILUSDT.BINANCE"
           - "ZRXUSDT.BINANCE"
         factor_name: "alpha044"
-        delay: 1
-        decay: 0
+        delay: 0
+        decay: 6
         neutralization: "MARKET"
         truncation: 0
-        rebalance_period: 1
-        capital: 100000.0
+        rebalance_period: 3
+        capital: 200000.0
         enable_long: true
         enable_short: true
 

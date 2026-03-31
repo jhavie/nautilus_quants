@@ -8,7 +8,7 @@ the desired portfolio. Weight sign encodes direction: positive = long,
 negative = short.
 
 Implementations:
-- FMZSelectionPolicy: sort + bottom-N long / top-N short, sticky hold
+- FMZSelectionPolicy: sort + top-N long / bottom-N short, sticky hold
 - TopKDropoutSelectionPolicy: active rotation with n_drop per leg
 """
 
@@ -75,7 +75,7 @@ class SelectionPolicy(Protocol):
 
 
 class FMZSelectionPolicy:
-    """Sort + bottom-N long / top-N short. Sticky: only flip triggers action.
+    """Sort + top-N long / bottom-N short. Sticky: only flip triggers action.
 
     Instruments that drop out of target range but don't flip to the opposite
     side remain in their current leg (no active rotation).
@@ -94,9 +94,9 @@ class FMZSelectionPolicy:
         current_short: set[str],
     ) -> list[TargetPosition]:
         sorted_symbols = sorted(factor_values.items(), key=lambda x: (x[1], x[0]))
-        long_targets = set(s for s, _ in sorted_symbols[: self._n_long])
+        long_targets = set(s for s, _ in sorted_symbols[-self._n_long :])
         short_targets = (
-            set(s for s, _ in sorted_symbols[-self._n_short :])
+            set(s for s, _ in sorted_symbols[: self._n_short])
             if self._n_short > 0
             else set()
         )
