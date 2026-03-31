@@ -102,6 +102,12 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
         Backtest: TestClock inserts a ts+5s alert within bar intervals (1h/4h),
         delay is negligible. Live: override to e.g. 180 for WebSocket feeds.
         Set to 0 to disable timeout (relies on set-complete + timestamp-advance).
+    factor_cache_path : str, default ""
+        Path to a pre-computed factor cache directory.  If set and the
+        directory contains ``factors.parquet``, factor values are loaded
+        from cache instead of being computed on each bar.  If set but the
+        directory is empty, factor values are computed normally and saved
+        to this path on actor stop for future runs.
     """
 
     factor_config_path: str
@@ -112,6 +118,7 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     signal_prefix: str = "factor"
     bar_types: list[str] = []
     flush_timeout_secs: int = 5
+    factor_cache_path: str = ""
 
 
 class FactorEngineActor(BarSubscriptionMixin, Actor):
@@ -170,6 +177,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._last_flushed_ts: int = 0
         self._extra_fields_detected: bool = False
         self._factor_snapshots: list[tuple[int, dict[str, dict[str, float]]]] = []
+        self._cached_results: dict[int, dict[str, dict[str, float]]] | None = None
 
     def on_start(self) -> None:
         """
@@ -206,6 +214,27 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             f"Registered {len(self._engine.factor_names)} factors: "
             f"{self._engine.factor_names}"
         )
+
+        # Load pre-computed factor cache if configured
+        if self._config.factor_cache_path:
+            from nautilus_quants.factors.cache import has_cache, load_as_snapshots
+
+            cache_path = self._config.factor_cache_path
+            if has_cache(cache_path):
+                try:
+                    self._cached_results = load_as_snapshots(cache_path)
+                    self.log.info(
+                        f"Loaded factor cache: {len(self._cached_results)} timestamps "
+                        f"from {cache_path}"
+                    )
+                except Exception as e:
+                    self.log.warning(f"Failed to load factor cache: {e}")
+                    self._cached_results = None
+            else:
+                self.log.info(
+                    f"Factor cache path configured but empty, "
+                    f"will save cache on stop: {cache_path}"
+                )
 
         # Get bar types from injected config (required)
         if not self._config.bar_types:
@@ -263,6 +292,28 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 )
             except Exception as e:
                 self.log.warning(f"Failed to cache factor snapshots: {e}")
+
+        # Save factor cache if path configured and no cache was loaded (first run)
+        if (
+            self._config.factor_cache_path
+            and self._cached_results is None
+            and self._factor_snapshots
+        ):
+            from nautilus_quants.factors.cache import save_snapshots_as_cache
+
+            try:
+                save_snapshots_as_cache(
+                    self._factor_snapshots,
+                    self._config.factor_cache_path,
+                    bar_spec=self._config.bar_spec,
+                    factor_config_path=self._config.factor_config_path,
+                )
+                self.log.info(
+                    f"Factor cache saved: {self._config.factor_cache_path} "
+                    f"({len(self._factor_snapshots)} timestamps)"
+                )
+            except Exception as e:
+                self.log.warning(f"Failed to save factor cache: {e}")
 
         self.log.info("FactorEngineActor stopped")
 
@@ -345,7 +396,11 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if self._engine is None:
             return
 
-        results = self._engine.flush_and_compute(ts)
+        # Use cached results if available, otherwise compute live
+        if self._cached_results is not None and ts in self._cached_results:
+            results = self._cached_results[ts]
+        else:
+            results = self._engine.flush_and_compute(ts)
         self._last_flushed_ts = max(self._last_flushed_ts, ts)
 
         # Accumulate snapshot for factor export

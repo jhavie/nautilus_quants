@@ -163,12 +163,58 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
         factor_config = load_factor_config(config.factor_config_path)
         evaluator = FactorEvaluator(factor_config)
 
-        # 5. Compute factors
-        if not quiet:
-            click.echo()
-            click.echo(f"Computing factors...")
+        # 5. Compute factors (with lazy cache support)
+        from nautilus_quants.factors.cache import (
+            has_cache,
+            load_as_factor_series,
+            save_factor_cache,
+            compute_cache_key,
+        )
 
-        factor_series, pricing = evaluator.evaluate(bars_by_instrument)
+        cache_hit = (
+            config.factor_cache_path and has_cache(config.factor_cache_path)
+        )
+
+        if cache_hit:
+            if not quiet:
+                click.echo()
+                click.echo(
+                    f"Loading factors from cache: {config.factor_cache_path}"
+                )
+            factor_series = load_as_factor_series(config.factor_cache_path)
+            # pricing is always needed for forward returns (not cached)
+            import pandas as pd
+            pricing = pd.DataFrame(
+                {
+                    inst_id: CatalogDataLoader.bars_to_dataframe(bars)["close"]
+                    for inst_id, bars in bars_by_instrument.items()
+                    if bars
+                }
+            )
+        else:
+            if not quiet:
+                click.echo()
+                click.echo("Computing factors...")
+            factor_series, pricing = evaluator.evaluate(bars_by_instrument)
+            # Save to cache if path configured
+            if config.factor_cache_path and factor_series:
+                config_hash = compute_cache_key(
+                    factor_config,
+                    config.bar_spec,
+                    config.instrument_ids,
+                    config.catalog_path,
+                )
+                save_factor_cache(
+                    factor_series,
+                    config.factor_cache_path,
+                    bar_spec=config.bar_spec,
+                    factor_config_path=config.factor_config_path,
+                    config_hash=config_hash,
+                )
+                if not quiet:
+                    click.echo(
+                        f"  Factor cache saved: {config.factor_cache_path}"
+                    )
 
         if not factor_series:
             click.echo("Error: No factor values computed. Check factor configuration.", err=True)

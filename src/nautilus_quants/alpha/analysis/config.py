@@ -60,6 +60,7 @@ class AlphaAnalysisConfig:
 
     output_dir: str = "logs/alpha_analysis"
     output_format: tuple[str, ...] = ("png",)
+    factor_cache_path: str = ""
 
 
 def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
@@ -115,4 +116,5 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         ]),
         output_dir=raw.get("output_dir", "logs/alpha_analysis"),
         output_format=tuple(output_format),
+        factor_cache_path=raw.get("factor_cache_path", ""),
     )
