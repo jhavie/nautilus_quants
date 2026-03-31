@@ -69,7 +69,6 @@ data:
       - "EGLDUSDT.BINANCE"
       - "ENJUSDT.BINANCE"
       - "ENSUSDT.BINANCE"
-      - "EOSUSDT.BINANCE"
       - "ETCUSDT.BINANCE"
       - "ETHUSDT.BINANCE"
       - "FILUSDT.BINANCE"
@@ -79,7 +78,6 @@ data:
       - "GRTUSDT.BINANCE"
       - "GTCUSDT.BINANCE"
       - "HBARUSDT.BINANCE"
-      - "HNTUSDT.BINANCE"
       - "HOTUSDT.BINANCE"
       - "ICXUSDT.BINANCE"
       - "IOSTUSDT.BINANCE"
@@ -87,7 +85,6 @@ data:
       - "IOTXUSDT.BINANCE"
       - "KAVAUSDT.BINANCE"
       - "KLAYUSDT.BINANCE"
-      - "KNCUSDT.BINANCE"
       - "KSMUSDT.BINANCE"
       - "LINAUSDT.BINANCE"
       - "LINKUSDT.BINANCE"
@@ -126,7 +123,6 @@ data:
       - "SUSHIUSDT.BINANCE"
       - "SXPUSDT.BINANCE"
       - "THETAUSDT.BINANCE"
-      - "TOMOUSDT.BINANCE"
       - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
@@ -142,8 +138,8 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2023-01-01"
-    end_time: "2023-12-31"
+    start_time: "2022-01-01"
+    end_time: "2022-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -170,6 +166,7 @@ engine:
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
         factor_config_path: "config/cs/factors.yaml"
+        factor_cache_path: "data/factor_cache/cache"
         interval: "4h"
         signal_prefix: "factor"
         max_history: 0
@@ -202,7 +199,7 @@ engine:
         # --- [2] TopKDropoutSelectionPolicy (渐进换仓, 降低换手率) ---
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
-        position_value: 125
+        position_value: 250
         topk_long: 40
         topk_short: 40
         n_drop_long: 4
@@ -211,9 +208,9 @@ engine:
         # --- [3] WorldQuantSelectionPolicy (BRAIN 7-step, 异质权重) ---
         # selection_policy: "WorldQuantSelectionPolicy"
         # position_mode: "weighted"
-        # total_capital: 20000
+        # total_capital: 10000
         # delay: 0
-        # decay: 3
+        # decay: 4
         # neutralization: "MARKET"
         # truncation: 0.0
 
