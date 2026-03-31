@@ -746,15 +746,16 @@ class ReportGenerator:
     def generate_factor_values_csv(self) -> Path | None:
         """Generate CSV of per-bar, per-instrument factor values.
 
-        Reads factor snapshots from engine cache (written by FactorEngineActor)
-        and writes a flat CSV with columns:
-        timestamp_ns, instrument_id, factor_name, value.
+        Reads factor data from engine cache (written by FactorEngineActor).
+        Supports two formats:
+        - Parquet path (cache replay mode): reads parquet, melts to CSV
+        - Serialized bytes (first-run mode): unpickles snapshots, flattens to CSV
+
+        Output CSV columns: timestamp_ns, instrument_id, factor_name, value.
 
         Returns:
             Path to CSV file, or None if no factor data available.
         """
-        import pickle
-
         try:
             data = self.engine.cache.get(FACTOR_VALUES_CACHE_KEY)
         except Exception:
@@ -763,8 +764,47 @@ class ReportGenerator:
         if not data:
             return None
 
+        # Try parquet path first (cache replay mode)
+        csv_path = self._try_factor_csv_from_parquet(data)
+        if csv_path:
+            return csv_path
+
+        # Fallback: serialized snapshots (first-run mode)
+        return self._try_factor_csv_from_snapshots(data)
+
+    def _try_factor_csv_from_parquet(self, data: bytes) -> Path | None:
+        """Try reading factor data from a parquet file path."""
         try:
-            snapshots: list[tuple[int, dict[str, dict[str, float]]]] = pickle.loads(data)
+            path = Path(data.decode("utf-8"))
+            if not (path.is_file() and path.suffix == ".parquet"):
+                return None
+            df = pd.read_parquet(path).reset_index()
+            id_vars = ["ts_event_ns", "instrument_id"]
+            if not all(c in df.columns for c in id_vars):
+                return None
+            df_melted = df.melt(
+                id_vars=id_vars,
+                var_name="factor_name",
+                value_name="value",
+            ).rename(columns={"ts_event_ns": "timestamp_ns"})
+            df_melted = df_melted.dropna(subset=["value"])
+            if df_melted.empty:
+                return None
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = self.output_dir / "factor_values_report.csv"
+            df_melted.to_csv(csv_path, index=False)
+            return csv_path
+        except Exception:
+            return None
+
+    def _try_factor_csv_from_snapshots(self, data: bytes) -> Path | None:
+        """Try reading factor data from serialized snapshots (first-run)."""
+        import pickle
+
+        try:
+            snapshots: list[tuple[int, dict[str, dict[str, float]]]] = (
+                pickle.loads(data)  # noqa: S301 — trusted internal cache data
+            )
         except Exception:
             return None
 

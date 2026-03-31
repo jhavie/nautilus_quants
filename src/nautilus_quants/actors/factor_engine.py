@@ -178,6 +178,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._extra_fields_detected: bool = False
         self._factor_snapshots: list[tuple[int, dict[str, dict[str, float]]]] = []
         self._cached_results: dict[int, dict[str, dict[str, float]]] | None = None
+        self._flush_count: int = 0
 
     def on_start(self) -> None:
         """
@@ -296,47 +297,22 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 f"total_computes={stats['total_computes']}"
             )
 
-        # Serialize factor snapshots to cache for report generation
-        if self._factor_snapshots:
-            import pickle
+        # Serialize factor data for report generation
+        if self._cached_results is not None:
+            # Cache replay: parquet already on disk, store path for reports
+            from pathlib import Path as _Path
 
-            try:
+            parquet_path = _Path(self._config.factor_cache_path) / "factors.parquet"
+            if parquet_path.is_file():
                 self.cache.add(
-                    FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots)
+                    FACTOR_VALUES_CACHE_KEY, str(parquet_path).encode()
                 )
                 self.log.info(
-                    f"Cached {len(self._factor_snapshots)} factor snapshots "
-                    f"({FACTOR_VALUES_CACHE_KEY})"
+                    f"Factor report will read from cache: {parquet_path}"
                 )
-            except Exception as e:
-                self.log.warning(f"Failed to cache factor snapshots: {e}")
-
-        # Save factor cache if path configured and no cache was loaded (first run)
-        if (
-            self._config.factor_cache_path
-            and self._cached_results is None
-            and self._factor_snapshots
-        ):
-            from nautilus_quants.factors.cache import (
-                compute_config_hash,
-                save_snapshots_as_cache,
-            )
-
-            try:
-                factor_cfg = load_factor_config(self._config.factor_config_path)
-                config_hash = compute_config_hash(factor_cfg)
-                save_snapshots_as_cache(
-                    self._factor_snapshots,
-                    self._config.factor_cache_path,
-                    factor_config_path=self._config.factor_config_path,
-                    config_hash=config_hash,
-                )
-                self.log.info(
-                    f"Factor cache saved: {self._config.factor_cache_path} "
-                    f"({len(self._factor_snapshots)} timestamps)"
-                )
-            except Exception as e:
-                self.log.warning(f"Failed to save factor cache: {e}")
+        elif self._factor_snapshots:
+            # First run: serialize snapshots for reports + save cache
+            self._serialize_factor_snapshots()
 
         self.log.info("FactorEngineActor stopped")
 
@@ -428,23 +404,20 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             results = self._engine.flush_and_compute(ts)
         self._last_flushed_ts = max(self._last_flushed_ts, ts)
 
-        # Accumulate snapshot for factor export
-        self._factor_snapshots.append((ts, results))
+        # Accumulate snapshot for factor export (skip when replaying from cache)
+        if self._cached_results is None:
+            self._factor_snapshots.append((ts, results))
 
-        # Diagnostic: log per-factor non-empty instrument count (first 5 + every 50th)
-        compute_count = self._engine.get_performance_stats().get("total_computes", 0)
-        if compute_count <= 5 or compute_count % 50 == 0:
-            diag_parts = []
+        # Log factor values for warmup visibility (first 3 timestamps only)
+        self._flush_count += 1
+        if self._flush_count <= 3:
             for fname, fvals in results.items():
-                diag_parts.append(f"{fname}={len(fvals)}")
-            self.log.info(f"Factor compute #{compute_count} [{', '.join(diag_parts)}]")
-
-        # Log actual factor values sorted by value (ascending) for ranking visibility
-        for fname, fvals in results.items():
-            if fvals:
-                sorted_vals = sorted(fvals.items(), key=lambda x: x[1])
-                vals_str = ", ".join(f"{inst}={v:.6f}" for inst, v in sorted_vals)
-                self.log.info(f"[{fname}] {vals_str}")
+                if fvals:
+                    sorted_vals = sorted(fvals.items(), key=lambda x: x[1])
+                    vals_str = ", ".join(
+                        f"{inst}={v:.6f}" for inst, v in sorted_vals
+                    )
+                    self.log.info(f"[{fname}] {vals_str}")
 
         # Create and publish FactorValues
         factor_values = FactorValues.create(
@@ -503,6 +476,45 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             self._flush_and_publish(self._pending_ts)
             self._pending_instruments.clear()
             self._pending_ts = 0
+
+    def _serialize_factor_snapshots(self) -> None:
+        """Serialize accumulated snapshots to cache (first-run path only)."""
+        import pickle
+
+        try:
+            self.cache.add(
+                FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots)
+            )
+            self.log.info(
+                f"Cached {len(self._factor_snapshots)} factor snapshots "
+                f"({FACTOR_VALUES_CACHE_KEY})"
+            )
+        except Exception as e:
+            self.log.warning(f"Failed to cache factor snapshots: {e}")
+
+        if self._config.factor_cache_path:
+            from nautilus_quants.factors.cache import (
+                compute_config_hash,
+                save_snapshots_as_cache,
+            )
+
+            try:
+                factor_cfg = load_factor_config(
+                    self._config.factor_config_path,
+                )
+                config_hash = compute_config_hash(factor_cfg)
+                save_snapshots_as_cache(
+                    self._factor_snapshots,
+                    self._config.factor_cache_path,
+                    factor_config_path=self._config.factor_config_path,
+                    config_hash=config_hash,
+                )
+                self.log.info(
+                    f"Factor cache saved: {self._config.factor_cache_path} "
+                    f"({len(self._factor_snapshots)} timestamps)"
+                )
+            except Exception as e:
+                self.log.warning(f"Failed to save factor cache: {e}")
 
     def on_reset(self) -> None:
         """Reset the actor state."""
