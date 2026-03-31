@@ -142,8 +142,8 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2022-01-01"
-    end_time: "2022-03-31"
+    start_time: "2023-01-01"
+    end_time: "2023-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -152,18 +152,18 @@ engine:
   risk_engine:
     bypass: true
 
-  controller:
-    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
-    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
-    config:
-      interval: "1h"
-      venue_name: "BINANCE"
-      currency: "USDT"
-      drawdown_window: "30d"
-      drawdown_ratio: 0.8
-      min_equity_ratio: 0.5
-      cooldown_period: "72h"
-      guarded_strategy_ids: []
+  # controller:
+    # controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
+    # config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    # config:
+    #   interval: "1h"
+    #   venue_name: "BINANCE"
+    #   currency: "USDT"
+    #   drawdown_window: "30d"
+    #   drawdown_ratio: 0.8
+    #   min_equity_ratio: 0.5
+    #   cooldown_period: "72h"
+    #   guarded_strategy_ids: []
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
@@ -185,19 +185,37 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        # selection_policy: "FMZSelectionPolicy"
-        position_mode: "fixed"
-        position_value: 300
-        # n_long: 40
-        # n_short: 40
         composite_factor: "alpha044"
         rebalance_interval: 1
-        # --- TopK Dropout mode (uncomment to switch) ---
+
+        # =============================================================
+        # Selection Policy — uncomment ONE block below
+        # =============================================================
+
+        # --- [1] FMZSelectionPolicy (截面排序, 最小N做多/最大N做空) ---
+        # selection_policy: "FMZSelectionPolicy"
+        # position_mode: "fixed"
+        # position_value: 300
+        # n_long: 40
+        # n_short: 40
+
+        # --- [2] TopKDropoutSelectionPolicy (渐进换仓, 降低换手率) ---
         selection_policy: "TopKDropoutSelectionPolicy"
-        topk_long: 15
-        topk_short: 15
-        n_drop_long: 3
-        n_drop_short: 3
+        position_mode: "fixed"
+        position_value: 125
+        topk_long: 40
+        topk_short: 40
+        n_drop_long: 4
+        n_drop_short: 4
+
+        # --- [3] WorldQuantSelectionPolicy (BRAIN 7-step, 异质权重) ---
+        # selection_policy: "WorldQuantSelectionPolicy"
+        # position_mode: "weighted"
+        # total_capital: 20000
+        # delay: 0
+        # decay: 3
+        # neutralization: "MARKET"
+        # truncation: 0.0
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
