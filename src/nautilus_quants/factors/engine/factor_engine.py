@@ -273,6 +273,15 @@ class FactorEngine:
     # Public API
     # ------------------------------------------------------------------
 
+    def flush_timestamp(self, ts: int) -> None:
+        """Flush staged data for *ts* without computing factors.
+
+        Used when factor values come from cache but the buffer must
+        stay consistent for potential fallback computation on later
+        timestamps that miss the cache.
+        """
+        self._buffer.flush_timestamp(ts)
+
     @property
     def factor_names(self) -> list[str]:
         """Return list of registered factor names."""

@@ -36,8 +36,26 @@ _METADATA_FILE = "metadata.yaml"
 
 
 # ---------------------------------------------------------------------------
-# Cache key
+# Cache key / hash
 # ---------------------------------------------------------------------------
+
+
+def compute_config_hash(factor_config: FactorConfig) -> str:
+    """Compute a deterministic hash of factor computation logic.
+
+    Includes only fields that affect factor values: expressions,
+    variables, and parameters.  Excludes cosmetic fields (description,
+    category, performance) and runtime context (bar_spec, catalog_path).
+    """
+    canonical = {
+        "variables": dict(factor_config.variables),
+        "factors": {
+            f.name: f.expression for f in factor_config.factors
+        },
+        "parameters": dict(factor_config.parameters),
+    }
+    payload = json.dumps(canonical, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def compute_cache_key(
@@ -46,11 +64,9 @@ def compute_cache_key(
     instrument_ids: list[str],
     catalog_path: str,
 ) -> str:
-    """Compute a deterministic SHA-256 cache key.
+    """Compute a full SHA-256 cache key (alpha module use).
 
-    Includes only fields that affect factor computation results:
-    expressions, variables, parameters, bar_spec, instruments, catalog path.
-    Excludes cosmetic fields (description, category, performance).
+    Includes computation logic *and* data source context.
     """
     canonical = {
         "variables": dict(factor_config.variables),
@@ -67,15 +83,84 @@ def compute_cache_key(
 
 
 # ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def validate_cache(
+    cache_dir: str | Path,
+    current_config_hash: str,
+    expected_instruments: set[str] | None = None,
+) -> tuple[bool, list[str]]:
+    """Validate cache against current configuration.
+
+    Returns
+    -------
+    tuple[bool, list[str]]
+        ``(is_valid, warnings)``
+
+        - ``is_valid=False`` when config_hash mismatches (cache stale).
+        - ``is_valid=True`` with warnings when instruments are missing.
+    """
+    meta = load_cache_metadata(cache_dir)
+    warnings: list[str] = []
+
+    # Config hash check
+    stored_hash = meta.get("config_hash", "")
+    if stored_hash and stored_hash != current_config_hash:
+        return False, [
+            f"Config hash mismatch: cached={stored_hash}, "
+            f"current={current_config_hash}"
+        ]
+
+    # Instruments coverage check
+    if expected_instruments:
+        cached_instruments = set(meta.get("instruments", []))
+        if cached_instruments:
+            missing = expected_instruments - cached_instruments
+            if missing:
+                warnings.append(
+                    f"Cache missing {len(missing)} instruments: "
+                    f"{sorted(missing)}"
+                )
+
+    return True, warnings
+
+
+# ---------------------------------------------------------------------------
 # Save
 # ---------------------------------------------------------------------------
+
+
+def _build_metadata(
+    df: pd.DataFrame,
+    *,
+    factor_config_path: str = "",
+    config_hash: str = "",
+) -> dict:
+    """Build metadata dict from a factor DataFrame."""
+    unique_ts = df.index.get_level_values("ts_event_ns").unique()
+    unique_insts = df.index.get_level_values("instrument_id").unique()
+    return {
+        "version": "1.0",
+        "config_hash": config_hash,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "factor_config_path": factor_config_path,
+        "factor_names": list(df.columns),
+        "instruments": sorted(unique_insts.tolist()),
+        "instrument_count": len(unique_insts),
+        "timestamp_count": len(unique_ts),
+        "timestamp_range": {
+            "start_ns": int(unique_ts.min()),
+            "end_ns": int(unique_ts.max()),
+        },
+    }
 
 
 def save_factor_cache(
     factor_series: dict[str, pd.Series],
     cache_dir: str | Path,
     *,
-    bar_spec: str = "",
     factor_config_path: str = "",
     config_hash: str = "",
 ) -> None:
@@ -88,7 +173,7 @@ def save_factor_cache(
         the output format of ``FactorEvaluator.evaluate()``.
     cache_dir
         Target directory (created if missing).
-    bar_spec, factor_config_path, config_hash
+    factor_config_path, config_hash
         Metadata written alongside the Parquet file.
     """
     cache_dir = Path(cache_dir)
@@ -112,28 +197,18 @@ def save_factor_cache(
     df.to_parquet(cache_dir / _PARQUET_FILE, engine="pyarrow")
 
     # Save metadata
-    unique_ts = df.index.get_level_values("ts_event_ns").unique()
-    unique_insts = df.index.get_level_values("instrument_id").unique()
-    metadata = {
-        "version": "1.0",
-        "config_hash": config_hash,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "bar_spec": bar_spec,
-        "factor_config_path": factor_config_path,
-        "factor_names": list(df.columns),
-        "instrument_count": len(unique_insts),
-        "timestamp_count": len(unique_ts),
-        "timestamp_range": {
-            "start_ns": int(unique_ts.min()),
-            "end_ns": int(unique_ts.max()),
-        },
-    }
+    metadata = _build_metadata(
+        df, factor_config_path=factor_config_path, config_hash=config_hash,
+    )
     with open(cache_dir / _METADATA_FILE, "w", encoding="utf-8") as f:
         yaml.dump(metadata, f, default_flow_style=False, allow_unicode=True)
 
     logger.info(
         "Factor cache saved: %s (%d instruments × %d timestamps × %d factors)",
-        cache_dir, len(unique_insts), len(unique_ts), len(df.columns),
+        cache_dir,
+        metadata["instrument_count"],
+        metadata["timestamp_count"],
+        len(df.columns),
     )
 
 
@@ -141,7 +216,6 @@ def save_snapshots_as_cache(
     snapshots: list[tuple[int, dict[str, dict[str, float]]]],
     cache_dir: str | Path,
     *,
-    bar_spec: str = "",
     factor_config_path: str = "",
     config_hash: str = "",
 ) -> None:
@@ -172,28 +246,19 @@ def save_snapshots_as_cache(
     cache_dir.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache_dir / _PARQUET_FILE, engine="pyarrow")
 
-    unique_ts = df.index.get_level_values("ts_event_ns").unique()
-    unique_insts = df.index.get_level_values("instrument_id").unique()
-    metadata = {
-        "version": "1.0",
-        "config_hash": config_hash,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "bar_spec": bar_spec,
-        "factor_config_path": factor_config_path,
-        "factor_names": list(df.columns),
-        "instrument_count": len(unique_insts),
-        "timestamp_count": len(unique_ts),
-        "timestamp_range": {
-            "start_ns": int(unique_ts.min()),
-            "end_ns": int(unique_ts.max()),
-        },
-    }
+    metadata = _build_metadata(
+        df, factor_config_path=factor_config_path, config_hash=config_hash,
+    )
     with open(cache_dir / _METADATA_FILE, "w", encoding="utf-8") as f:
         yaml.dump(metadata, f, default_flow_style=False, allow_unicode=True)
 
     logger.info(
-        "Factor cache saved (from snapshots): %s (%d instruments × %d timestamps × %d factors)",
-        cache_dir, len(unique_insts), len(unique_ts), len(df.columns),
+        "Factor cache saved (from snapshots): %s "
+        "(%d instruments × %d timestamps × %d factors)",
+        cache_dir,
+        metadata["instrument_count"],
+        metadata["timestamp_count"],
+        len(df.columns),
     )
 
 

@@ -1,6 +1,6 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""Tests for factor cache (save / load / hash)."""
+"""Tests for factor cache (save / load / hash / validation)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,14 @@ import pytest
 
 from nautilus_quants.factors.cache import (
     compute_cache_key,
+    compute_config_hash,
     has_cache,
     load_as_factor_series,
     load_as_snapshots,
     load_cache_metadata,
     save_factor_cache,
     save_snapshots_as_cache,
+    validate_cache,
 )
 from nautilus_quants.factors.config import FactorConfig, FactorDefinition
 
@@ -95,6 +97,35 @@ class TestComputeCacheKey:
 
 
 # ---------------------------------------------------------------------------
+# compute_config_hash tests
+# ---------------------------------------------------------------------------
+
+
+class TestComputeConfigHash:
+    def test_deterministic(self) -> None:
+        config = _make_factor_config()
+        assert compute_config_hash(config) == compute_config_hash(config)
+
+    def test_changes_on_expression(self) -> None:
+        h1 = compute_config_hash(_make_factor_config("rank(volume)"))
+        h2 = compute_config_hash(_make_factor_config("rank(close)"))
+        assert h1 != h2
+
+    def test_ignores_description(self) -> None:
+        c1 = FactorConfig(
+            factors=[FactorDefinition(name="f", expression="close", description="A")],
+        )
+        c2 = FactorConfig(
+            factors=[FactorDefinition(name="f", expression="close", description="B")],
+        )
+        assert compute_config_hash(c1) == compute_config_hash(c2)
+
+    def test_length(self) -> None:
+        h = compute_config_hash(_make_factor_config())
+        assert len(h) == 16  # truncated hex
+
+
+# ---------------------------------------------------------------------------
 # has_cache tests
 # ---------------------------------------------------------------------------
 
@@ -119,7 +150,7 @@ class TestHasCache:
 class TestFactorSeriesRoundtrip:
     def test_roundtrip(self, tmp_path: pd.Timestamp) -> None:
         original = _make_factor_series()
-        save_factor_cache(original, tmp_path, bar_spec="4h", config_hash="abc123")
+        save_factor_cache(original, tmp_path, config_hash="abc123")
 
         loaded = load_as_factor_series(tmp_path)
 
@@ -135,16 +166,18 @@ class TestFactorSeriesRoundtrip:
         save_factor_cache(
             _make_factor_series(),
             tmp_path,
-            bar_spec="4h",
             factor_config_path="config/cs/factors.yaml",
             config_hash="abc123",
         )
         meta = load_cache_metadata(tmp_path)
-        assert meta["bar_spec"] == "4h"
         assert meta["config_hash"] == "abc123"
         assert meta["factor_names"] == ["alpha044"]
         assert meta["instrument_count"] == 2
         assert meta["timestamp_count"] == 2
+        assert sorted(meta["instruments"]) == [
+            "BTCUSDT.BINANCE", "ETHUSDT.BINANCE",
+        ]
+        assert "bar_spec" not in meta
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +217,74 @@ class TestSnapshotsRoundtrip:
 
         assert "alpha044" in loaded
         assert len(loaded["alpha044"]) == 4  # 2 timestamps × 2 instruments
+
+    def test_snapshots_metadata_has_instruments(self, tmp_path: pd.Timestamp) -> None:
+        save_snapshots_as_cache(
+            _make_snapshots(), tmp_path, config_hash="deadbeef",
+        )
+        meta = load_cache_metadata(tmp_path)
+        assert meta["config_hash"] == "deadbeef"
+        assert sorted(meta["instruments"]) == [
+            "BTCUSDT.BINANCE", "ETHUSDT.BINANCE",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# validate_cache tests
+# ---------------------------------------------------------------------------
+
+
+class TestValidateCache:
+    def test_valid_cache(self, tmp_path: pd.Timestamp) -> None:
+        config = _make_factor_config()
+        h = compute_config_hash(config)
+        save_factor_cache(_make_factor_series(), tmp_path, config_hash=h)
+
+        valid, warnings = validate_cache(tmp_path, h)
+        assert valid is True
+        assert warnings == []
+
+    def test_config_hash_mismatch(self, tmp_path: pd.Timestamp) -> None:
+        save_factor_cache(
+            _make_factor_series(), tmp_path, config_hash="old_hash",
+        )
+
+        valid, warnings = validate_cache(tmp_path, "new_hash")
+        assert valid is False
+        assert len(warnings) == 1
+        assert "mismatch" in warnings[0].lower()
+
+    def test_missing_instruments_warning(self, tmp_path: pd.Timestamp) -> None:
+        config = _make_factor_config()
+        h = compute_config_hash(config)
+        save_factor_cache(_make_factor_series(), tmp_path, config_hash=h)
+
+        valid, warnings = validate_cache(
+            tmp_path, h,
+            expected_instruments={"BTCUSDT.BINANCE", "ETHUSDT.BINANCE", "SOLUSDT.BINANCE"},
+        )
+        assert valid is True  # still usable
+        assert len(warnings) == 1
+        assert "SOLUSDT.BINANCE" in warnings[0]
+
+    def test_superset_instruments_no_warning(self, tmp_path: pd.Timestamp) -> None:
+        config = _make_factor_config()
+        h = compute_config_hash(config)
+        save_factor_cache(_make_factor_series(), tmp_path, config_hash=h)
+
+        valid, warnings = validate_cache(
+            tmp_path, h,
+            expected_instruments={"BTCUSDT.BINANCE"},  # subset of cached
+        )
+        assert valid is True
+        assert warnings == []
+
+    def test_empty_stored_hash_is_valid(self, tmp_path: pd.Timestamp) -> None:
+        """Backward compat: old caches without config_hash pass validation."""
+        save_factor_cache(_make_factor_series(), tmp_path, config_hash="")
+
+        valid, warnings = validate_cache(tmp_path, "any_hash")
+        assert valid is True
 
 
 # ---------------------------------------------------------------------------

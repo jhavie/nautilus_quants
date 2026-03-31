@@ -215,27 +215,6 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             f"{self._engine.factor_names}"
         )
 
-        # Load pre-computed factor cache if configured
-        if self._config.factor_cache_path:
-            from nautilus_quants.factors.cache import has_cache, load_as_snapshots
-
-            cache_path = self._config.factor_cache_path
-            if has_cache(cache_path):
-                try:
-                    self._cached_results = load_as_snapshots(cache_path)
-                    self.log.info(
-                        f"Loaded factor cache: {len(self._cached_results)} timestamps "
-                        f"from {cache_path}"
-                    )
-                except Exception as e:
-                    self.log.warning(f"Failed to load factor cache: {e}")
-                    self._cached_results = None
-            else:
-                self.log.info(
-                    f"Factor cache path configured but empty, "
-                    f"will save cache on stop: {cache_path}"
-                )
-
         # Get bar types from injected config (required)
         if not self._config.bar_types:
             self.log.error(
@@ -254,6 +233,45 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self.log.info(
             f"Tracking {len(self._expected_instruments)} instruments for flush sync"
         )
+
+        # Load pre-computed factor cache if configured
+        # (after bar subscription so _expected_instruments is available for validation)
+        if self._config.factor_cache_path:
+            from nautilus_quants.factors.cache import (
+                compute_config_hash,
+                has_cache,
+                load_as_snapshots,
+                validate_cache,
+            )
+
+            cache_path = self._config.factor_cache_path
+            if has_cache(cache_path):
+                config_hash = compute_config_hash(factor_config)
+                valid, warnings = validate_cache(
+                    cache_path, config_hash, self._expected_instruments,
+                )
+                for w in warnings:
+                    self.log.warning(w)
+                if valid:
+                    try:
+                        self._cached_results = load_as_snapshots(cache_path)
+                        self.log.info(
+                            f"Loaded factor cache: "
+                            f"{len(self._cached_results)} timestamps "
+                            f"from {cache_path}"
+                        )
+                    except Exception as e:
+                        self.log.warning(f"Failed to load factor cache: {e}")
+                        self._cached_results = None
+                else:
+                    self.log.warning(
+                        "Factor cache config mismatch, ignoring cache"
+                    )
+            else:
+                self.log.info(
+                    f"Factor cache path configured but empty, "
+                    f"will save cache on stop: {cache_path}"
+                )
 
         self.log.info("FactorEngineActor started successfully")
 
@@ -299,14 +317,19 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             and self._cached_results is None
             and self._factor_snapshots
         ):
-            from nautilus_quants.factors.cache import save_snapshots_as_cache
+            from nautilus_quants.factors.cache import (
+                compute_config_hash,
+                save_snapshots_as_cache,
+            )
 
             try:
+                factor_cfg = load_factor_config(self._config.factor_config_path)
+                config_hash = compute_config_hash(factor_cfg)
                 save_snapshots_as_cache(
                     self._factor_snapshots,
                     self._config.factor_cache_path,
-                    bar_spec=self._config.bar_spec,
                     factor_config_path=self._config.factor_config_path,
+                    config_hash=config_hash,
                 )
                 self.log.info(
                     f"Factor cache saved: {self._config.factor_cache_path} "
@@ -399,6 +422,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         # Use cached results if available, otherwise compute live
         if self._cached_results is not None and ts in self._cached_results:
             results = self._cached_results[ts]
+            # Keep buffer consistent for potential cache-miss fallback
+            self._engine.flush_timestamp(ts)
         else:
             results = self._engine.flush_and_compute(ts)
         self._last_flushed_ts = max(self._last_flushed_ts, ts)

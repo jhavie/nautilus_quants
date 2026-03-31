@@ -165,17 +165,30 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
 
         # 5. Compute factors (with lazy cache support)
         from nautilus_quants.factors.cache import (
+            compute_config_hash,
             has_cache,
             load_as_factor_series,
             save_factor_cache,
-            compute_cache_key,
+            validate_cache,
         )
 
-        cache_hit = (
-            config.factor_cache_path and has_cache(config.factor_cache_path)
-        )
+        config_hash = compute_config_hash(factor_config)
+        use_cache = False
 
-        if cache_hit:
+        if config.factor_cache_path and has_cache(config.factor_cache_path):
+            valid, warnings = validate_cache(
+                config.factor_cache_path,
+                config_hash,
+                expected_instruments=set(config.instrument_ids),
+            )
+            for w in warnings:
+                click.echo(f"  Warning: {w}", err=True)
+            if valid:
+                use_cache = True
+            elif not quiet:
+                click.echo("  Factor config changed, re-computing...")
+
+        if use_cache:
             if not quiet:
                 click.echo()
                 click.echo(
@@ -198,16 +211,9 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
             factor_series, pricing = evaluator.evaluate(bars_by_instrument)
             # Save to cache if path configured
             if config.factor_cache_path and factor_series:
-                config_hash = compute_cache_key(
-                    factor_config,
-                    config.bar_spec,
-                    config.instrument_ids,
-                    config.catalog_path,
-                )
                 save_factor_cache(
                     factor_series,
                     config.factor_cache_path,
-                    bar_spec=config.bar_spec,
                     factor_config_path=config.factor_config_path,
                     config_hash=config_hash,
                 )
