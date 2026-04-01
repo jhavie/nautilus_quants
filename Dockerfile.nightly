@@ -26,10 +26,9 @@ RUN uv pip install --python .venv/bin/python \
     --pre --index-url=https://packages.nautechsystems.io/simple \
     --force-reinstall --no-deps
 
-# Install project
+# Install project only (preserve nightly nautilus_trader from previous step)
 COPY src/ ./src/
-RUN uv sync --no-editable --no-install-package nautilus_trader 2>/dev/null || \
-    uv pip install --python .venv/bin/python -e .
+RUN uv pip install --python .venv/bin/python . --no-deps
 
 # === Runtime stage ===
 FROM python:3.12-slim
