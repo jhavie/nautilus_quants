@@ -152,8 +152,8 @@ python -m nautilus_quants.alpha inspect alpha044
 python -m nautilus_quants.alpha status alpha044 active
 
 # Export active factors to a production-ready factors.yaml
+# (variables/parameters auto-resolved from each factor's origin config)
 python -m nautilus_quants.alpha export-factors \
-  --context-id alpha101 \
   --method equal \
   --top 30 \
   --transform cs_rank \

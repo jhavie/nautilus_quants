@@ -166,8 +166,8 @@ python -m nautilus_quants.alpha inspect alpha044
 python -m nautilus_quants.alpha status alpha044 active
 
 # 导出活跃因子为生产配置文件
+# （variables/parameters 自动从每个因子的来源配置中解析）
 python -m nautilus_quants.alpha export-factors \
-  --context-id alpha101 \
   --method equal \
   --top 30 \
   --transform cs_rank \
