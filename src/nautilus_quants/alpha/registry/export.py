@@ -17,7 +17,6 @@ from nautilus_quants.alpha.registry.repository import FactorRepository
 def export_factors_yaml(
     repo: FactorRepository,
     output_path: Path,
-    context_id: str = "",
     status: str = "active",
     composite_method: str = "equal",
     composite_top_n: int = 30,
@@ -26,6 +25,8 @@ def export_factors_yaml(
     """Generate a complete ``factors.yaml`` from the registry.
 
     The output is directly loadable by ``load_factor_config()``.
+    Variables and parameters are auto-resolved from the ``context_id``
+    stored on each factor (set during ``alpha register``).
 
     Parameters
     ----------
@@ -33,8 +34,6 @@ def export_factors_yaml(
         Repository to query.
     output_path : Path
         Destination YAML path.
-    context_id : str
-        Config context to use for variables/parameters.  Empty = no context.
     status : str
         Filter factors by this status (default "active").
     composite_method : str
@@ -60,14 +59,17 @@ def export_factors_yaml(
         exclude_ids={"composite"},
     )
 
-    # 2. Load context (variables / parameters).
+    # 2. Auto-resolve context from factors' context_id (merge all referenced).
     variables: dict[str, str] = {}
     parameters: dict[str, Any] = {}
-    if context_id:
-        ctx = repo.get_context(context_id)
-        if ctx is not None:
-            variables = ctx.variables
-            parameters = ctx.parameters
+    seen_ctx: set[str] = set()
+    for f in factors:
+        if f.context_id and f.context_id not in seen_ctx:
+            seen_ctx.add(f.context_id)
+            ctx = repo.get_context(f.context_id)
+            if ctx is not None:
+                variables.update(ctx.variables)
+                parameters.update(ctx.parameters)
 
     # 3. Compute weights.
     weights = _compute_weights(factors, composite_method)
@@ -79,8 +81,9 @@ def export_factors_yaml(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     doc: dict[str, Any] = {}
 
+    ctx_label = "_".join(sorted(seen_ctx)) if seen_ctx else "registry"
     doc["metadata"] = {
-        "name": f"registry_export{'_' + context_id if context_id else ''}",
+        "name": f"registry_export_{ctx_label}",
         "version": "1.0.0",
         "description": (
             f"Auto-generated from registry ({len(factors)} {status} factors, "

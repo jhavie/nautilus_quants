@@ -386,10 +386,12 @@ def _open_repo(db_path: str):
 @cli.command()
 @click.argument("config_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--source", default="", help="Factor source label (e.g. alpha101, fmz, mined).")
-@click.option("--context-id", default="", help="Config context ID (defaults to metadata.name).")
 @_DB_OPTION
-def register(config_file: Path, source: str, context_id: str, db_path: str) -> None:
-    """Register factors from a YAML config file into the registry."""
+def register(config_file: Path, source: str, db_path: str) -> None:
+    """Register factors from a YAML config file into the registry.
+
+    Context ID is auto-derived from metadata.name in the YAML.
+    """
     from nautilus_quants.factors.config import load_factor_config
 
     try:
@@ -401,14 +403,13 @@ def register(config_file: Path, source: str, context_id: str, db_path: str) -> N
     repo, db = _open_repo(db_path)
     try:
         new, updated, unchanged = repo.import_from_config(
-            config, source=source, context_id=context_id,
+            config, source=source,
         )
-        cid = context_id or config.name
         click.echo(
             f"已注册 {new + updated + unchanged} 个因子"
             f"（{new} 新增, {updated} 更新, {unchanged} 无变化）"
         )
-        click.echo(f"已保存配置上下文: {cid}")
+        click.echo(f"已保存配置上下文: {config.name}")
     finally:
         db.close()
 
@@ -519,35 +520,36 @@ def status(factor_id: str, new_status: str, db_path: str) -> None:
 
 
 @cli.command("export-factors")
-@click.option("--context-id", default="", help="Config context for variables/parameters.")
 @click.option("--method", default="equal", help="Composite weighting method (equal/icir_weight).")
 @click.option("--top", "top_n", default=30, type=int, help="Max factors in composite.")
 @click.option("--transform", default="cs_rank", help="Transform function (cs_rank/cs_zscore/raw).")
 @click.option("-o", "--output", "output_path", required=True, type=click.Path(path_type=Path))
 @_DB_OPTION
 def export_factors(
-    context_id: str,
     method: str,
     top_n: int,
     transform: str,
     output_path: Path,
     db_path: str,
 ) -> None:
-    """Export active factors + composite to a factors.yaml file."""
+    """Export active factors + composite to a factors.yaml file.
+
+    Variables and parameters are auto-resolved from each factor's
+    context_id (set during register).
+    """
     from nautilus_quants.alpha.registry.export import export_factors_yaml
 
     repo, db = _open_repo(db_path)
     try:
         export_factors_yaml(
             repo, output_path,
-            context_id=context_id,
             composite_method=method,
             composite_top_n=top_n,
             composite_transform=transform,
         )
         click.echo(
             f"已导出到 {output_path}\n"
-            f"method={method}, transform={transform}, context={context_id or '(none)'}"
+            f"method={method}, transform={transform}"
         )
     finally:
         db.close()

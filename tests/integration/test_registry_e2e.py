@@ -81,7 +81,6 @@ def test_full_registry_workflow(tmp_path: Path) -> None:
     export_path = tmp_path / "exported_factors.yaml"
     result = runner.invoke(cli, [
         "export-factors",
-        "--context-id", "e2e_test",
         "--method", "equal",
         "--top", "10",
         "--transform", "cs_rank",

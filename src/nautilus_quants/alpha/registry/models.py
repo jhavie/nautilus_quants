@@ -46,6 +46,7 @@ class FactorRecord:
     category: str = ""
     source: str = ""
     status: str = "candidate"
+    context_id: str = ""
     created_at: str = ""
     updated_at: str = ""
     ic_mean: float | None = None

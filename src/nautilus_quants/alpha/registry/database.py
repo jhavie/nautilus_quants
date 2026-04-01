@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS factors (
     category     VARCHAR DEFAULT '',
     source       VARCHAR DEFAULT '',
     status       VARCHAR DEFAULT 'candidate',
+    context_id   VARCHAR DEFAULT '',
     created_at   VARCHAR NOT NULL,
     updated_at   VARCHAR NOT NULL,
     ic_mean      DOUBLE,

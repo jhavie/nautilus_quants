@@ -52,8 +52,8 @@ class FactorRepository:
             self._db.execute(
                 "INSERT INTO factors "
                 "(factor_id, expression, description, category, source, status, "
-                " created_at, updated_at, ic_mean, icir, score, bar_spec) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " context_id, created_at, updated_at, ic_mean, icir, score, bar_spec) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     record.factor_id,
                     record.expression,
@@ -61,6 +61,7 @@ class FactorRepository:
                     record.category,
                     record.source,
                     record.status,
+                    record.context_id,
                     now,
                     now,
                     record.ic_mean,
@@ -84,8 +85,9 @@ class FactorRepository:
         # Update mutable fields; preserve status/source/scores from DB.
         self._db.execute(
             "UPDATE factors SET expression = ?, description = ?, category = ?, "
-            "updated_at = ? WHERE factor_id = ?",
-            [record.expression, record.description, record.category, now, record.factor_id],
+            "context_id = ?, updated_at = ? WHERE factor_id = ?",
+            [record.expression, record.description, record.category,
+             record.context_id, now, record.factor_id],
         )
         if expression_changed:
             self._create_version(record.factor_id, record.expression, "", now)
@@ -95,7 +97,7 @@ class FactorRepository:
         """Get a single factor by ID."""
         row = self._db.fetch_one(
             "SELECT factor_id, expression, description, category, source, status, "
-            "created_at, updated_at, ic_mean, icir, score, bar_spec "
+            "context_id, created_at, updated_at, ic_mean, icir, score, bar_spec "
             "FROM factors WHERE factor_id = ?",
             [factor_id],
         )
@@ -171,7 +173,7 @@ class FactorRepository:
 
         sql = (
             "SELECT factor_id, expression, description, category, source, status, "
-            "created_at, updated_at, ic_mean, icir, score, bar_spec "
+            "context_id, created_at, updated_at, ic_mean, icir, score, bar_spec "
             f"FROM factors{where} ORDER BY {order_clause}"
         )
         if limit is not None:
@@ -252,6 +254,7 @@ class FactorRepository:
 
         Returns ``(new_count, updated_count, unchanged_count)``.
         """
+        cid = context_id or config.name
         new = updated = unchanged = 0
         for fdef in config.factors:
             record = FactorRecord(
@@ -260,6 +263,7 @@ class FactorRepository:
                 description=fdef.description,
                 category=fdef.category,
                 source=source,
+                context_id=cid,
             )
             result = self.upsert_factor(record)
             if result == "new":
@@ -270,7 +274,6 @@ class FactorRepository:
                 unchanged += 1
 
         # Store config context.
-        cid = context_id or config.name
         ctx = ConfigContext(
             context_id=cid,
             variables=config.variables,

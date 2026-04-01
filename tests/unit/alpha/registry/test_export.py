@@ -23,12 +23,15 @@ def repo() -> FactorRepository:
     db.close()
 
 
-def _seed_active_factors(repo: FactorRepository, n: int = 5) -> None:
+def _seed_active_factors(
+    repo: FactorRepository, n: int = 5, context_id: str = "",
+) -> None:
     """Insert n active factors."""
     for i in range(n):
         repo.upsert_factor(
             FactorRecord(
                 factor_id=f"alpha{i:03d}",
+                context_id=context_id,
                 expression=f"ts_rank(close, {10 + i})",
                 description=f"Test factor {i}",
                 category="momentum" if i % 2 == 0 else "volume",
@@ -77,30 +80,31 @@ class TestExportBasic:
 
 
 class TestExportWithContext:
-    def test_variables_preserved(self, repo: FactorRepository, tmp_path: Path) -> None:
-        _seed_active_factors(repo, 2)
+    def test_variables_auto_resolved(self, repo: FactorRepository, tmp_path: Path) -> None:
+        """Variables auto-resolved from factors' context_id."""
         repo.upsert_context(ConfigContext(
             context_id="test_ctx",
             variables={"returns": "delta(close, 1) / delay(close, 1)"},
         ))
+        _seed_active_factors(repo, 2, context_id="test_ctx")
         out = tmp_path / "factors.yaml"
-        export_factors_yaml(repo, out, context_id="test_ctx")
+        export_factors_yaml(repo, out)
         config = load_factor_config(out)
         assert config.variables == {"returns": "delta(close, 1) / delay(close, 1)"}
 
-    def test_parameters_preserved(self, repo: FactorRepository, tmp_path: Path) -> None:
-        _seed_active_factors(repo, 2)
+    def test_parameters_auto_resolved(self, repo: FactorRepository, tmp_path: Path) -> None:
         repo.upsert_context(ConfigContext(
             context_id="test_ctx",
             parameters={"short_window": 24, "long_window": 96},
         ))
+        _seed_active_factors(repo, 2, context_id="test_ctx")
         out = tmp_path / "factors.yaml"
-        export_factors_yaml(repo, out, context_id="test_ctx")
+        export_factors_yaml(repo, out)
         config = load_factor_config(out)
         assert config.parameters == {"short_window": 24, "long_window": 96}
 
     def test_no_context_still_works(self, repo: FactorRepository, tmp_path: Path) -> None:
-        """Export without context_id should work (empty variables/parameters)."""
+        """Factors without context_id → empty variables/parameters."""
         _seed_active_factors(repo, 2)
         out = tmp_path / "factors.yaml"
         export_factors_yaml(repo, out)
