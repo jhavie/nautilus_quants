@@ -36,6 +36,7 @@ backtest = [
     "quantstats>=0.0.64",
     "alphalens-reloaded>=0.0.12",
     "plotly>=5.18.0",
+    "duckdb>=1.0.0",
 ]
 dev = [
     "pytest>=7.0.0",
