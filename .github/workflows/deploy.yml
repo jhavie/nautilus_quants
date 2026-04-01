@@ -96,7 +96,11 @@ jobs:
         id: env
         run: |
           CUSTOM_IMAGE_TAG="${{ inputs.image_tag }}"
-          IMAGE_TAG="${{ github.sha }}"
+          if [ "${{ github.ref_name }}" = "develop" ]; then
+            IMAGE_TAG="develop-${{ github.sha }}"
+          else
+            IMAGE_TAG="${{ github.sha }}"
+          fi
 
           case "${{ inputs.environment }}" in
             prod)
@@ -106,25 +110,25 @@ jobs:
               fi
               echo "container=nautilus-prod" >> $GITHUB_OUTPUT
               echo "config=config/live/okx_fmz.yaml" >> $GITHUB_OUTPUT
-              echo "env_file=/root/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
+              echo "env_file=/home/ubuntu/workspace/nautilus_quants/.env.prod" >> $GITHUB_OUTPUT
               echo "github_environment=prod" >> $GITHUB_OUTPUT
               ;;
             pre-release)
               echo "container=nautilus-pre-release" >> $GITHUB_OUTPUT
               echo "config=config/live/okx_fmz_demo.yaml" >> $GITHUB_OUTPUT
-              echo "env_file=/root/workspace/nautilus_quants/.env.pre" >> $GITHUB_OUTPUT
+              echo "env_file=/home/ubuntu/workspace/nautilus_quants/.env.pre" >> $GITHUB_OUTPUT
               echo "github_environment=pre-release" >> $GITHUB_OUTPUT
               ;;
             nightly)
               echo "container=nautilus-nightly" >> $GITHUB_OUTPUT
               echo "config=config/live/okx_testnet_nightly.yaml" >> $GITHUB_OUTPUT
-              echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
+              echo "env_file=/home/ubuntu/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
               echo "github_environment=nightly" >> $GITHUB_OUTPUT
               ;;
             *)
               echo "container=nautilus-testnet-15m" >> $GITHUB_OUTPUT
               echo "config=config/live/okx_testnet_15m.yaml" >> $GITHUB_OUTPUT
-              echo "env_file=/root/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
+              echo "env_file=/home/ubuntu/workspace/nautilus_quants/.env" >> $GITHUB_OUTPUT
               echo "github_environment=testnet" >> $GITHUB_OUTPUT
               ;;
           esac
@@ -138,7 +142,7 @@ jobs:
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
-          username: root
+          username: ubuntu
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             docker login ghcr.io -u jhavie -p ${{ secrets.GHCR_PAT }}
@@ -150,9 +154,9 @@ jobs:
               --env-file ${{ steps.env.outputs.env_file }} \
               -e OPENBLAS_NUM_THREADS=1 \
               -e OMP_NUM_THREADS=1 \
-              -v /root/workspace/nautilus_quants/config:/app/config:ro \
-              -v /root/workspace/nautilus_quants/logs:/app/logs \
-              -v /root/workspace/nautilus_quants/data:/app/data \
+              -v /home/ubuntu/workspace/nautilus_quants/config:/app/config:ro \
+              -v /home/ubuntu/workspace/nautilus_quants/logs:/app/logs \
+              -v /home/ubuntu/workspace/nautilus_quants/data:/app/data \
               ${{ env.IMAGE }}:${{ steps.env.outputs.image_tag }} \
               run ${{ steps.env.outputs.config }}
             sleep 5
