@@ -103,10 +103,49 @@ class TestPostLimitSession:
     def test_cancel_confirmed_reprice_submits_new_limit(self) -> None:
         state = _make_state(OrderState.CANCEL_PENDING_REPRICE)
 
-        command = PostLimitSession(state).on_cancel_confirmed(fallback_to_market=True)
+        command = PostLimitSession(state).on_cancel_confirmed(
+            max_chase_attempts=3, fallback_to_market=True,
+        )
 
         assert state.state == OrderState.PENDING_LIMIT
         assert command == SessionCommand.SUBMIT_LIMIT
+
+    def test_exchange_cancel_retries_limit_before_market_fallback(self) -> None:
+        """Exchange-initiated cancel on WORKING_LIMIT should chase, not fallback."""
+        state = _make_state(OrderState.WORKING_LIMIT)
+        state.chase_count = 0
+
+        command = PostLimitSession(state).on_cancel_confirmed(
+            max_chase_attempts=3, fallback_to_market=True,
+        )
+
+        assert state.state == OrderState.PENDING_LIMIT
+        assert state.chase_count == 1
+        assert command == SessionCommand.SUBMIT_LIMIT
+
+    def test_exchange_cancel_falls_back_when_chases_exhausted(self) -> None:
+        """Exchange cancel after max chases should fallback to market."""
+        state = _make_state(OrderState.WORKING_LIMIT)
+        state.chase_count = 3
+
+        command = PostLimitSession(state).on_cancel_confirmed(
+            max_chase_attempts=3, fallback_to_market=True,
+        )
+
+        assert state.state == OrderState.PENDING_MARKET
+        assert state.used_market_fallback is True
+        assert command == SessionCommand.SUBMIT_MARKET
+
+    def test_exchange_cancel_fails_when_no_fallback(self) -> None:
+        """Exchange cancel with no market fallback and chases exhausted should fail."""
+        state = _make_state(OrderState.WORKING_LIMIT)
+        state.chase_count = 3
+
+        command = PostLimitSession(state).on_cancel_confirmed(
+            max_chase_attempts=3, fallback_to_market=False,
+        )
+
+        assert command == SessionCommand.FAIL
 
     def test_cancel_rejected_returns_to_working_limit(self) -> None:
         state = _make_state(OrderState.CANCEL_PENDING_MARKET)
