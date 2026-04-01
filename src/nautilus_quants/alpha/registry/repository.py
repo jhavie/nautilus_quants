@@ -118,9 +118,23 @@ class FactorRepository:
         category: str | None = None,
         source: str | None = None,
         sort_by: str = "factor_id",
+        descending: bool = False,
         limit: int | None = None,
+        exclude_ids: set[str] | None = None,
     ) -> list[FactorRecord]:
-        """Query factors with optional filters, sorting, and limit."""
+        """Query factors with optional filters, sorting, and limit.
+
+        Parameters
+        ----------
+        sort_by : str
+            Column to sort by.  Use ``"abs_icir"`` for ``ABS(icir) DESC
+            NULLS LAST`` (selects strongest-signal factors regardless of
+            sign).
+        descending : bool
+            Sort descending (ignored when ``sort_by="abs_icir"``).
+        exclude_ids : set[str] | None
+            Factor IDs to exclude from results.
+        """
         clauses: list[str] = []
         params: list[Any] = []
 
@@ -133,6 +147,10 @@ class FactorRepository:
         if source is not None:
             clauses.append("source = ?")
             params.append(source)
+        if exclude_ids:
+            placeholders = ", ".join("?" for _ in exclude_ids)
+            clauses.append(f"factor_id NOT IN ({placeholders})")
+            params.extend(sorted(exclude_ids))
 
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
 
@@ -140,14 +158,21 @@ class FactorRepository:
         allowed_sort = {
             "factor_id", "category", "source", "status",
             "created_at", "updated_at", "ic_mean", "icir", "score",
+            "abs_icir",
         }
         if sort_by not in allowed_sort:
             sort_by = "factor_id"
 
+        if sort_by == "abs_icir":
+            order_clause = "ABS(icir) DESC NULLS LAST"
+        else:
+            direction = "DESC" if descending else "ASC"
+            order_clause = f"{sort_by} {direction} NULLS LAST"
+
         sql = (
             "SELECT factor_id, expression, description, category, source, status, "
             "created_at, updated_at, ic_mean, icir, score, bar_spec "
-            f"FROM factors{where} ORDER BY {sort_by}"
+            f"FROM factors{where} ORDER BY {order_clause}"
         )
         if limit is not None:
             sql += f" LIMIT {int(limit)}"

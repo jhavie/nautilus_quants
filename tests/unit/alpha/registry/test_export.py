@@ -129,6 +129,42 @@ class TestExportTransform:
         assert "cs_rank" not in composite.expression
 
 
+class TestExportExcludesComposite:
+    """Fix P2: existing 'composite' factor must not be overwritten in export."""
+
+    def test_registered_composite_excluded(
+        self, repo: FactorRepository, tmp_path: Path,
+    ) -> None:
+        repo.upsert_factor(FactorRecord(
+            factor_id="composite",
+            expression="original_composite_expr",
+            status="active",
+            source="user",
+        ))
+        _seed_active_factors(repo, 3)
+        out = tmp_path / "factors.yaml"
+        export_factors_yaml(repo, out)
+        config = load_factor_config(out)
+        composite = config.get_factor("composite")
+        assert composite is not None
+        # Should be the auto-generated expression, NOT the user's original.
+        assert "original_composite_expr" not in composite.expression
+        assert "cs_rank" in composite.expression
+
+    def test_composite_not_counted_in_top_n(
+        self, repo: FactorRepository, tmp_path: Path,
+    ) -> None:
+        repo.upsert_factor(FactorRecord(
+            factor_id="composite", expression="old", status="active",
+        ))
+        _seed_active_factors(repo, 5)
+        out = tmp_path / "factors.yaml"
+        export_factors_yaml(repo, out, composite_top_n=3)
+        config = load_factor_config(out)
+        # 3 individual + 1 synthetic composite = 4
+        assert len(config.factors) == 4
+
+
 class TestExportEmpty:
     def test_no_active_factors(self, repo: FactorRepository, tmp_path: Path) -> None:
         """Should still produce a valid YAML with empty composite."""

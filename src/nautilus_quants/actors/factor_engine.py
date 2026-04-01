@@ -356,6 +356,25 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             return
 
         new_config, new_mtime = result
+
+        # Sync parameters (Fix P1: was missing, expressions using
+        # config parameters would keep stale values after reload).
+        self._engine._parameters = new_config.parameters.copy()
+
+        # Clean up factors/variables removed from the new config (Fix P1:
+        # reload was additive-only, stale entries lingered indefinitely).
+        new_factor_names = {f.name for f in new_config.factors}
+        for name in set(self._engine.factor_names) - new_factor_names:
+            del self._engine._factors[name]
+            self._engine._factor_descriptions.pop(name, None)
+
+        new_var_names = set(new_config.variables.keys())
+        for name in set(self._engine.variable_names) - new_var_names:
+            del self._engine._variables[name]
+            if name in self._engine._variable_order:
+                self._engine._variable_order.remove(name)
+
+        # Register new/updated variables and factors.
         for var_name, var_expr in new_config.variables.items():
             self._engine.register_variable(var_name, var_expr)
         for factor in new_config.factors:

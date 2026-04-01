@@ -137,6 +137,82 @@ class TestTryReloadFactors:
 # ---------------------------------------------------------------------------
 
 
+class TestParametersReload:
+    """Fix P1: parameters must be included in reload."""
+
+    def test_reload_includes_parameters(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "factors.yaml"
+        doc = {
+            "metadata": {"name": "test", "version": "1.0"},
+            "parameters": {"window": 24},
+            "factors": {"f1": {"expression": "ts_mean(close, window)"}},
+        }
+        with open(yaml_path, "w") as f:
+            yaml.dump(doc, f)
+
+        result = _try_reload_factors(str(yaml_path), 0.0)
+        assert result is not None
+        new_config, _ = result
+        assert new_config.parameters == {"window": 24}
+
+    def test_reload_updated_parameters(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "factors.yaml"
+        doc = {
+            "metadata": {"name": "test", "version": "1.0"},
+            "parameters": {"window": 48},
+            "factors": {"f1": {"expression": "ts_mean(close, window)"}},
+        }
+        with open(yaml_path, "w") as f:
+            yaml.dump(doc, f)
+
+        result = _try_reload_factors(str(yaml_path), 0.0)
+        assert result is not None
+        new_config, _ = result
+        assert new_config.parameters["window"] == 48
+
+
+class TestStaleFactorCleanup:
+    """Fix P1: factors/variables removed from config must be cleaned up."""
+
+    def test_reload_detects_removed_factors(self, tmp_path: Path) -> None:
+        """Reload with fewer factors should still return valid config."""
+        yaml_path = tmp_path / "factors.yaml"
+        _write_factors_yaml(yaml_path, {"f1": "close", "f2": "open"})
+        mtime1 = yaml_path.stat().st_mtime
+
+        time.sleep(0.05)
+        _write_factors_yaml(yaml_path, {"f1": "close"})
+
+        result = _try_reload_factors(str(yaml_path), mtime1)
+        assert result is not None
+        new_config, _ = result
+        factor_names = {f.name for f in new_config.factors}
+        assert "f1" in factor_names
+        assert "f2" not in factor_names
+
+    def test_reload_detects_removed_variables(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "factors.yaml"
+        doc = {
+            "metadata": {"name": "test", "version": "1.0"},
+            "variables": {"v1": "delta(close, 1)", "v2": "ts_std(close, 24)"},
+            "factors": {"f1": {"expression": "cs_rank(v1)"}},
+        }
+        with open(yaml_path, "w") as f:
+            yaml.dump(doc, f)
+        mtime1 = yaml_path.stat().st_mtime
+
+        time.sleep(0.05)
+        doc["variables"] = {"v1": "delta(close, 1)"}
+        with open(yaml_path, "w") as f:
+            yaml.dump(doc, f)
+
+        result = _try_reload_factors(str(yaml_path), mtime1)
+        assert result is not None
+        new_config, _ = result
+        assert "v1" in new_config.variables
+        assert "v2" not in new_config.variables
+
+
 class TestTimerConstant:
     def test_timer_name_defined(self) -> None:
         assert _HOT_RELOAD_TIMER == "factor_config_hot_reload"

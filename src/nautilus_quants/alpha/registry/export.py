@@ -50,8 +50,15 @@ def export_factors_yaml(
     Path
         The output path.
     """
-    # 1. Query factors.
-    factors = repo.list_factors(status=status, sort_by="icir", limit=composite_top_n)
+    # 1. Query factors (exclude any existing "composite" to avoid overwriting
+    #    a user-defined composite expression; sort by |ICIR| descending so
+    #    top-N selects the strongest-signal factors regardless of sign).
+    factors = repo.list_factors(
+        status=status,
+        sort_by="abs_icir",
+        limit=composite_top_n,
+        exclude_ids={"composite"},
+    )
 
     # 2. Load context (variables / parameters).
     variables: dict[str, str] = {}

@@ -119,6 +119,39 @@ class TestListFactors:
         result = repo.list_factors(sort_by="factor_id", limit=2)
         assert len(result) == 2
 
+    def test_descending(self, repo: FactorRepository) -> None:
+        result = repo.list_factors(sort_by="factor_id", descending=True)
+        assert [f.factor_id for f in result] == ["d", "c", "b", "a"]
+
+    def test_exclude_ids(self, repo: FactorRepository) -> None:
+        result = repo.list_factors(exclude_ids={"a", "c"})
+        assert {f.factor_id for f in result} == {"b", "d"}
+
+
+class TestAbsIcirSort:
+    """Fix P2: sort by absolute ICIR descending for top-N selection."""
+
+    def test_abs_icir_sort_order(self, repo: FactorRepository) -> None:
+        repo.upsert_factor(_make_record("f1", "e1", icir=-0.5))
+        repo.upsert_factor(_make_record("f2", "e2", icir=0.3))
+        repo.upsert_factor(_make_record("f3", "e3", icir=-0.1))
+        result = repo.list_factors(sort_by="abs_icir")
+        assert [f.factor_id for f in result] == ["f1", "f2", "f3"]
+
+    def test_abs_icir_with_nulls_last(self, repo: FactorRepository) -> None:
+        repo.upsert_factor(_make_record("f1", "e1", icir=-0.5))
+        repo.upsert_factor(_make_record("f2", "e2"))  # icir=None
+        repo.upsert_factor(_make_record("f3", "e3", icir=0.2))
+        result = repo.list_factors(sort_by="abs_icir")
+        assert [f.factor_id for f in result] == ["f1", "f3", "f2"]
+
+    def test_abs_icir_top_n(self, repo: FactorRepository) -> None:
+        repo.upsert_factor(_make_record("f1", "e1", icir=-0.5))
+        repo.upsert_factor(_make_record("f2", "e2", icir=0.3))
+        repo.upsert_factor(_make_record("f3", "e3", icir=-0.1))
+        result = repo.list_factors(sort_by="abs_icir", limit=2)
+        assert [f.factor_id for f in result] == ["f1", "f2"]
+
 
 # ---------------------------------------------------------------------------
 # Status transitions
