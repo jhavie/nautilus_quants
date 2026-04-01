@@ -605,6 +605,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self._restore_primary_from_active(state)
         self._clear_active_child(state)
         command = PostLimitSession(state).on_cancel_confirmed(
+            max_chase_attempts=self._get_max_chase(state),
             fallback_to_market=self._config.fallback_to_market,
         )
         self._execute_session_command(state, command)

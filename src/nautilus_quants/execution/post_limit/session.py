@@ -133,7 +133,12 @@ class PostLimitSession:
             fallback_to_market=fallback_to_market,
         )
 
-    def on_cancel_confirmed(self, *, fallback_to_market: bool) -> SessionCommand:
+    def on_cancel_confirmed(
+        self,
+        *,
+        max_chase_attempts: int,
+        fallback_to_market: bool,
+    ) -> SessionCommand:
         if self.state.state == OrderState.CANCEL_PENDING_REPRICE:
             self.state.state = OrderState.PENDING_LIMIT
             return SessionCommand.SUBMIT_LIMIT
@@ -142,10 +147,21 @@ class PostLimitSession:
             self.state.state = OrderState.PENDING_MARKET
             return SessionCommand.SUBMIT_MARKET
 
-        if self.state.state == OrderState.WORKING_LIMIT and fallback_to_market:
-            self.state.state = OrderState.PENDING_MARKET
-            self.state.used_market_fallback = True
-            return SessionCommand.SUBMIT_MARKET
+        # Exchange-initiated cancel (e.g. post_only rejected at matching):
+        # retry as chase before falling back to market.
+        if self.state.state == OrderState.WORKING_LIMIT:
+            if self.state.chase_count < max_chase_attempts:
+                self.state.chase_count += 1
+                self.state.post_only_retreat_ticks = 0
+                self.state.state = OrderState.PENDING_LIMIT
+                return SessionCommand.SUBMIT_LIMIT
+
+            if fallback_to_market:
+                self.state.state = OrderState.PENDING_MARKET
+                self.state.used_market_fallback = True
+                return SessionCommand.SUBMIT_MARKET
+
+            return SessionCommand.FAIL
 
         return SessionCommand.NOOP
 
