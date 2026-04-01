@@ -119,7 +119,7 @@ class ConfigContext:
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    """Per-factor, per-bar_spec, per-period analysis metrics.
+    """Per-factor, per-version, per-bar_spec, per-period analysis metrics.
 
     Populated by Feature 035 (``alpha analyze --write-registry``).
 
@@ -127,6 +127,8 @@ class AnalysisResult:
     ----------
     factor_id : str
         Factor identifier.
+    version : int
+        Factor version number (from factor_versions).
     bar_spec : str
         Bar specification (e.g. "4h").
     period : int
@@ -146,8 +148,9 @@ class AnalysisResult:
     """
 
     factor_id: str
-    bar_spec: str
-    period: int
+    version: int = 1
+    bar_spec: str = ""
+    period: int = 0
     ic_mean: float | None = None
     ic_std: float | None = None
     icir: float | None = None

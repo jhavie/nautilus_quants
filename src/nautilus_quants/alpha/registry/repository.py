@@ -362,26 +362,47 @@ class FactorRepository:
     # ------------------------------------------------------------------
 
     def save_analysis(self, results: list[AnalysisResult]) -> None:
-        """Save analysis results (upsert by composite PK)."""
+        """Save analysis results (upsert by composite PK including version)."""
         for r in results:
             self._db.execute(
                 "INSERT OR REPLACE INTO analysis_cache "
-                "(factor_id, bar_spec, period, ic_mean, ic_std, icir, "
+                "(factor_id, version, bar_spec, period, ic_mean, ic_std, icir, "
                 " mean_return, turnover, analyzed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    r.factor_id, r.bar_spec, r.period,
+                    r.factor_id, r.version, r.bar_spec, r.period,
                     r.ic_mean, r.ic_std, r.icir,
                     r.mean_return, r.turnover, r.analyzed_at,
                 ],
             )
 
-    def get_analysis(self, factor_id: str, bar_spec: str) -> list[AnalysisResult]:
-        """Get analysis results for a factor at a given bar_spec."""
-        rows = self._db.fetch_all(
-            "SELECT factor_id, bar_spec, period, ic_mean, ic_std, icir, "
-            "mean_return, turnover, analyzed_at "
-            "FROM analysis_cache WHERE factor_id = ? AND bar_spec = ? ORDER BY period",
-            [factor_id, bar_spec],
-        )
+    def get_analysis(
+        self, factor_id: str, bar_spec: str, version: int | None = None,
+    ) -> list[AnalysisResult]:
+        """Get analysis results for a factor.
+
+        Parameters
+        ----------
+        version : int | None
+            Specific version to query.  None = latest version's results.
+        """
+        if version is not None:
+            rows = self._db.fetch_all(
+                "SELECT factor_id, version, bar_spec, period, ic_mean, ic_std, icir, "
+                "mean_return, turnover, analyzed_at "
+                "FROM analysis_cache "
+                "WHERE factor_id = ? AND version = ? AND bar_spec = ? ORDER BY period",
+                [factor_id, version, bar_spec],
+            )
+        else:
+            rows = self._db.fetch_all(
+                "SELECT factor_id, version, bar_spec, period, ic_mean, ic_std, icir, "
+                "mean_return, turnover, analyzed_at "
+                "FROM analysis_cache "
+                "WHERE factor_id = ? AND bar_spec = ? "
+                "AND version = (SELECT MAX(version) FROM analysis_cache "
+                "              WHERE factor_id = ? AND bar_spec = ?) "
+                "ORDER BY period",
+                [factor_id, bar_spec, factor_id, bar_spec],
+            )
         return [AnalysisResult(*r) for r in rows]

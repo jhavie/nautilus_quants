@@ -299,14 +299,39 @@ class TestConfigContext:
 class TestAnalysis:
     def test_save_and_get(self, repo: FactorRepository) -> None:
         results = [
-            AnalysisResult("f1", "4h", 1, ic_mean=0.05, icir=0.3, analyzed_at="2026-01-01"),
-            AnalysisResult("f1", "4h", 4, ic_mean=0.03, icir=0.2, analyzed_at="2026-01-01"),
+            AnalysisResult("f1", version=1, bar_spec="4h", period=1, ic_mean=0.05, icir=0.3, analyzed_at="2026-01-01"),
+            AnalysisResult("f1", version=1, bar_spec="4h", period=4, ic_mean=0.03, icir=0.2, analyzed_at="2026-01-01"),
         ]
         repo.save_analysis(results)
         loaded = repo.get_analysis("f1", "4h")
         assert len(loaded) == 2
         assert loaded[0].period == 1
         assert loaded[0].ic_mean == 0.05
+
+    def test_get_by_version(self, repo: FactorRepository) -> None:
+        """Each version's analysis is stored independently."""
+        repo.save_analysis([
+            AnalysisResult("f1", version=1, bar_spec="4h", period=1, icir=0.3, analyzed_at="2026-01-01"),
+            AnalysisResult("f1", version=2, bar_spec="4h", period=1, icir=0.5, analyzed_at="2026-01-02"),
+        ])
+        v1 = repo.get_analysis("f1", "4h", version=1)
+        assert len(v1) == 1
+        assert v1[0].icir == 0.3
+
+        v2 = repo.get_analysis("f1", "4h", version=2)
+        assert len(v2) == 1
+        assert v2[0].icir == 0.5
+
+    def test_get_latest_version(self, repo: FactorRepository) -> None:
+        """version=None returns the latest version's results."""
+        repo.save_analysis([
+            AnalysisResult("f1", version=1, bar_spec="4h", period=1, icir=0.3, analyzed_at="2026-01-01"),
+            AnalysisResult("f1", version=2, bar_spec="4h", period=1, icir=0.5, analyzed_at="2026-01-02"),
+        ])
+        latest = repo.get_analysis("f1", "4h")
+        assert len(latest) == 1
+        assert latest[0].version == 2
+        assert latest[0].icir == 0.5
 
     def test_get_empty(self, repo: FactorRepository) -> None:
         assert repo.get_analysis("nonexistent", "4h") == []

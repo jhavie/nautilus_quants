@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS config_context (
 
 CREATE TABLE IF NOT EXISTS analysis_cache (
     factor_id    VARCHAR NOT NULL,
+    version      INTEGER NOT NULL DEFAULT 1,
     bar_spec     VARCHAR NOT NULL,
     period       INTEGER NOT NULL,
     ic_mean      DOUBLE,
@@ -55,7 +56,7 @@ CREATE TABLE IF NOT EXISTS analysis_cache (
     mean_return  DOUBLE,
     turnover     DOUBLE,
     analyzed_at  VARCHAR NOT NULL,
-    PRIMARY KEY (factor_id, bar_spec, period)
+    PRIMARY KEY (factor_id, version, bar_spec, period)
 );
 """
 

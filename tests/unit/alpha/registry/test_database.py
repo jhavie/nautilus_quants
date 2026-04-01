@@ -134,15 +134,15 @@ class TestExecuteAndFetch:
     def test_analysis_cache_composite_pk(self, db: RegistryDatabase) -> None:
         db.execute(
             "INSERT INTO analysis_cache "
-            "(factor_id, bar_spec, period, ic_mean, analyzed_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ["alpha001", "4h", 1, 0.05, "2026-01-01"],
+            "(factor_id, version, bar_spec, period, ic_mean, analyzed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ["alpha001", 1, "4h", 1, 0.05, "2026-01-01"],
         )
         db.execute(
             "INSERT INTO analysis_cache "
-            "(factor_id, bar_spec, period, ic_mean, analyzed_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ["alpha001", "4h", 4, 0.03, "2026-01-01"],
+            "(factor_id, version, bar_spec, period, ic_mean, analyzed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ["alpha001", 1, "4h", 4, 0.03, "2026-01-01"],
         )
         rows = db.fetch_all(
             "SELECT period, ic_mean FROM analysis_cache "
