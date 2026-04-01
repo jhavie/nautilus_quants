@@ -92,7 +92,7 @@ class TestWorldQuantAlphaStrategyInit:
         assert strategy._short_positions == set()
         assert strategy._prev_alpha is None
         assert strategy._alpha_history == []
-        assert strategy._signal_count == 0
+        assert strategy._signal_count == -1  # starts at -1, incremented to 0 on first signal
 
 
 class TestNeutralize:
@@ -424,6 +424,8 @@ class TestNoSignalDuringWarmup:
         )
         strategy = WorldQuantAlphaStrategy(config)
 
+        # _signal_count starts at -1; simulate first signal arrival
+        strategy._signal_count = 0
         # Signal count 0: should rebalance (0 % 4 == 0)
         assert strategy._should_rebalance() is True
 

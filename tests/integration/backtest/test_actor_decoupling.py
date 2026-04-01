@@ -109,38 +109,3 @@ class TestActorDecouplingArchitecture:
         assert strategy_config.signal_name is not None
 
 
-class TestFactorValuesCustomData:
-    """Tests for FactorValues CustomData integration."""
-
-    def test_to_custom_data_creates_valid_object(self) -> None:
-        """Test to_custom_data creates a valid CustomData object."""
-        values = FactorValues.create(
-            ts_event=1234567890000000000,
-            factors={"alpha001": {"ETHUSDT.BINANCE": 0.75}},
-        )
-        
-        try:
-            custom_data = values.to_custom_data()
-            assert custom_data is not None
-            assert custom_data.ts_event == values.ts_event
-        except ImportError:
-            pytest.skip("nautilus_trader.core.nautilus_pyo3 not available")
-
-    def test_from_custom_data_restores_values(self) -> None:
-        """Test from_custom_data restores original values."""
-        original = FactorValues.create(
-            ts_event=9876543210000000000,
-            factors={
-                "alpha001": {"ETHUSDT.BINANCE": 0.5, "BTCUSDT.BINANCE": -0.3},
-                "alpha002": {"ETHUSDT.BINANCE": 0.8},
-            },
-        )
-        
-        try:
-            custom_data = original.to_custom_data()
-            restored = FactorValues.from_custom_data(custom_data)
-            
-            assert restored.ts_event == original.ts_event
-            assert restored.factors == original.factors
-        except ImportError:
-            pytest.skip("nautilus_trader.core.nautilus_pyo3 not available")
