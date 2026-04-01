@@ -96,7 +96,11 @@ jobs:
         id: env
         run: |
           CUSTOM_IMAGE_TAG="${{ inputs.image_tag }}"
-          IMAGE_TAG="${{ github.sha }}"
+          if [ "${{ github.ref_name }}" = "develop" ]; then
+            IMAGE_TAG="develop-${{ github.sha }}"
+          else
+            IMAGE_TAG="${{ github.sha }}"
+          fi
 
           case "${{ inputs.environment }}" in
             prod)
