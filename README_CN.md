@@ -147,6 +147,33 @@ python -m nautilus_quants.backtest list
 python -m nautilus_quants.alpha analyze config/examples/alpha_analysis.yaml -v
 ```
 
+#### 因子注册中心
+
+```bash
+# 将 YAML 中的因子注册到 DuckDB 因子库
+python -m nautilus_quants.alpha register config/cs/factors.yaml --source alpha101
+
+# 查看所有已注册因子
+python -m nautilus_quants.alpha list
+
+# 按状态过滤，按 ICIR 绝对值排序
+python -m nautilus_quants.alpha list --status active --sort abs_icir
+
+# 查看因子详情和版本历史
+python -m nautilus_quants.alpha inspect alpha044
+
+# 更改因子状态（candidate → active → archived）
+python -m nautilus_quants.alpha status alpha044 active
+
+# 导出活跃因子为生产配置文件
+python -m nautilus_quants.alpha export-factors \
+  --context-id alpha101 \
+  --method equal \
+  --top 30 \
+  --transform cs_rank \
+  -o config/live/factors.yaml
+```
+
 ## 配置系统
 
 所有可调参数通过 YAML 配置文件管理，源码中不允许硬编码数值。
@@ -224,8 +251,9 @@ src/nautilus_quants/
 │   ├── operators/      # 时序 / 截面 / 数学算子
 │   └── builtin/        # 45 个 Alpha101 因子
 ├── alpha/              # 因子分析（alphalens）
-│   ├── cli.py          # 分析 CLI
-│   └── analysis/       # 评估器 + 报告生成
+│   ├── cli.py          # 分析 + 注册中心 CLI
+│   ├── analysis/       # 评估器 + 报告生成
+│   └── registry/       # DuckDB 因子注册中心（CRUD、版本管理、导出）
 ├── backtest/           # 回测框架
 │   ├── cli.py          # 回测 CLI
 │   ├── runner.py       # BacktestNode 执行器
@@ -253,6 +281,7 @@ src/nautilus_quants/
 | 因子 | lark | 表达式解析器 |
 | 分析 | alphalens-reloaded, scipy | 因子质量评估 |
 | 报告 | quantstats, plotly | 绩效可视化 |
+| 注册中心 | duckdb | 因子库管理（可选） |
 | CLI | click, tqdm | 命令行界面 |
 
 ## 开发

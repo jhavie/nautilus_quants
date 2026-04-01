@@ -133,6 +133,33 @@ python -m nautilus_quants.backtest list
 python -m nautilus_quants.alpha analyze config/examples/alpha_analysis.yaml -v
 ```
 
+#### Factor Registry
+
+```bash
+# Register factors from YAML into the DuckDB registry
+python -m nautilus_quants.alpha register config/cs/factors.yaml --source alpha101
+
+# List all registered factors
+python -m nautilus_quants.alpha list
+
+# Filter by status, sort by absolute ICIR
+python -m nautilus_quants.alpha list --status active --sort abs_icir
+
+# Inspect factor details and version history
+python -m nautilus_quants.alpha inspect alpha044
+
+# Change factor status (candidate → active → archived)
+python -m nautilus_quants.alpha status alpha044 active
+
+# Export active factors to a production-ready factors.yaml
+python -m nautilus_quants.alpha export-factors \
+  --context-id alpha101 \
+  --method equal \
+  --top 30 \
+  --transform cs_rank \
+  -o config/live/factors.yaml
+```
+
 ## Configuration
 
 All parameters are YAML-driven. No hardcoded values in source code.
@@ -167,8 +194,9 @@ src/nautilus_quants/
 │   ├── operators/      # TS / CS / Math operators
 │   └── builtin/        # 45 Alpha101 factors
 ├── alpha/              # Factor analysis (alphalens)
-│   ├── cli.py          # Analysis CLI
-│   └── analysis/       # Evaluator + report generation
+│   ├── cli.py          # Analysis + Registry CLI
+│   ├── analysis/       # Evaluator + report generation
+│   └── registry/       # DuckDB factor registry (CRUD, versioning, export)
 ├── backtest/           # Backtest framework
 │   ├── cli.py          # Backtest CLI
 │   ├── runner.py       # BacktestNode executor
@@ -196,6 +224,7 @@ src/nautilus_quants/
 | Factors | lark | Expression parser |
 | Analysis | alphalens-reloaded, scipy | Factor quality evaluation |
 | Reporting | quantstats, plotly | Performance visualization |
+| Registry | duckdb | Factor library management (optional) |
 | CLI | click, tqdm | Command-line interface |
 
 ## Development
