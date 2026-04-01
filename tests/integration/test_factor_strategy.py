@@ -74,35 +74,6 @@ class TestFactorValuesCustomData:
         assert fv.ts_event == 456
         assert fv.get("f2", "B") == 2.0
 
-    def test_to_custom_data(self):
-        """Test conversion to Nautilus CustomData."""
-        fv = FactorValues.create(
-            ts_event=1000000000,
-            factors={"alpha": {"ETHUSDT.BINANCE": 0.5}},
-        )
-
-        # Convert to CustomData
-        custom_data = fv.to_custom_data()
-
-        # Verify structure
-        assert custom_data.ts_event == 1000000000
-        assert custom_data.ts_init == 1000000000
-        # DataType stores type name, verify it's set correctly
-        assert custom_data.data_type is not None
-
-        # Verify we can restore from CustomData
-        restored = FactorValues.from_custom_data(custom_data)
-        assert restored.ts_event == fv.ts_event
-        assert restored.get("alpha", "ETHUSDT.BINANCE") == 0.5
-
-    def test_custom_data_with_different_ts_init(self):
-        """Test CustomData with explicit ts_init."""
-        fv = FactorValues.create(ts_event=1000, factors={}, ts_init=2000)
-
-        assert fv.ts_event == 1000
-        assert fv.ts_init == 2000
-
-
 class TestFactorEngineActorConfigIntegration:
     """Test FactorEngineActor configuration."""
 

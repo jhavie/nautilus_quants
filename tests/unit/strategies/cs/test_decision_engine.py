@@ -80,54 +80,61 @@ class TestComputeOrders:
         """Fixed mode: HOLD instruments produce no orders."""
         actor = _make_actor(n_long=2, n_short=2, position_mode="fixed")
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        # Highest scores = long (C,D), lowest = short (A,B) per PR #71
         orders = actor._compute_orders(
             composite,
-            current_long={"A", "B"},
-            current_short={"C", "D"},
+            current_long={"C", "D"},
+            current_short={"A", "B"},
         )
         assert orders == []
 
     def test_flip_short_to_long(self):
         actor = _make_actor(n_long=2, n_short=2)
-        composite = {"D": 0.5, "A": 1.0, "B": 3.0, "C": 4.0}
+        # Sorted: A(1), B(2), C(3), D(4) → long={C,D}, short={A,B}
+        # C was short → flips to long
+        composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(
             composite,
-            current_long={"A"},
-            current_short={"C", "D"},
+            current_long={"D"},
+            current_short={"A", "C"},
         )
-        d_orders = [o for o in orders if o["instrument_id"] == "D"]
-        assert len(d_orders) == 1
-        assert d_orders[0]["order_side"] == "BUY"
-        assert d_orders[0]["target_quote_quantity"] > 0
-        assert "FLIP_TO_LONG" in d_orders[0]["tags"]
+        c_orders = [o for o in orders if o["instrument_id"] == "C"]
+        assert len(c_orders) == 1
+        assert c_orders[0]["order_side"] == "BUY"
+        assert c_orders[0]["target_quote_quantity"] > 0
+        assert "FLIP_TO_LONG" in c_orders[0]["tags"]
 
     def test_flip_long_to_short(self):
         actor = _make_actor(n_long=2, n_short=2)
-        composite = {"B": 1.0, "C": 2.0, "D": 3.0, "A": 4.0}
+        # Sorted: A(1), B(2), C(3), D(4) → long={C,D}, short={A,B}
+        # B was long → flips to short
+        composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(
             composite,
-            current_long={"A", "B"},
-            current_short={"D"},
+            current_long={"B", "D"},
+            current_short={"A"},
         )
-        a_orders = [o for o in orders if o["instrument_id"] == "A"]
-        flip = [o for o in a_orders if "FLIP_TO_SHORT" in o.get("tags", [])]
+        b_orders = [o for o in orders if o["instrument_id"] == "B"]
+        flip = [o for o in b_orders if "FLIP_TO_SHORT" in o.get("tags", [])]
         assert len(flip) == 1
         assert flip[0]["order_side"] == "SELL"
 
     def test_flip_target_quote_quantity_is_position_value(self):
         actor = _make_actor(position_value=500.0)
-        composite = {"D": 0.5, "A": 1.0, "B": 3.0, "C": 4.0}
+        # Sorted: A(1), B(2), C(3), D(4) → long={C,D}, short={A,B}
+        # C was short → flips to long with position_value
+        composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(
             composite,
-            current_long={"A"},
-            current_short={"C", "D"},
+            current_long={"D"},
+            current_short={"A", "C"},
         )
-        d_orders = [
+        c_orders = [
             o for o in orders
-            if o["instrument_id"] == "D" and "FLIP_TO_LONG" in o.get("tags", [])
+            if o["instrument_id"] == "C" and "FLIP_TO_LONG" in o.get("tags", [])
         ]
-        assert len(d_orders) == 1
-        assert d_orders[0]["target_quote_quantity"] == 500.0
+        assert len(c_orders) == 1
+        assert c_orders[0]["target_quote_quantity"] == 500.0
 
     def test_delisting_protection(self):
         actor = _make_actor(n_long=2, n_short=2)
@@ -167,16 +174,17 @@ class TestComputeOrders:
 
     def test_new_open_when_no_existing_position(self):
         actor = _make_actor(n_long=2, n_short=2)
+        # long={C,D}, short={A,B}; C not in any current set → NEW_LONG
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         orders = actor._compute_orders(
             composite,
             current_long=set(),
-            current_short={"C", "D"},
+            current_short={"A", "B"},
         )
-        a_orders = [o for o in orders if o["instrument_id"] == "A"]
-        assert len(a_orders) == 1
-        assert "NEW_LONG" in a_orders[0]["tags"]
-        assert not any("FLIP" in t for t in a_orders[0]["tags"])
+        c_orders = [o for o in orders if o["instrument_id"] == "C"]
+        assert len(c_orders) == 1
+        assert "NEW_LONG" in c_orders[0]["tags"]
+        assert not any("FLIP" in t for t in c_orders[0]["tags"])
 
     def test_order_dict_has_no_intent_field(self):
         actor = _make_actor(n_long=2, n_short=2)
@@ -219,10 +227,11 @@ class TestPositionMode:
     def test_fixed_mode_skips_hold(self):
         actor = _make_actor(position_mode="fixed")
         composite = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        # Highest=long → long={C,D}, short={A,B}; already at target
         orders = actor._compute_orders(
             composite,
-            current_long={"A", "B"},
-            current_short={"C", "D"},
+            current_long={"C", "D"},
+            current_short={"A", "B"},
         )
         assert len(orders) == 0
 

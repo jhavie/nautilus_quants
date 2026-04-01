@@ -41,7 +41,10 @@ def _shorts(targets: list[TargetPosition]) -> set[str]:
 # ---------------------------------------------------------------------------
 
 class _OldFMZSelectionPolicy:
-    """Original FMZ implementation (tuple[set, set] return) for comparison."""
+    """Reference FMZ implementation (tuple[set, set] return) for comparison.
+
+    Sort direction corrected in PR #71: highest scores = long, lowest = short.
+    """
 
     def __init__(self, n_long: int, n_short: int) -> None:
         self._n_long = n_long
@@ -52,8 +55,8 @@ class _OldFMZSelectionPolicy:
         current_long: set[str], current_short: set[str],
     ) -> tuple[set[str], set[str]]:
         sorted_symbols = sorted(scores.items(), key=lambda x: (x[1], x[0]))
-        long_targets = set(s for s, _ in sorted_symbols[:self._n_long])
-        short_targets = set(s for s, _ in sorted_symbols[-self._n_short:])
+        long_targets = set(s for s, _ in sorted_symbols[-self._n_long:])
+        short_targets = set(s for s, _ in sorted_symbols[:self._n_short])
         final_long = (current_long - short_targets) | long_targets
         final_short = (current_short - long_targets) | short_targets
         return final_long, final_short

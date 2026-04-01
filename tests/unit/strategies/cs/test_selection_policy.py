@@ -64,29 +64,36 @@ class TestFMZSelectionPolicy:
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
         scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
         targets = policy.select(scores, current_long=set(), current_short=set())
-        assert _longs(targets) == {"A", "B"}
-        assert _shorts(targets) == {"C", "D"}
+        # Highest scores = long, lowest = short (PR #71)
+        assert _longs(targets) == {"C", "D"}
+        assert _shorts(targets) == {"A", "B"}
 
     def test_sticky_hold_rank_slips(self):
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
+        # Sorted: B(1), C(2), A(2.5), D(3), E(4) → long={D,E}, short={B,C}
+        # A slipped from top-2 but not in short targets → sticky hold
         scores = {"B": 1.0, "C": 2.0, "A": 2.5, "D": 3.0, "E": 4.0}
-        targets = policy.select(scores, current_long={"A", "B"}, current_short={"D", "E"})
+        targets = policy.select(scores, current_long={"A", "E"}, current_short={"B", "C"})
         assert "A" in _longs(targets)
-        assert "B" in _longs(targets)
+        assert "E" in _longs(targets)
 
     def test_flip_long_to_short_target(self):
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
+        # Sorted: B(1), C(2), D(3), A(4) → long={A,D}, short={B,C}
+        # B was long → flips to short
         scores = {"B": 1.0, "C": 2.0, "D": 3.0, "A": 4.0}
         targets = policy.select(scores, current_long={"A", "B"}, current_short=set())
-        assert "A" not in _longs(targets)
-        assert "A" in _shorts(targets)
+        assert "B" not in _longs(targets)
+        assert "B" in _shorts(targets)
 
     def test_flip_short_to_long_target(self):
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
+        # Sorted: D(0.5), A(1), B(3), C(4) → long={B,C}, short={D,A}
+        # C was short → flips to long
         scores = {"D": 0.5, "A": 1.0, "B": 3.0, "C": 4.0}
         targets = policy.select(scores, current_long=set(), current_short={"C", "D"})
-        assert "D" in _longs(targets)
-        assert "D" not in _shorts(targets)
+        assert "C" in _longs(targets)
+        assert "C" not in _shorts(targets)
 
     def test_no_overlap(self):
         policy = FMZSelectionPolicy(n_long=2, n_short=2)
@@ -111,7 +118,7 @@ class TestFMZSelectionPolicy:
         policy = FMZSelectionPolicy(n_long=2, n_short=0)
         scores = {"A": 1.0, "B": 2.0, "C": 3.0}
         targets = policy.select(scores, current_long=set(), current_short=set())
-        assert _longs(targets) == {"A", "B"}
+        assert _longs(targets) == {"B", "C"}
         assert _shorts(targets) == set()
 
 
