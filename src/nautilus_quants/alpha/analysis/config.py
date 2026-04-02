@@ -9,6 +9,19 @@ import yaml
 
 
 @dataclass(frozen=True)
+class MetricsConfig:
+    """Configuration for extended factor metrics.
+
+    Attributes:
+        factor_metrics: Enable factor signal quality metrics
+            (Win Rate, Coverage, IC Half-Life, Monotonicity,
+             IC Linearity, IC AR(1))
+    """
+
+    factor_metrics: bool = False
+
+
+@dataclass(frozen=True)
 class AlphaAnalysisConfig:
     """Configuration for alpha factor analysis.
 
@@ -61,6 +74,7 @@ class AlphaAnalysisConfig:
     output_dir: str = "logs/alpha_analysis"
     output_format: tuple[str, ...] = ("png",)
     factor_cache_path: str = ""
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
 
 
 def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
@@ -117,4 +131,14 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         output_dir=raw.get("output_dir", "logs/alpha_analysis"),
         output_format=tuple(output_format),
         factor_cache_path=raw.get("factor_cache_path", ""),
+        metrics=_parse_metrics_config(raw.get("metrics", {})),
+    )
+
+
+def _parse_metrics_config(raw: dict | None) -> MetricsConfig:
+    """Parse metrics configuration from YAML dict."""
+    if not raw:
+        return MetricsConfig()
+    return MetricsConfig(
+        factor_metrics=raw.get("factor_metrics", False),
     )

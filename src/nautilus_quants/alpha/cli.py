@@ -328,6 +328,28 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
         if ic_results:
             report_gen.generate_summary(ic_results, output_dir, factor_series=factor_series)
 
+        # 9a. Extended factor signal quality metrics
+        factor_metrics_results = None
+
+        if config.metrics.factor_metrics and al_results:
+            from nautilus_quants.alpha.analysis.report import compute_all_factor_metrics
+
+            if not quiet:
+                click.echo("  Computing factor signal quality metrics...")
+            factor_metrics_results = {}
+            for fname, al_result in al_results.items():
+                factor_metrics_results[fname] = compute_all_factor_metrics(
+                    al_result["factor_data"],
+                    ic_results[fname],
+                    total_timestamps=len(pricing),
+                    total_assets=len(pricing.columns),
+                )
+
+        if factor_metrics_results:
+            report_gen.generate_extended_summary(
+                factor_metrics_results, output_dir,
+            )
+
         duration = time.time() - start_time
 
         # 10. Print results
@@ -335,6 +357,9 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
             click.echo()
             click.echo("Factor Analysis Summary:")
             report_gen.print_summary_table(ic_results, factor_series=factor_series)
+
+            if factor_metrics_results:
+                report_gen.print_extended_summary(factor_metrics_results)
 
             click.echo()
             click.echo("=" * 80)
