@@ -18,16 +18,58 @@ Constitution Compliance:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
+from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.model.data import Bar, BarType, DataType
 
 from nautilus_quants.utils.cache_keys import FACTOR_VALUES_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
-from nautilus_quants.factors.config import load_factor_config
+from nautilus_quants.factors.config import (
+    FactorConfig,
+    load_factor_config,
+    validate_factor_config,
+)
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
+
+# Timer name for the hot-reload check.
+_HOT_RELOAD_TIMER = "factor_config_hot_reload"
+
+
+def _try_reload_factors(
+    config_path: str,
+    last_mtime: float,
+) -> tuple[FactorConfig, float] | None:
+    """Check whether the factor config file has changed and reload if so.
+
+    Returns ``(new_config, new_mtime)`` on success, or ``None`` if the file
+    hasn't changed, doesn't exist, or fails validation.
+
+    This function is intentionally extracted from the Actor class so that it
+    can be unit-tested without Nautilus infrastructure.
+    """
+    path = Path(config_path)
+    try:
+        current_mtime = path.stat().st_mtime
+    except OSError:
+        return None
+
+    if current_mtime == last_mtime:
+        return None
+
+    try:
+        new_config = load_factor_config(config_path)
+        errors = validate_factor_config(new_config)
+        if errors:
+            return None
+    except Exception:
+        return None
+
+    return new_config, current_mtime
 
 
 def _detect_extra_bar_fields(bar: Bar) -> list[str]:
@@ -119,6 +161,8 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     bar_types: list[str] = []
     flush_timeout_secs: int = 5
     factor_cache_path: str = ""
+    enable_hot_reload: bool = False
+    hot_reload_interval_secs: int = 300
 
 
 class FactorEngineActor(BarSubscriptionMixin, Actor):
@@ -179,6 +223,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._factor_snapshots: list[tuple[int, dict[str, dict[str, float]]]] = []
         self._cached_results: dict[int, dict[str, dict[str, float]]] | None = None
         self._flush_count: int = 0
+        self._factors_mtime: float = 0.0
 
     def on_start(self) -> None:
         """
@@ -274,11 +319,84 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                     f"will save cache on stop: {cache_path}"
                 )
 
+        # Hot-reload: set up periodic config check via Nautilus Clock Timer.
+        if self._config.enable_hot_reload:
+            try:
+                self._factors_mtime = Path(
+                    self._config.factor_config_path
+                ).stat().st_mtime
+            except OSError:
+                self.log.warning(
+                    "Cannot stat factor config file, hot-reload disabled"
+                )
+            else:
+                self.clock.set_timer(
+                    name=_HOT_RELOAD_TIMER,
+                    interval=pd.Timedelta(
+                        seconds=self._config.hot_reload_interval_secs,
+                    ),
+                    callback=self._on_hot_reload_check,
+                )
+                self.log.info(
+                    f"Factor config hot-reload enabled, "
+                    f"interval={self._config.hot_reload_interval_secs}s"
+                )
+
         self.log.info("FactorEngineActor started successfully")
+
+    def _on_hot_reload_check(self, event: TimeEvent) -> None:
+        """Clock Timer callback: reload factor config if file changed."""
+        if self._engine is None:
+            return
+
+        result = _try_reload_factors(
+            self._config.factor_config_path, self._factors_mtime,
+        )
+        if result is None:
+            return
+
+        new_config, new_mtime = result
+
+        # Sync parameters (Fix P1: was missing, expressions using
+        # config parameters would keep stale values after reload).
+        self._engine._parameters = new_config.parameters.copy()
+
+        # Clean up factors/variables removed from the new config (Fix P1:
+        # reload was additive-only, stale entries lingered indefinitely).
+        new_factor_names = {f.name for f in new_config.factors}
+        for name in set(self._engine.factor_names) - new_factor_names:
+            del self._engine._factors[name]
+            self._engine._factor_descriptions.pop(name, None)
+
+        new_var_names = set(new_config.variables.keys())
+        for name in set(self._engine.variable_names) - new_var_names:
+            del self._engine._variables[name]
+            if name in self._engine._variable_order:
+                self._engine._variable_order.remove(name)
+
+        # Register new/updated variables and factors.
+        for var_name, var_expr in new_config.variables.items():
+            self._engine.register_variable(var_name, var_expr)
+        for factor in new_config.factors:
+            self._engine.register_expression_factor(
+                factor.name, factor.expression, factor.description,
+            )
+        self._factors_mtime = new_mtime
+        self.log.info(
+            f"Factor config hot-reloaded: {len(new_config.factors)} factors, "
+            f"config={new_config.name} v{new_config.version}"
+        )
 
     def on_stop(self) -> None:
         """Actions to perform on actor stop."""
         self.log.info("Stopping FactorEngineActor...")
+
+        # Cancel hot-reload timer if active.
+        if self._config.enable_hot_reload:
+            try:
+                self.clock.cancel_timer(_HOT_RELOAD_TIMER)
+            except Exception:
+                pass
 
         # Flush any pending data before shutdown
         if self._pending_ts > 0 and self._engine is not None:
