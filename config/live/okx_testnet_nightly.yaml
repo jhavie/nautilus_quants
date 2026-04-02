@@ -110,3 +110,4 @@ engine:
         enable_residual_sweep: true
         residual_sweep_min_notional_fallback: 5.0
         max_sweep_retries: 3
+        market_timeout_secs: 1500.0  # 25 min (< 30 min bar interval)

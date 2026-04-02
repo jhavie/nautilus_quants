@@ -85,7 +85,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"enable_residual_sweep={self._config.enable_residual_sweep}, "
             f"max_sweep_retries={self._config.max_sweep_retries}, "
             f"max_transient_retries={self._config.max_transient_retries}, "
-            f"transient_retry_delay_secs={self._config.transient_retry_delay_secs}"
+            f"transient_retry_delay_secs={self._config.transient_retry_delay_secs}, "
+            f"market_timeout_secs={self._config.market_timeout_secs}"
         )
         self._rebuild_runtime_indexes(rearm_timers=True)
 
@@ -186,6 +187,10 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
                 self._arm_timeout(state)
         elif state.active_order_kind == SpawnKind.MARKET:
             session.on_market_accepted()
+            if self._config.market_timeout_secs > 0:
+                self._arm_timeout(
+                    state, timeout_override=self._config.market_timeout_secs,
+                )
         self._publish_execution_states()
 
     def on_time_event(self, event: TimeEvent) -> None:
@@ -212,6 +217,15 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             max_chase_attempts=self._get_max_chase(state),
             fallback_to_market=self._config.fallback_to_market,
         )
+        if (
+            state.active_order_kind == SpawnKind.MARKET
+            and command == SessionCommand.CANCEL_ACTIVE
+        ):
+            self.log.warning(
+                f"PostLimit MARKET TIMEOUT: {state.primary_order_id} "
+                f"{state.instrument_id} abandoned after "
+                f"{self._config.market_timeout_secs:.0f}s unfilled"
+            )
         if command == SessionCommand.CANCEL_ACTIVE:
             self.cancel_order(current_order)
         elif command == SessionCommand.FAIL:
@@ -671,9 +685,13 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         PostLimitSession(state).mark_failed()
         self._publish_execution_states()
 
-    def _arm_timeout(self, state: OrderExecutionState) -> None:
+    def _arm_timeout(
+        self,
+        state: OrderExecutionState,
+        timeout_override: float | None = None,
+    ) -> None:
         self._cancel_timer(state)
-        timeout = self._get_timeout_secs(state)
+        timeout = timeout_override or self._get_timeout_secs(state)
         self._timer_to_primary[state.timer_name] = state.primary_order_id
         self.clock.set_timer(
             name=state.timer_name,

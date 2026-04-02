@@ -52,6 +52,11 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     max_sweep_retries : int, default 3
         Maximum retry attempts for residual sweep market orders when a sweep
         child is canceled/rejected/denied.
+    market_timeout_secs : float, default 1800.0
+        Seconds to wait for a market-fallback order to fill before cancelling
+        and failing the session.  Prevents stuck market orders on low-liquidity
+        venues (e.g. testnet) from accumulating across rebalance bars.
+        Set to 0 to disable (market orders wait indefinitely).
     """
 
     exec_algorithm_id: ExecAlgorithmId | None = ExecAlgorithmId("PostLimit")
@@ -67,3 +72,4 @@ class PostLimitExecAlgorithmConfig(ExecAlgorithmConfig, frozen=True):
     enable_residual_sweep: bool = True
     residual_sweep_min_notional_fallback: float = 5.0
     max_sweep_retries: int = 3
+    market_timeout_secs: float = 1800.0

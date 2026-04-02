@@ -113,6 +113,38 @@ class TestPostLimitExecAlgorithmHooks:
 
             algo._record_failed_primary.assert_called_once_with(order, anchor_px=0.0)
 
+    def test_market_accepted_arms_timeout_with_market_timeout_secs(self) -> None:
+        from nautilus_quants.execution.post_limit.config import PostLimitExecAlgorithmConfig
+
+        algo = PostLimitExecAlgorithm(PostLimitExecAlgorithmConfig(market_timeout_secs=1500.0))
+        stack, _, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.PENDING_MARKET, kind=SpawnKind.MARKET)
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            algo._arm_timeout = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_accepted(SimpleNamespace(client_order_id=state.active_order_id))
+
+            assert state.state == OrderState.WORKING_MARKET
+            algo._arm_timeout.assert_called_once_with(state, timeout_override=1500.0)
+
+    def test_market_timeout_not_armed_when_disabled(self) -> None:
+        from nautilus_quants.execution.post_limit.config import PostLimitExecAlgorithmConfig
+
+        algo = PostLimitExecAlgorithm(PostLimitExecAlgorithmConfig(market_timeout_secs=0))
+        stack, _, _, _ = _patch_algo_environment(algo)
+        with stack:
+            state = _make_state(state=OrderState.PENDING_MARKET, kind=SpawnKind.MARKET)
+            algo._states[state.primary_order_id] = state
+            algo._active_child_to_primary[state.active_order_id] = state.primary_order_id
+            algo._arm_timeout = MagicMock()  # type: ignore[method-assign]
+
+            algo.on_order_accepted(SimpleNamespace(client_order_id=state.active_order_id))
+
+            assert state.state == OrderState.WORKING_MARKET
+            algo._arm_timeout.assert_not_called()
+
     def test_on_order_accepted_arms_timeout_only_after_limit_accept(self) -> None:
         algo = PostLimitExecAlgorithm()
         stack, _, _, _ = _patch_algo_environment(algo)
