@@ -70,6 +70,9 @@ class PostLimitSession:
     def on_timeout(
         self, *, max_chase_attempts: int, fallback_to_market: bool
     ) -> SessionCommand:
+        if self.state.state == OrderState.WORKING_MARKET:
+            return SessionCommand.CANCEL_ACTIVE
+
         if self.state.state != OrderState.WORKING_LIMIT:
             return SessionCommand.NOOP
 
@@ -161,6 +164,9 @@ class PostLimitSession:
                 self.state.used_market_fallback = True
                 return SessionCommand.SUBMIT_MARKET
 
+            return SessionCommand.FAIL
+
+        if self.state.state == OrderState.WORKING_MARKET:
             return SessionCommand.FAIL
 
         return SessionCommand.NOOP

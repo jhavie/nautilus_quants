@@ -186,6 +186,27 @@ class TestPostLimitSession:
         assert state.used_market_fallback is True
         assert command == SessionCommand.SUBMIT_MARKET
 
+    def test_timeout_working_market_returns_cancel_active(self) -> None:
+        """Market order stuck unfilled → timeout should cancel it."""
+        state = _make_state(OrderState.WORKING_MARKET)
+
+        command = PostLimitSession(state).on_timeout(
+            max_chase_attempts=3,
+            fallback_to_market=True,
+        )
+
+        assert command == SessionCommand.CANCEL_ACTIVE
+
+    def test_cancel_confirmed_working_market_returns_fail(self) -> None:
+        """Market order cancelled after timeout → session should fail."""
+        state = _make_state(OrderState.WORKING_MARKET)
+
+        command = PostLimitSession(state).on_cancel_confirmed(
+            max_chase_attempts=3, fallback_to_market=True,
+        )
+
+        assert command == SessionCommand.FAIL
+
     def test_non_transient_reject_bypasses_retry(self) -> None:
         state = _make_state(OrderState.PENDING_LIMIT)
 
