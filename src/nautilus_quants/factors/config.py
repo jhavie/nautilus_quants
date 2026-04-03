@@ -36,6 +36,20 @@ class FactorDefinition:
 
 
 @dataclass(frozen=True)
+class CompositeConfig:
+    """Declarative composite factor configuration.
+
+    Attributes:
+        name: Output factor name (default "composite")
+        transform: Transform applied before weighting (normalize/cs_rank/cs_zscore/raw)
+        weights: Factor name → weight mapping
+    """
+    name: str = "composite"
+    transform: str = "normalize"
+    weights: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PerformanceConfig:
     """
     Performance monitoring configuration.
@@ -72,7 +86,13 @@ class FactorConfig:
     variables: dict[str, str] = field(default_factory=dict)
     factors: list[FactorDefinition] = field(default_factory=list)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
-    
+    _pipeline: list[FactorDefinition] = field(default_factory=list)
+
+    @property
+    def all_factors(self) -> list[FactorDefinition]:
+        """All factors: base (factors) + auto-generated (composite/derived)."""
+        return self.factors + self._pipeline
+
     def get_parameter(self, name: str, default: Any = None) -> Any:
         """Get a parameter value by name."""
         return self.parameters.get(name, default)
@@ -101,6 +121,59 @@ def generate_factor_id(source: str, key: str) -> str:
     if source:
         return f"{source}_{key}"
     return key
+
+
+_TRANSFORM_TEMPLATES: dict[str, str] = {
+    "normalize": "normalize({factor}, true, 0)",
+    "cs_rank": "cs_rank({factor})",
+    "cs_zscore": "cs_zscore({factor})",
+}
+
+_TRANSFORM_SUFFIXES: dict[str, str] = {
+    "normalize": "_norm",
+    "cs_rank": "_ranked",
+    "cs_zscore": "_zscored",
+}
+
+
+def _build_composite_pipeline(
+    raw: dict[str, Any],
+) -> list[FactorDefinition]:
+    """Generate pipeline FactorDefinitions from a composite config."""
+    weights: dict[str, float] = raw.get("weights", {})
+    if not weights:
+        return []
+
+    transform = raw.get("transform", "normalize")
+    comp_name = raw.get("name", "composite")
+
+    pipeline: list[FactorDefinition] = []
+    terms: list[str] = []
+
+    if transform == "raw":
+        # No intermediate factors
+        for factor_name, weight in weights.items():
+            terms.append(f"{weight} * {factor_name}")
+    else:
+        template = _TRANSFORM_TEMPLATES.get(transform)
+        suffix = _TRANSFORM_SUFFIXES.get(transform, f"_{transform}")
+        if template is None:
+            template = f"{transform}({{factor}})"
+
+        for factor_name, weight in weights.items():
+            derived_name = f"{factor_name}{suffix}"
+            pipeline.append(FactorDefinition(
+                name=derived_name,
+                expression=template.format(factor=factor_name),
+            ))
+            terms.append(f"{weight} * {derived_name}")
+
+    composite_expr = " + ".join(terms)
+    pipeline.append(FactorDefinition(
+        name=comp_name,
+        expression=composite_expr,
+    ))
+    return pipeline
 
 
 class ConfigValidationError(Exception):
@@ -226,6 +299,12 @@ def load_factor_config(path: str | Path) -> FactorConfig:
         warning_threshold_ms=perf_raw.get("warning_threshold_ms", 0.5),
     )
     
+    # Parse composite config → auto-generate pipeline factors
+    pipeline: list[FactorDefinition] = []
+    composite_raw = raw_config.get("composite")
+    if composite_raw and isinstance(composite_raw, dict):
+        pipeline = _build_composite_pipeline(composite_raw)
+
     config = FactorConfig(
         name=name,
         version=version,
@@ -235,6 +314,7 @@ def load_factor_config(path: str | Path) -> FactorConfig:
         variables=variables,
         factors=factors,
         performance=performance,
+        _pipeline=pipeline,
     )
     
     # Validate

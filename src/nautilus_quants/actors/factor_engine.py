@@ -363,7 +363,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         # Clean up factors/variables removed from the new config (Fix P1:
         # reload was additive-only, stale entries lingered indefinitely).
-        new_factor_names = {f.name for f in new_config.factors}
+        new_factor_names = {f.name for f in new_config.all_factors}
         for name in set(self._engine.factor_names) - new_factor_names:
             del self._engine._factors[name]
             self._engine._factor_descriptions.pop(name, None)
@@ -377,13 +377,13 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         # Register new/updated variables and factors.
         for var_name, var_expr in new_config.variables.items():
             self._engine.register_variable(var_name, var_expr)
-        for factor in new_config.factors:
+        for factor in new_config.all_factors:
             self._engine.register_expression_factor(
                 factor.name, factor.expression, factor.description,
             )
         self._factors_mtime = new_mtime
         self.log.info(
-            f"Factor config hot-reloaded: {len(new_config.factors)} factors, "
+            f"Factor config hot-reloaded: {len(new_config.all_factors)} factors, "
             f"config={new_config.name} v{new_config.version}"
         )
 

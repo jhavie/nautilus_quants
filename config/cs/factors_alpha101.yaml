@@ -1,6 +1,5 @@
 # Alpha101 3-Factor Composite Strategy Configuration (CS Version)
 #
-# 4h composite:  0.4 * alpha044     + 0.3 * alpha033     + 0.3 * alpha017
 # 8h composite:  0.4 * alpha044_8h  + 0.3 * alpha033_8h  + 0.3 * alpha017_8h
 #
 # 8h equivalent method: synthesize 8h bars from 4h bars
@@ -18,8 +17,6 @@
 # Sign convention: CS longs top N (highest) / shorts bottom N (lowest).
 #   Alpha analysis shows -1*expr has positive IC (higher → better returns).
 #   For CS we KEEP the -1* so highest values = best returns = longed.
-#
-# Composite weights sum to 1.0
 
 metadata:
   name: alpha101_3factor_cs
@@ -28,124 +25,45 @@ metadata:
   description: "Alpha101 3-factor composite for CS strategy (negated for highest=long)"
 
 parameters:
-  # 4h windows (original)
-  w44_4h:  5    # alpha044: 5 x 4h bars
-  w17a_4h: 10   # alpha017 ts_rank(close): 10 x 4h bars
-  w17b_4h: 20   # alpha017 ts_mean(volume): 20 x 4h bars
-  w17c_4h: 5    # alpha017 ts_rank(vol_ratio): 5 x 4h bars
-  # 8h windows (×2)
+  # 8h windows (×2 of 4h originals)
   w44_8h:  10   # alpha044: 5 x 8h = 10 x 4h bars
   w17a_8h: 20   # alpha017 ts_rank(close): 10 x 8h = 20 x 4h bars
   w17b_8h: 40   # alpha017 ts_mean(volume): 20 x 8h = 40 x 4h bars
   w17c_8h: 10   # alpha017 ts_rank(vol_ratio): 5 x 8h = 10 x 4h bars
 
 variables:
-  # returns: "delta(close, 1) / delay(close, 1)"
-  # --- 8h synthetic OHLCV from 4h bars ---
+  # 8h synthetic OHLCV from 4h bars
   high_8h:   "ts_max(high, 2)"       # 8h high = max of 2 x 4h highs
   volume_8h: "ts_sum(volume, 2)"     # 8h volume = sum of 2 x 4h volumes
   open_8h:   "delay(open, 1)"        # 8h open = previous 4h bar's open
-  # close_8h = close (current 4h close is the 8h bar's close, no alias needed)
 
 factors:
-  # ==========================================================================
-  # Phase 1: 原始因子 (Time-Series + Cross-Sectional via Evaluator)
-  # ==========================================================================
-
-  # 量价rank相关因子 — 全局最高 ICIR=0.265
-  # alpha044:
-  #   expression: "-correlation(high, rank(volume), 5)"
-  #   description: "Alpha#44: High-price vs volume rank correlation (negated for CS)"
-  #   category: "volume"
-
-  # # 开盘/收盘比率因子 — 全局最高 4h IC=0.047
-  # alpha033:
-  #   expression: "-rank(1 - open / close)"
-  #   description: "Alpha#33: Open/close ratio rank (negated for CS)"
-  #   category: "momentum"
-
-  # # 趋势×加速×相对成交量三维因子 — ICIR=0.260
-  # alpha017:
-  #   expression: "-(rank(ts_rank(close, 10)) * rank(delta(delta(close, 1), 1)) * rank(ts_rank(volume / ts_mean(volume, 20), 5)))"
-  #   description: "Alpha#17: Trend × acceleration × relative volume triple product (negated for CS)"
-  #   category: "liquidity"
-
-  # ==========================================================================
-  # Phase 1b: 8h 等价因子 (via 4h bar synthesis, overlapping windows)
-  # ==========================================================================
-
-  # alpha044 @ 8h: high_8h vs rank(volume_8h), window=10 (5×8h expressed in 4h)
   alpha044_8h:
     expression: "-correlation(high_8h, rank(volume_8h), w44_8h)"
     description: "Alpha#44 @ 8h equiv: ts_max(high,2) vs rank(ts_sum(vol,2)), window=10x4h"
-    category: "volume"
     prototype: "alpha044"
     tags: ["volume"]
 
-  # alpha033 @ 8h: open_8h / close 比率 — 纯截面因子，用合成open_8h
   alpha033_8h:
     expression: "-rank(1 - open_8h / close)"
     description: "Alpha#33 @ 8h equiv: open=delay(open,1) as 8h-bar open vs close"
-    category: "momentum"
     prototype: "alpha033"
     tags: ["momentum"]
 
-  # alpha017 @ 8h: 所有时序窗口 ×2，加速度步长也 ×2
   alpha017_8h:
     expression: "-(rank(ts_rank(close, w17a_8h)) * rank(delta(delta(close, 2), 2)) * rank(ts_rank(volume_8h / ts_mean(volume_8h, w17b_8h), w17c_8h)))"
     description: "Alpha#17 @ 8h equiv: windows 10→20, 20→40, 5→10; accel delta lag 1→2; volume_8h synthesized"
-    category: "liquidity"
     prototype: "alpha017"
     tags: ["liquidity"]
 
-  # ==========================================================================
-  # Phase 2: 归一化因子 (Cross-Sectional z-score only)
-  # ==========================================================================
-
-  # alpha044_norm:
-  #   expression: "normalize(alpha044, true, 0)"
-  #   description: "Normalized alpha044 (z-score)"
-
-  # alpha033_norm:
-  #   expression: "normalize(alpha033, true, 0)"
-  #   description: "Normalized alpha033 (z-score)"
-
-  # alpha017_norm:
-  #   expression: "normalize(alpha017, true, 0)"
-  #   description: "Normalized alpha017 (z-score)"
-
-  # --- 8h 归一化 ---
-  alpha044_8h_norm:
-    expression: "normalize(alpha044_8h, true, 0)"
-    description: "Normalized alpha044_8h (z-score)"
-    prototype: "alpha044"
-    tags: ["volume", "normalized"]
-
-  alpha033_8h_norm:
-    expression: "normalize(alpha033_8h, true, 0)"
-    description: "Normalized alpha033_8h (z-score)"
-    prototype: "alpha033"
-    tags: ["momentum", "normalized"]
-
-  alpha017_8h_norm:
-    expression: "normalize(alpha017_8h, true, 0)"
-    description: "Normalized alpha017_8h (z-score)"
-    prototype: "alpha017"
-    tags: ["liquidity", "normalized"]
-
-  # ==========================================================================
-  # Phase 3: 3 因子合成
-  # ==========================================================================
-
-  # composite:
-  #   expression: "0.4 * alpha044_norm + 0.3 * alpha033_norm + 0.3 * alpha017_norm"
-  #   description: "3-factor composite @ 4h: alpha044(0.4) + alpha033(0.3) + alpha017(0.3)"
-
-  composite:
-    expression: "0.4 * alpha044_8h_norm + 0.3 * alpha033_8h_norm + 0.3 * alpha017_8h_norm"
-    description: "3-factor composite @ 8h equiv: same weights, 8h-synthesized factors"
-    prototype: "composite"
-    tags: ["composite"]
+# Declarative composite: auto-generates _norm factors + composite expression
+composite:
+  name: composite
+  transform: normalize
+  weights:
+    alpha044_8h: 0.4
+    alpha033_8h: 0.3
+    alpha017_8h: 0.3
 
 performance:
   enable_timing: true
