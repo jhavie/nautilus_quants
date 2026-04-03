@@ -24,7 +24,8 @@ import pandas as pd
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
 from nautilus_trader.common.events import TimeEvent
-from nautilus_trader.model.data import Bar, BarType, DataType
+from nautilus_trader.model.data import Bar, BarType, DataType, FundingRateUpdate
+from nautilus_trader.model.identifiers import InstrumentId
 
 from nautilus_quants.utils.cache_keys import FACTOR_VALUES_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
@@ -150,6 +151,13 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
         from cache instead of being computed on each bar.  If set but the
         directory is empty, factor values are computed normally and saved
         to this path on actor stop for future runs.
+    subscribe_funding_rates : bool, default False
+        Whether to subscribe to FundingRateUpdate events and inject the
+        latest funding rate into bar_data as ``funding_rate`` field.
+    oi_data_path : str, default ""
+        Path to open interest Parquet directory. If set, OI data is
+        loaded at startup and injected into bar_data as ``open_interest``
+        and ``open_interest_value`` fields on each bar.
     """
 
     factor_config_path: str
@@ -163,6 +171,8 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     factor_cache_path: str = ""
     enable_hot_reload: bool = False
     hot_reload_interval_secs: int = 300
+    subscribe_funding_rates: bool = False
+    oi_data_path: str = ""
 
 
 class FactorEngineActor(BarSubscriptionMixin, Actor):
@@ -225,6 +235,11 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._flush_count: int = 0
         self._factors_mtime: float = 0.0
 
+        # Funding rate: cache latest rate per instrument (forward-fill)
+        self._latest_funding_rates: dict[str, float] = {}
+        # Open interest: preloaded lookup {inst_id: {ts_ns: {field: val}}}
+        self._oi_lookup: dict[str, dict[int, dict[str, float]]] = {}
+
     def on_start(self) -> None:
         """
         Actions to perform on actor start.
@@ -279,6 +294,58 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self.log.info(
             f"Tracking {len(self._expected_instruments)} instruments for flush sync"
         )
+
+        # Subscribe to FundingRateUpdate events if configured
+        if self._config.subscribe_funding_rates:
+            fr_extra = ["funding_rate"]
+            for inst_id_str in self._expected_instruments:
+                inst_id = InstrumentId.from_str(inst_id_str)
+                self.subscribe_funding_rates(inst_id)
+            self.log.info(
+                f"Subscribed to funding rates for "
+                f"{len(self._expected_instruments)} instruments"
+            )
+        else:
+            fr_extra = []
+
+        # Load open interest lookup if configured
+        if self._config.oi_data_path:
+            from nautilus_quants.data.transform.open_interest import (
+                load_oi_lookup,
+            )
+
+            try:
+                bar_spec = self._config.bar_spec or "4h"
+                self._oi_lookup = load_oi_lookup(
+                    self._config.oi_data_path,
+                    list(self._expected_instruments),
+                    timeframe=bar_spec,
+                )
+                total_rows = sum(
+                    len(ts_map) for ts_map in self._oi_lookup.values()
+                )
+                self.log.info(
+                    f"Loaded OI lookup: {len(self._oi_lookup)} instruments, "
+                    f"{total_rows} total data points"
+                )
+            except Exception as e:
+                self.log.warning(f"Failed to load OI data: {e}")
+                self._oi_lookup = {}
+            oi_extra = ["open_interest", "open_interest_value"]
+        else:
+            oi_extra = []
+
+        # Register FR/OI as extra fields so Buffer initializes them
+        market_data_extra = fr_extra + oi_extra
+        if market_data_extra and self._engine is not None:
+            existing = list(self._engine._buffer._extra_fields)
+            new_fields = [f for f in market_data_extra if f not in existing]
+            if new_fields:
+                all_extra = list(existing) + new_fields
+                self._engine.set_extra_fields(all_extra)
+                self.log.info(
+                    f"Registered market data extra fields: {new_fields}"
+                )
 
         # Load pre-computed factor cache if configured
         # (after bar subscription so _expected_instruments is available for validation)
@@ -463,7 +530,11 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                     self._extra_fields_detected = True
                     extra = _detect_extra_bar_fields(bar)
                     if extra:
-                        self._engine.set_extra_fields(extra)
+                        # Merge with already-registered fields (e.g. FR/OI
+                        # from on_start) to avoid overwriting them.
+                        existing = list(self._engine._buffer._extra_fields)
+                        merged = list(dict.fromkeys(extra + existing))
+                        self._engine.set_extra_fields(merged)
                         self.log.info(f"Auto-detected extra bar fields: {extra}")
             except ImportError:
                 self._extra_fields_detected = True
@@ -492,6 +563,17 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         # Accumulate bar into panel buffer
         bar_data = _extract_bar_data(bar)
+
+        # Inject latest funding rate (forward-fill from on_funding_rate)
+        if instrument_id in self._latest_funding_rates:
+            bar_data["funding_rate"] = self._latest_funding_rates[instrument_id]
+
+        # Inject open interest from preloaded lookup
+        if self._oi_lookup and instrument_id in self._oi_lookup:
+            oi_data = self._oi_lookup[instrument_id].get(ts)
+            if oi_data:
+                bar_data.update(oi_data)
+
         self._engine.on_bar(instrument_id, bar_data, ts)
         self._pending_ts = ts
         self._pending_instruments.add(instrument_id)
@@ -507,6 +589,16 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         ):
             # First instrument arrived → start one-shot timeout alert
             self._set_flush_alert(ts)
+
+    def on_funding_rate(self, funding_rate: FundingRateUpdate) -> None:
+        """Cache latest funding rate for injection into bar_data.
+
+        The cached value is injected on each subsequent ``on_bar()`` call,
+        providing natural forward-fill: the 8h funding rate automatically
+        persists across 1h/4h bars until the next settlement.
+        """
+        inst_id = str(funding_rate.instrument_id)
+        self._latest_funding_rates[inst_id] = float(funding_rate.rate)
 
     def _flush_and_publish(self, ts: int) -> None:
         """Flush a timestamp, compute all factors, and publish results."""
@@ -644,6 +736,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._expected_instruments.clear()
         self._cancel_flush_alert()
         self._factor_snapshots.clear()
+        self._latest_funding_rates.clear()
+        self._oi_lookup.clear()
         self.log.info("FactorEngineActor reset")
 
     # -------------------------------------------------------------------------
