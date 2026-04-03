@@ -600,16 +600,19 @@ def inspect(factor_id: str, env_name: str | None, db_dir: str) -> None:
         bt_repo = BacktestRepository(db)
         runs = bt_repo.list_backtests(factor_id=factor_id)
         if runs:
-            click.echo(f"\nBacktests ({len(runs)}):")
+            click.echo(f"\nBacktests ({len(runs)} records):")
             for r in runs:
                 def _v(v: float | None, fmt: str = ".4f") -> str:
                     return f"{v:{fmt}}" if v is not None else "-"
                 dd = f"{r.max_drawdown:.2%}" if r.max_drawdown else "-"
+                factors = bt_repo.get_backtest_factors(r.backtest_id)
+                fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
                 click.echo(
                     f"  {r.backtest_id}  sharpe={_v(r.sharpe_ratio)} "
                     f"pnl%={_v(r.total_pnl_pct, '.2f')} "
-                    f"dd={dd} tf={r.timeframe} "
-                    f"instr={r.instrument_count}"
+                    f"max_dd={dd} timeframe={r.timeframe} "
+                    f"instr={r.instrument_count} "
+                    f"factors=[{fids}]"
                 )
     finally:
         db.close()
