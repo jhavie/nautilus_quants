@@ -476,7 +476,7 @@ def _tail_log_entries(
 ) -> list[dict[str, str]]:
     """Read recent WARN/ERROR entries from the newest log file."""
     try:
-        log_files = sorted(log_dir.glob("*.log"))
+        log_files = sorted(log_dir.glob("*.log"), key=lambda f: f.stat().st_mtime)
     except Exception:
         return []
     if not log_files:
