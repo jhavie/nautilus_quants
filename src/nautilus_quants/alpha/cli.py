@@ -587,9 +587,29 @@ def inspect(factor_id: str, env_name: str | None, db_dir: str) -> None:
             click.echo(f"\nAnalysis metrics ({len(metrics)} records):")
             for m in metrics[:12]:
                 icir_str = f"{m.icir:.4f}" if m.icir is not None else "-"
+                ic_str = f"{m.ic_mean:.4f}" if m.ic_mean is not None else "-"
                 click.echo(
                     f"  run={m.run_id} period={m.period} "
-                    f"ICIR={icir_str} timeframe={m.timeframe}"
+                    f"IC={ic_str} ICIR={icir_str} timeframe={m.timeframe}"
+                )
+
+        from nautilus_quants.alpha.registry.backtest_repository import (
+            BacktestRepository,
+        )
+
+        bt_repo = BacktestRepository(db)
+        runs = bt_repo.list_backtests(factor_id=factor_id)
+        if runs:
+            click.echo(f"\nBacktests ({len(runs)}):")
+            for r in runs:
+                def _v(v: float | None, fmt: str = ".4f") -> str:
+                    return f"{v:{fmt}}" if v is not None else "-"
+                dd = f"{r.max_drawdown:.2%}" if r.max_drawdown else "-"
+                click.echo(
+                    f"  {r.backtest_id}  sharpe={_v(r.sharpe_ratio)} "
+                    f"pnl%={_v(r.total_pnl_pct, '.2f')} "
+                    f"dd={dd} tf={r.timeframe} "
+                    f"instr={r.instrument_count}"
                 )
     finally:
         db.close()
@@ -655,6 +675,61 @@ def metrics(
                 f"{_f(m.monotonicity, 6, 2)} {wr} {_f(m.ic_linearity, 7, 3)} "
                 f"{_f(m.ic_skew)} {_f(m.ic_kurtosis)} {_f(m.ic_ar1, 7, 3)} {n}"
             )
+    finally:
+        db.close()
+
+
+@cli.command("backtests")
+@click.option("--factor-id", default=None, help="Filter by factor_id.")
+@click.option("--limit", default=20, type=int, help="Max rows.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def backtests(
+    factor_id: str | None, limit: int,
+    env_name: str | None, db_dir: str,
+) -> None:
+    """List backtest runs from the registry."""
+    from nautilus_quants.alpha.registry.backtest_repository import BacktestRepository
+    from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.environment import resolve_env
+
+    env = resolve_env(env_name)
+    db = RegistryDatabase.for_environment(env, db_dir)
+    bt_repo = BacktestRepository(db)
+    try:
+        runs = bt_repo.list_backtests(factor_id=factor_id, limit=limit)
+        if not runs:
+            click.echo("(no backtests found)")
+            return
+
+        def _f(v: float | None, w: int = 8, d: int = 4) -> str:
+            return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
+
+        click.echo(
+            f"{'backtest_id':<18} {'strategy':<20} {'tf':<4} "
+            f"{'instr':>5} {'sharpe':>8} {'pnl%':>8} {'dd%':>8} "
+            f"{'wr%':>7} {'dur(s)':>7}"
+        )
+        click.echo("-" * 100)
+        for r in runs:
+            wr = f"{r.win_rate * 100:>6.1f}%" if r.win_rate else f"{'-':>7}"
+            dd = f"{r.max_drawdown * 100:>7.2f}%" if r.max_drawdown else f"{'-':>8}"
+            click.echo(
+                f"{r.backtest_id:<18} {r.strategy_name:<20} {r.timeframe:<4} "
+                f"{r.instrument_count:>5} {_f(r.sharpe_ratio)} "
+                f"{_f(r.total_pnl_pct)} {dd} "
+                f"{wr} {r.duration_seconds:>7.1f}"
+            )
+        # Show factors per backtest
+        for r in runs:
+            factors = bt_repo.get_backtest_factors(r.backtest_id)
+            if factors:
+                fids = [
+                    f"{bf.factor_id}({bf.role[0]})" for bf in factors
+                ]
+                click.echo(f"  factors: {', '.join(fids)}")
+
+        click.echo(f"({len(runs)} backtests)")
     finally:
         db.close()
 
