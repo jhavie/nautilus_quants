@@ -6,8 +6,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 from click.testing import CliRunner
+
+pytest.importorskip("duckdb", reason="duckdb required for registry tests")
 
 from nautilus_quants.alpha.cli import cli
 from nautilus_quants.factors.config import load_factor_config
