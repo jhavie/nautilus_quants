@@ -109,7 +109,7 @@ class FactorEngine:
             self.register_variable(var_name, var_expr)
 
         # Register factors
-        for factor_def in config.factors:
+        for factor_def in config.all_factors:
             self.register_expression_factor(
                 name=factor_def.name,
                 expression=factor_def.expression,

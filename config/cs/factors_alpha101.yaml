@@ -1,0 +1,70 @@
+# Alpha101 3-Factor Composite Strategy Configuration (CS Version)
+#
+# 8h composite:  0.4 * alpha044_8h  + 0.3 * alpha033_8h  + 0.3 * alpha017_8h
+#
+# 8h equivalent method: synthesize 8h bars from 4h bars
+#   high_8h   = ts_max(high, 2)      open_8h = delay(open, 1)
+#   volume_8h = ts_sum(volume, 2)    close_8h = close  (last 4h close = 8h close)
+#   All time-series windows ×2 (e.g. 5→10, 10→20, 20→40)
+#
+# Factor selection rationale:
+#   - alpha044: ICIR=0.265, IC(1d)=0.046 — 全局最强
+#   - alpha033: ICIR=0.236, 4h IC=0.047 — 最高短期 IC
+#   - alpha017: ICIR=0.260 — 趋势×加速×成交量三维信号
+#
+# Normalization: z-score only (no quantile clip — FMZ is rank-based, clipping hurts tail discrimination)
+#
+# Sign convention: CS longs top N (highest) / shorts bottom N (lowest).
+#   Alpha analysis shows -1*expr has positive IC (higher → better returns).
+#   For CS we KEEP the -1* so highest values = best returns = longed.
+
+metadata:
+  name: alpha101_3factor_cs
+  source: "alpha101"
+  version: "3.0"
+  description: "Alpha101 3-factor composite for CS strategy (negated for highest=long)"
+
+parameters:
+  # 8h windows (×2 of 4h originals)
+  w44_8h:  10   # alpha044: 5 x 8h = 10 x 4h bars
+  w17a_8h: 20   # alpha017 ts_rank(close): 10 x 8h = 20 x 4h bars
+  w17b_8h: 40   # alpha017 ts_mean(volume): 20 x 8h = 40 x 4h bars
+  w17c_8h: 10   # alpha017 ts_rank(vol_ratio): 5 x 8h = 10 x 4h bars
+
+variables:
+  # 8h synthetic OHLCV from 4h bars
+  high_8h:   "ts_max(high, 2)"       # 8h high = max of 2 x 4h highs
+  volume_8h: "ts_sum(volume, 2)"     # 8h volume = sum of 2 x 4h volumes
+  open_8h:   "delay(open, 1)"        # 8h open = previous 4h bar's open
+
+factors:
+  alpha044_8h:
+    expression: "-correlation(high_8h, rank(volume_8h), w44_8h)"
+    description: "Alpha#44 @ 8h equiv: ts_max(high,2) vs rank(ts_sum(vol,2)), window=10x4h"
+    prototype: "alpha044"
+    tags: ["volume"]
+
+  alpha033_8h:
+    expression: "-rank(1 - open_8h / close)"
+    description: "Alpha#33 @ 8h equiv: open=delay(open,1) as 8h-bar open vs close"
+    prototype: "alpha033"
+    tags: ["momentum"]
+
+  alpha017_8h:
+    expression: "-(rank(ts_rank(close, w17a_8h)) * rank(delta(delta(close, 2), 2)) * rank(ts_rank(volume_8h / ts_mean(volume_8h, w17b_8h), w17c_8h)))"
+    description: "Alpha#17 @ 8h equiv: windows 10→20, 20→40, 5→10; accel delta lag 1→2; volume_8h synthesized"
+    prototype: "alpha017"
+    tags: ["liquidity"]
+
+# Declarative composite: auto-generates _norm factors + composite expression
+composite:
+  name: composite
+  transform: normalize
+  weights:
+    alpha044_8h: 0.4
+    alpha033_8h: 0.3
+    alpha017_8h: 0.3
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0

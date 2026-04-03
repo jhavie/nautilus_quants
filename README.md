@@ -39,10 +39,51 @@ Unified panel-based (timestamps × instruments) factor computation engine:
 
 Factor quality evaluation using alphalens-reloaded:
 
-- IC / ICIR analysis with Newey-West correction
-- Quantile returns analysis
+- IC / ICIR analysis with Newey-West correction (20+ metrics)
+- Factor signal quality: Monotonicity, IC Linearity, IC AR(1), IC Half-Life, Win Rate, Coverage
 - Parallel evaluation via ProcessPoolExecutor
-- Visualization and reporting
+- Auto-persist to DuckDB registry (configurable via YAML)
+
+### Factor Registry (`nautilus_quants.alpha.registry`)
+
+DuckDB-backed factor lifecycle management with multi-environment support:
+
+- **5 tables**: `factors` (core) → `alpha_analysis_metrics` (1:N) ↔ `backtest_run_metrics` (M:N via `backtest_factors`) + `configs_snapshot`
+- **Auto-persist**: `alpha analyze` and `backtest run` auto-register factors and save metrics
+- **Multi-env**: `test.duckdb` / `dev.duckdb` / `prod.duckdb` (separate DB files per environment)
+- **Config as JSON**: Full YAML configs stored in `configs_snapshot` for reproducibility
+- **Parametric factors**: Different params = different `factor_id`, grouped by `prototype` field
+
+```yaml
+# Add to any analysis/backtest YAML to enable auto-persist
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+```
+
+- **Declarative composite**: `composite` section in factors YAML auto-generates normalize + weighted combination; only base factors are registered
+
+**CLI Commands (`python -m nautilus_quants.alpha`):**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `analyze` | Run factor analysis + auto-persist to DB | `analyze config/cs/alpha_101.yaml` |
+| `metrics` | Show all metrics for a factor (IC, ICIR, t(NW), skew, kurtosis, AR1...) | `metrics alpha101_alpha044_8h` |
+| `list` | List registered factors | `list --prototype alpha044 --source alpha101` |
+| `inspect` | Factor details + analysis metrics + backtests | `inspect alpha101_alpha044_8h` |
+| `backtests` | List backtest runs with linked factors | `backtests --factor-id alpha101_alpha044_8h` |
+| `status` | Change factor status (candidate/active/archived) | `status alpha101_alpha044_8h active` |
+| `register` | Register factors from YAML without analysis | `register config/cs/factors.yaml` |
+| `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
+
+**Backtest CLI (`python -m nautilus_quants.backtest`):**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `run` | Execute backtest + auto-persist to DB | `run config/cs/backtest.yaml` |
+| `validate` | Validate config without executing | `validate config/cs/backtest.yaml` |
+| `list` | List available strategies | `list -v` |
 
 ### Backtest (`nautilus_quants.backtest`)
 

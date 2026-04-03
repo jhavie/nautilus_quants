@@ -1,11 +1,13 @@
 """Analysis report generator.
 
-Generates alphalens tearsheet charts and IC/ICIR summary.
+Generates alphalens tearsheet charts, IC/ICIR summary, and extended
+factor metrics (signal quality + portfolio performance).
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -15,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
+from scipy.optimize import curve_fit
 
 if TYPE_CHECKING:
     from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
@@ -168,6 +171,327 @@ def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
     if nan_count.any():
         table["NaN Count"] = nan_count
     return table
+
+
+# ── Factor Signal Quality Metrics ──
+
+
+def compute_win_rate(ic_df: pd.DataFrame) -> pd.Series:
+    """Fraction of periods with positive IC per forward-return period.
+
+    Args:
+        ic_df: IC DataFrame (index=date, columns=period labels)
+
+    Returns:
+        Series[period] with values in [0, 1].
+    """
+    result = {}
+    for col in ic_df.columns:
+        clean = ic_df[col].dropna()
+        result[col] = (clean > 0).sum() / max(len(clean), 1)
+    return pd.Series(result)
+
+
+def compute_coverage(
+    factor_data: pd.DataFrame,
+    total_timestamps: int,
+    total_assets: int,
+) -> float:
+    """Ratio of valid factor observations to total possible.
+
+    factor_data has already been cleaned by alphalens (NaN rows dropped),
+    so len(factor_data) is the actual non-NaN observation count.
+
+    Args:
+        factor_data: alphalens factor_data (MultiIndex[date, asset])
+        total_timestamps: Total time steps in pricing data
+        total_assets: Total instruments in pricing data
+
+    Returns:
+        Float in [0, 1].
+    """
+    possible = max(total_timestamps * total_assets, 1)
+    return len(factor_data) / possible
+
+
+def compute_ic_linearity(ic_df: pd.DataFrame) -> pd.Series:
+    """R² of linear fit to cumulative IC (IC stability).
+
+    Measures how consistently the factor accumulates predictive power.
+    R² ≈ 1.0 = steady IC, no regime breaks.  R² ≈ 0.0 = erratic.
+
+    Args:
+        ic_df: IC DataFrame (index=date, columns=period labels)
+
+    Returns:
+        Series[period] with R² values in [0, 1].
+    """
+    result = {}
+    for col in ic_df.columns:
+        clean = ic_df[col].dropna()
+        n = len(clean)
+        if n < 3:
+            result[col] = np.nan
+            continue
+        cum = clean.cumsum().values
+        t = np.arange(n, dtype=float)
+        ss_res = np.sum((cum - np.polyval(np.polyfit(t, cum, 1), t)) ** 2)
+        ss_tot = np.sum((cum - cum.mean()) ** 2)
+        result[col] = 1 - ss_res / ss_tot if ss_tot > 1e-15 else np.nan
+    return pd.Series(result)
+
+
+def compute_ic_ar1(ic_df: pd.DataFrame) -> pd.Series:
+    """Lag-1 autocorrelation of IC series per period.
+
+    Scalar summary of IC persistence.  AR(1) > 0.3 = persistent signal,
+    ≈ 0 = no memory, < 0 = reverting (unusual).
+
+    Args:
+        ic_df: IC DataFrame (index=date, columns=period labels)
+
+    Returns:
+        Series[period] with autocorrelation values.
+    """
+    result = {}
+    for col in ic_df.columns:
+        clean = ic_df[col].dropna()
+        result[col] = clean.autocorr(lag=1) if len(clean) >= 3 else np.nan
+    return pd.Series(result)
+
+
+def compute_ic_half_life(ic_df: pd.DataFrame) -> pd.Series:
+    """Half-life of IC autocorrelation decay in bars.
+
+    For each period column, computes the autocorrelation at increasing
+    lags and fits an exponential decay ``a * exp(-t / tau)``.
+    Half-life = ``tau * ln(2)``.
+
+    Args:
+        ic_df: IC DataFrame (index=date, columns=period labels)
+
+    Returns:
+        Series[period] in bars.  NaN if fit fails or insufficient data.
+    """
+    result = {}
+    for col in ic_df.columns:
+        result[col] = _fit_ic_half_life(ic_df[col].dropna())
+    return pd.Series(result)
+
+
+def _fit_ic_half_life(ic_series: pd.Series) -> float:
+    """Fit exponential decay to IC autocorrelation."""
+    n = len(ic_series)
+    if n < 20:
+        return np.nan
+
+    max_lag = min(n // 4, 100)
+    lags = np.arange(1, max_lag + 1, dtype=float)
+    autocorrs = np.array([ic_series.autocorr(lag=int(k)) for k in lags])
+
+    # Drop NaN autocorrelations
+    valid = np.isfinite(autocorrs)
+    if valid.sum() < 3:
+        return np.nan
+
+    lags_clean = lags[valid]
+    ac_clean = autocorrs[valid]
+
+    # Only fit if first autocorrelation is positive (decaying signal)
+    if ac_clean[0] <= 0:
+        return np.nan
+
+    def _exp_decay(t: np.ndarray, a: float, tau: float) -> np.ndarray:
+        return a * np.exp(-t / tau)
+
+    try:
+        popt, _ = curve_fit(
+            _exp_decay, lags_clean, ac_clean,
+            p0=[ac_clean[0], 10.0],
+            bounds=([0, 0.1], [2.0, max_lag * 5]),
+            maxfev=2000,
+        )
+        tau = popt[1]
+        return tau * np.log(2)
+    except (RuntimeError, ValueError):
+        return np.nan
+
+
+def compute_monotonicity(factor_data: pd.DataFrame) -> pd.Series:
+    """Spearman correlation between quantile rank and mean return.
+
+    A score of +1 means higher quantiles have strictly higher returns
+    (positive factor).  -1 means perfect reversal factor.
+
+    Args:
+        factor_data: alphalens factor_data (MultiIndex[date, asset])
+
+    Returns:
+        Series[period] with values in [-1, 1].
+    """
+    import alphalens.performance as perf
+
+    mean_ret, _ = perf.mean_return_by_quantile(factor_data, by_date=False)
+    period_cols = [c for c in mean_ret.columns if c not in ("factor", "factor_quantile")]
+    result = {}
+    for col in period_cols:
+        returns = mean_ret[col].values
+        ranks = np.arange(1, len(returns) + 1)
+        if len(ranks) < 3:
+            result[col] = np.nan
+        else:
+            rho, _ = scipy_stats.spearmanr(ranks, returns)
+            result[col] = rho
+    return pd.Series(result)
+
+
+
+
+# ── Result Dataclasses ──
+
+
+@dataclass(frozen=True)
+class FactorMetricsResult:
+    """Result container for factor signal quality metrics."""
+
+    win_rate: pd.Series        # period → float [0, 1]
+    coverage: float            # [0, 1]
+    ic_half_life: pd.Series    # period → float (bars), NaN if fit fails
+    monotonicity: pd.Series    # period → float [-1, 1]
+    ic_linearity: pd.Series    # period → float [0, 1] (R² of cumulative IC)
+    ic_ar1: pd.Series          # period → float (lag-1 autocorrelation)
+
+
+
+def compute_all_factor_metrics(
+    factor_data: pd.DataFrame,
+    ic_df: pd.DataFrame,
+    total_timestamps: int,
+    total_assets: int,
+) -> FactorMetricsResult:
+    """Compute all factor signal quality metrics.
+
+    Args:
+        factor_data: alphalens factor_data (MultiIndex[date, asset])
+        ic_df: IC DataFrame (index=date, columns=period labels)
+        total_timestamps: Total time steps in pricing data
+        total_assets: Total instruments in pricing data
+    """
+    return FactorMetricsResult(
+        win_rate=compute_win_rate(ic_df),
+        coverage=compute_coverage(factor_data, total_timestamps, total_assets),
+        ic_half_life=compute_ic_half_life(ic_df),
+        monotonicity=compute_monotonicity(factor_data),
+        ic_linearity=compute_ic_linearity(ic_df),
+        ic_ar1=compute_ic_ar1(ic_df),
+    )
+
+
+
+def build_analysis_metrics(
+    run_id: str,
+    factor_id: str,
+    timeframe: str,
+    ic_summary: pd.DataFrame,
+    metrics_result: FactorMetricsResult | None = None,
+    factor_config_id: str = "",
+    analysis_config_id: str = "",
+    output_dir: str = "",
+) -> list:
+    """Build AnalysisMetrics from IC summary and FactorMetricsResult.
+
+    Returns a list of AnalysisMetrics (one per period).
+    Imported lazily to avoid circular imports.
+    """
+    from nautilus_quants.alpha.registry.models import AnalysisMetrics
+
+    now = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
+    result = []
+
+    for period_label in ic_summary.index:
+        row = ic_summary.loc[period_label]
+
+        # Signal quality metrics (per-period from FactorMetricsResult)
+        win_rate_val = None
+        mono_val = None
+        hl_val = None
+        lin_val = None
+        ar1_val = None
+        cov_val = None
+        if metrics_result is not None:
+            if period_label in metrics_result.win_rate.index:
+                win_rate_val = _safe_float(
+                    metrics_result.win_rate[period_label],
+                )
+            if period_label in metrics_result.monotonicity.index:
+                mono_val = _safe_float(
+                    metrics_result.monotonicity[period_label],
+                )
+            if period_label in metrics_result.ic_half_life.index:
+                hl_val = _safe_float(
+                    metrics_result.ic_half_life[period_label],
+                )
+            if period_label in metrics_result.ic_linearity.index:
+                lin_val = _safe_float(
+                    metrics_result.ic_linearity[period_label],
+                )
+            if period_label in metrics_result.ic_ar1.index:
+                ar1_val = _safe_float(
+                    metrics_result.ic_ar1[period_label],
+                )
+            cov_val = _safe_float(metrics_result.coverage)
+
+        result.append(AnalysisMetrics(
+            run_id=run_id,
+            factor_id=factor_id,
+            period=str(period_label),
+            ic_mean=_safe_float(row.get("IC Mean")),
+            ic_std=_safe_float(row.get("IC Std.")),
+            icir=_safe_float(row.get("Risk-Adjusted IC")),
+            t_stat_ic=_safe_float(row.get("t-stat(IC)")),
+            p_value_ic=_safe_float(row.get("p-value(IC)")),
+            t_stat_nw=_safe_float(row.get("t-stat(NW)")),
+            p_value_nw=_safe_float(row.get("p-value(NW)")),
+            n_eff=_safe_int(row.get("N_eff")),
+            ic_skew=_safe_float(row.get("IC Skew")),
+            ic_kurtosis=_safe_float(row.get("IC Kurtosis")),
+            n_samples=_safe_int(row.get("N")),
+            win_rate=win_rate_val,
+            monotonicity=mono_val,
+            ic_half_life=hl_val,
+            ic_linearity=lin_val,
+            ic_ar1=ar1_val,
+            coverage=cov_val,
+            factor_config_id=factor_config_id,
+            analysis_config_id=analysis_config_id,
+            output_dir=output_dir,
+            timeframe=timeframe,
+            created_at=now,
+        ))
+
+    return result
+
+
+def _safe_float(val: Any) -> float | None:
+    """Convert to float, returning None for NaN/None."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if np.isnan(f) else f
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(val: Any) -> int | None:
+    """Convert to int, returning None for NaN/None."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if np.isnan(f) else int(f)
+    except (ValueError, TypeError):
+        return None
 
 
 def _chart_quantile_returns_bar(factor_data: pd.DataFrame, period: str, **kwargs: Any) -> None:
@@ -551,3 +875,85 @@ class AnalysisReportGenerator:
             print()
             print("Factor Correlation Matrix (Spearman):")
             print(corr.to_string(float_format=lambda x: f"{x:.3f}"))
+
+    def generate_extended_summary(
+        self,
+        factor_metrics_results: dict[str, FactorMetricsResult] | None,
+        output_dir: Path,
+    ) -> Path | None:
+        """Generate extended metrics summary to file.
+
+        Appends to existing summary.txt or creates new file.
+        """
+        if not factor_metrics_results:
+            return None
+
+        lines = self._format_factor_metrics(factor_metrics_results)
+        summary_path = output_dir / "summary.txt"
+        with open(summary_path, "a", encoding="utf-8") as f:
+            f.write("\n" + "\n".join(lines) + "\n")
+        return summary_path
+
+    def print_extended_summary(
+        self,
+        factor_metrics_results: dict[str, FactorMetricsResult] | None,
+    ) -> None:
+        """Print extended metrics to console."""
+        if factor_metrics_results:
+            for line in self._format_factor_metrics(factor_metrics_results):
+                print(line)
+
+    @staticmethod
+    def _format_factor_metrics(
+        results: dict[str, FactorMetricsResult],
+    ) -> list[str]:
+        """Format factor signal quality metrics as text lines."""
+        lines = [
+            "",
+            "Factor Signal Quality",
+            "=" * 60,
+        ]
+        for fname, m in results.items():
+            lines.append(f"Factor: {fname}")
+            lines.append("-" * 40)
+
+            periods = list(m.win_rate.index)
+            hdr = "  " + " " * 16 + "".join(f"{p:>10}" for p in periods)
+            lines.append(hdr)
+            lines.append(
+                "  Win Rate        "
+                + "".join(f"{m.win_rate[p]:>9.1%} " for p in periods)
+            )
+            lines.append(
+                "  Monotonicity    "
+                + "".join(
+                    f"{m.monotonicity.get(p, np.nan):>9.2f} "
+                    for p in periods
+                )
+            )
+            lines.append(
+                "  IC Half-Life    "
+                + "".join(
+                    f"{m.ic_half_life.get(p, np.nan):>7.0f} bars"
+                    if np.isfinite(m.ic_half_life.get(p, np.nan))
+                    else f"{'N/A':>10} "
+                    for p in periods
+                )
+            )
+            lines.append(
+                "  IC Linearity    "
+                + "".join(
+                    f"{m.ic_linearity.get(p, np.nan):>10.3f}" for p in periods
+                )
+            )
+            lines.append(
+                "  IC AR(1)        "
+                + "".join(
+                    f"{m.ic_ar1.get(p, np.nan):>10.3f}" for p in periods
+                )
+            )
+            lines.append(f"  Coverage         {m.coverage:.1%}")
+            lines.append("")
+
+        return lines
+

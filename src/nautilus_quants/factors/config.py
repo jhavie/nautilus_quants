@@ -20,17 +20,33 @@ import yaml
 class FactorDefinition:
     """
     Definition of a single factor.
-    
+
     Attributes:
-        name: Factor identifier
+        name: Factor key in YAML (e.g. "alpha044_8h")
         expression: Alpha101-style expression string
         description: Human-readable description
-        category: Optional category for grouping (momentum, volatility, etc.)
+        tags: Labels for grouping (replaces category). E.g. ["reversal", "volume"]
+        prototype: Groups parameter variants of the same base factor
     """
     name: str
     expression: str
     description: str = ""
-    category: str = ""
+    tags: list[str] = field(default_factory=list)
+    prototype: str = ""
+
+
+@dataclass(frozen=True)
+class CompositeConfig:
+    """Declarative composite factor configuration.
+
+    Attributes:
+        name: Output factor name (default "composite")
+        transform: Transform applied before weighting (normalize/cs_rank/cs_zscore/raw)
+        weights: Factor name → weight mapping
+    """
+    name: str = "composite"
+    transform: str = "normalize"
+    weights: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -65,11 +81,18 @@ class FactorConfig:
     name: str = "default"
     version: str = "1.0"
     description: str = ""
+    source: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
     variables: dict[str, str] = field(default_factory=dict)
     factors: list[FactorDefinition] = field(default_factory=list)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
-    
+    _pipeline: list[FactorDefinition] = field(default_factory=list)
+
+    @property
+    def all_factors(self) -> list[FactorDefinition]:
+        """All factors: base (factors) + auto-generated (composite/derived)."""
+        return self.factors + self._pipeline
+
     def get_parameter(self, name: str, default: Any = None) -> Any:
         """Get a parameter value by name."""
         return self.parameters.get(name, default)
@@ -84,6 +107,73 @@ class FactorConfig:
             if factor.name == name:
                 return factor
         return None
+
+
+def generate_factor_id(source: str, key: str) -> str:
+    """Generate a factor_id from source prefix and YAML key.
+
+    Examples:
+        >>> generate_factor_id("alpha101", "alpha044_8h")
+        'alpha101_alpha044_8h'
+        >>> generate_factor_id("", "sma_60")
+        'sma_60'
+    """
+    if source:
+        return f"{source}_{key}"
+    return key
+
+
+_TRANSFORM_TEMPLATES: dict[str, str] = {
+    "normalize": "normalize({factor}, true, 0)",
+    "cs_rank": "cs_rank({factor})",
+    "cs_zscore": "cs_zscore({factor})",
+}
+
+_TRANSFORM_SUFFIXES: dict[str, str] = {
+    "normalize": "_norm",
+    "cs_rank": "_ranked",
+    "cs_zscore": "_zscored",
+}
+
+
+def _build_composite_pipeline(
+    raw: dict[str, Any],
+) -> list[FactorDefinition]:
+    """Generate pipeline FactorDefinitions from a composite config."""
+    weights: dict[str, float] = raw.get("weights", {})
+    if not weights:
+        return []
+
+    transform = raw.get("transform", "normalize")
+    comp_name = raw.get("name", "composite")
+
+    pipeline: list[FactorDefinition] = []
+    terms: list[str] = []
+
+    if transform == "raw":
+        # No intermediate factors
+        for factor_name, weight in weights.items():
+            terms.append(f"{weight} * {factor_name}")
+    else:
+        template = _TRANSFORM_TEMPLATES.get(transform)
+        suffix = _TRANSFORM_SUFFIXES.get(transform, f"_{transform}")
+        if template is None:
+            template = f"{transform}({{factor}})"
+
+        for factor_name, weight in weights.items():
+            derived_name = f"{factor_name}{suffix}"
+            pipeline.append(FactorDefinition(
+                name=derived_name,
+                expression=template.format(factor=factor_name),
+            ))
+            terms.append(f"{weight} * {derived_name}")
+
+    composite_expr = " + ".join(terms)
+    pipeline.append(FactorDefinition(
+        name=comp_name,
+        expression=composite_expr,
+    ))
+    return pipeline
 
 
 class ConfigValidationError(Exception):
@@ -175,24 +265,30 @@ def load_factor_config(path: str | Path) -> FactorConfig:
     name = metadata.get("name", "default")
     version = metadata.get("version", "1.0")
     description = metadata.get("description", "")
-    
+    source = metadata.get("source", "")
+
     # Parse parameters
     parameters = raw_config.get("parameters", {})
-    
+
     # Parse variables
     variables = raw_config.get("variables", {})
-    
+
     # Parse factors
     factors_raw = raw_config.get("factors", {})
     factors: list[FactorDefinition] = []
     for factor_name, factor_data in factors_raw.items():
         if factor_data is None:
             continue
+        raw_tags = factor_data.get("tags", [])
+        # Backward compat: migrate category → tags if tags empty
+        if not raw_tags and factor_data.get("category"):
+            raw_tags = [factor_data["category"]]
         factors.append(FactorDefinition(
             name=factor_name,
             expression=factor_data.get("expression", ""),
             description=factor_data.get("description", ""),
-            category=factor_data.get("category", ""),
+            tags=raw_tags,
+            prototype=factor_data.get("prototype", ""),
         ))
     
     # Parse performance config
@@ -203,14 +299,22 @@ def load_factor_config(path: str | Path) -> FactorConfig:
         warning_threshold_ms=perf_raw.get("warning_threshold_ms", 0.5),
     )
     
+    # Parse composite config → auto-generate pipeline factors
+    pipeline: list[FactorDefinition] = []
+    composite_raw = raw_config.get("composite")
+    if composite_raw and isinstance(composite_raw, dict):
+        pipeline = _build_composite_pipeline(composite_raw)
+
     config = FactorConfig(
         name=name,
         version=version,
         description=description,
+        source=source,
         parameters=parameters,
         variables=variables,
         factors=factors,
         performance=performance,
+        _pipeline=pipeline,
     )
     
     # Validate

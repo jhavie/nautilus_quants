@@ -111,6 +111,7 @@ def run_backtest(
         raise BacktestConfigError("No engines returned from backtest")
 
     engine = engines[0]
+
     # Get ALL positions (open + closed), not just currently open ones
     open_positions = len(engine.cache.positions())
     closed_positions = len(engine.cache.positions_closed())

@@ -9,6 +9,11 @@
 # 调仓周期: 每根 bar (4h)
 # 因子: alpha044 (correlation(high, rank(volume), 5))
 
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+
 venues:
   - name: "BINANCE"
     oms_type: "NETTING"
@@ -139,7 +144,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-12-31"
+    end_time: "2022-03-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -165,8 +170,8 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/cs/factors.yaml"
-        factor_cache_path: "data/factor_cache/cache"
+        factor_config_path: "config/cs/factors_alpha101.yaml"
+        factor_cache_path: "data/factor_cache/cache_alpha101"
         interval: "4h"
         signal_prefix: "factor"
         max_history: 0
@@ -182,8 +187,8 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        composite_factor: "alpha044"
-        rebalance_interval: 1
+        composite_factor: "alpha044_8h"
+        rebalance_interval: 2
 
         # =============================================================
         # Selection Policy — uncomment ONE block below

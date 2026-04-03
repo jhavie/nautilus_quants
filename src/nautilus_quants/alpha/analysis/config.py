@@ -9,6 +9,19 @@ import yaml
 
 
 @dataclass(frozen=True)
+class MetricsConfig:
+    """Configuration for extended factor metrics.
+
+    Attributes:
+        factor_metrics: Enable factor signal quality metrics
+            (Win Rate, Coverage, IC Half-Life, Monotonicity,
+             IC Linearity, IC AR(1))
+    """
+
+    factor_metrics: bool = False
+
+
+@dataclass(frozen=True)
 class AlphaAnalysisConfig:
     """Configuration for alpha factor analysis.
 
@@ -61,6 +74,12 @@ class AlphaAnalysisConfig:
     output_dir: str = "logs/alpha_analysis"
     output_format: tuple[str, ...] = ("png",)
     factor_cache_path: str = ""
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
+
+    # Registry auto-persist configuration
+    registry_env: str = "test"
+    registry_db_dir: str = "logs/registry"
+    registry_enabled: bool = True
 
 
 def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
@@ -85,6 +104,9 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
 
     periods = raw.get("periods", (1, 4, 8, 24))
     output_format = raw.get("output_format", ("png",))
+
+    # Parse registry config
+    reg = raw.get("registry", {}) or {}
 
     return AlphaAnalysisConfig(
         catalog_path=raw["catalog_path"],
@@ -117,4 +139,17 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         output_dir=raw.get("output_dir", "logs/alpha_analysis"),
         output_format=tuple(output_format),
         factor_cache_path=raw.get("factor_cache_path", ""),
+        metrics=_parse_metrics_config(raw.get("metrics", {})),
+        registry_env=reg.get("env", "test"),
+        registry_db_dir=reg.get("db_dir", "logs/registry"),
+        registry_enabled=reg.get("enabled", True),
+    )
+
+
+def _parse_metrics_config(raw: dict | None) -> MetricsConfig:
+    """Parse metrics configuration from YAML dict."""
+    if not raw:
+        return MetricsConfig()
+    return MetricsConfig(
+        factor_metrics=raw.get("factor_metrics", False),
     )
