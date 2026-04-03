@@ -84,7 +84,11 @@ def export_factors_yaml(
             entry["tags"] = f.tags
         if f.prototype:
             entry["prototype"] = f.prototype
-        factors_section[f.factor_id] = entry
+        # Strip source prefix so re-import won't double-prefix
+        key = f.factor_id
+        if source and key.startswith(f"{source}_"):
+            key = key[len(source) + 1:]
+        factors_section[key] = entry
     doc["factors"] = factors_section
 
     # Declarative composite section
