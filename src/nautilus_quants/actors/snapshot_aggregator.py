@@ -123,13 +123,6 @@ class SnapshotAggregatorActor(Actor):
             client_id=ClientId(self.id.value),
         )
 
-        # Subscribe to QuoteTicks for all instruments so Portfolio always has
-        # up-to-date prices for unrealized PnL calculation (not just bar close).
-        instrument_ids = self.cache.instrument_ids(venue=self._venue)
-        for instrument_id in instrument_ids:
-            self.subscribe_quote_ticks(instrument_id)
-        self.log.info(f"Subscribed QuoteTicks for {len(instrument_ids)} instruments")
-
         self.clock.set_timer(
             name="snapshot_aggregator",
             interval=timedelta(seconds=self._interval_secs),
