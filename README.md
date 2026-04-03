@@ -62,13 +62,28 @@ registry:
   enabled: true
 ```
 
-```bash
-# CLI commands
-python -m nautilus_quants.alpha register config/cs/factors.yaml
-python -m nautilus_quants.alpha list --prototype alpha044
-python -m nautilus_quants.alpha inspect alpha101_alpha044_8h
-python -m nautilus_quants.alpha metrics alpha101_alpha044_8h
-```
+- **Declarative composite**: `composite` section in factors YAML auto-generates normalize + weighted combination; only base factors are registered
+
+**CLI Commands (`python -m nautilus_quants.alpha`):**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `analyze` | Run factor analysis + auto-persist to DB | `analyze config/cs/alpha_101.yaml` |
+| `metrics` | Show all metrics for a factor (IC, ICIR, t(NW), skew, kurtosis, AR1...) | `metrics alpha101_alpha044_8h` |
+| `list` | List registered factors | `list --prototype alpha044 --source alpha101` |
+| `inspect` | Factor details + analysis metrics + backtests | `inspect alpha101_alpha044_8h` |
+| `backtests` | List backtest runs with linked factors | `backtests --factor-id alpha101_alpha044_8h` |
+| `status` | Change factor status (candidate/active/archived) | `status alpha101_alpha044_8h active` |
+| `register` | Register factors from YAML without analysis | `register config/cs/factors.yaml` |
+| `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
+
+**Backtest CLI (`python -m nautilus_quants.backtest`):**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `run` | Execute backtest + auto-persist to DB | `run config/cs/backtest.yaml` |
+| `validate` | Validate config without executing | `validate config/cs/backtest.yaml` |
+| `list` | List available strategies | `list -v` |
 
 ### Backtest (`nautilus_quants.backtest`)
 
