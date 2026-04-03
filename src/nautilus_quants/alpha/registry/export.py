@@ -85,15 +85,15 @@ def export_factors_yaml(
         if f.prototype:
             entry["prototype"] = f.prototype
         factors_section[f.factor_id] = entry
-
-    factors_section["composite"] = {
-        "expression": composite_expr,
-        "description": (
-            f"Auto-composite: {composite_method}, "
-            f"{len(factors)} factors, transform={composite_transform}"
-        ),
-    }
     doc["factors"] = factors_section
+
+    # Declarative composite section
+    if weights:
+        doc["composite"] = {
+            "name": "composite",
+            "transform": composite_transform,
+            "weights": {fid: round(w, 4) for fid, w in weights},
+        }
 
     # 6. Write YAML
     output_path = Path(output_path)
