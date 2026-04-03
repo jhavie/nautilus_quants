@@ -51,8 +51,12 @@ def _get_two_data_ops() -> frozenset[str]:
     if _TWO_DATA_OPS is None:
         from nautilus_quants.factors.operators.time_series import TS_OPERATOR_INSTANCES
 
+        # Operators where arg[1] is another data series (not a scalar parameter).
+        # ts_percentile takes (data, window, quantile) — quantile is a scalar.
+        _SCALAR_EXTRA_OPS = {"ts_percentile"}
         _TWO_DATA_OPS = frozenset(
-            name for name, op in TS_OPERATOR_INSTANCES.items() if op.min_args >= 3
+            name for name, op in TS_OPERATOR_INSTANCES.items()
+            if op.min_args >= 3 and name not in _SCALAR_EXTRA_OPS
         )
     return _TWO_DATA_OPS
 
@@ -243,6 +247,9 @@ class Evaluator(ASTVisitor):
                 )
             else:
                 window = int(args[1]) if len(args) > 1 and not isinstance(args[1], str) else 1
+                # Pass extra positional args (e.g., quantile for ts_percentile)
+                for i in range(2, len(args)):
+                    extra_kwargs[f"extra_{i - 2}"] = args[i]
 
             if isinstance(data, pd.DataFrame):
                 return op_instance.compute_panel(data, window, **extra_kwargs)

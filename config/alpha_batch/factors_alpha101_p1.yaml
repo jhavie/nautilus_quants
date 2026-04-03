@@ -1,0 +1,101 @@
+metadata:
+  name: alpha101_p1
+  version: '1.0'
+  description: Alpha101 OHLCV-only factors (20 factors)
+variables:
+  returns: delta(close, 1) / delay(close, 1)
+factors:
+  alpha044:
+    expression: -1 * correlation(high, rank(volume), 5)
+    description: 'Alpha#44: High-volume rank correlation'
+    category: volume
+  alpha033:
+    expression: rank(-1 + open / close)
+    description: 'Alpha#33: Open to close ratio rank'
+    category: momentum
+  alpha017:
+    expression: -1 * rank(ts_rank(close, 10)) * rank(delta(delta(close, 1), 1)) *
+      rank(ts_rank(volume / ts_mean(volume, 20), 5))
+    description: 'Alpha#17: Rank triple product'
+    category: momentum
+  alpha026:
+    expression: -1 * ts_max(correlation(ts_rank(volume, 5), ts_rank(high, 5), 5),
+      3)
+    description: 'Alpha#26: Max correlation rank'
+    category: volume
+  alpha055:
+    expression: -1 * correlation(rank((close - ts_min(low, 12)) / replace_zero(ts_max(high,
+      12) - ts_min(low, 12), 0.0001)), rank(volume), 6)
+    description: 'Alpha#55: Normalized close rank volume correlation'
+    category: volume
+  alpha002:
+    expression: -1 * correlation(rank(delta(log(volume), 2)), rank((close - open)
+      / open), 6)
+    description: 'Alpha#2: Volume-price correlation'
+    category: volume
+  alpha039:
+    expression: -1 * rank(delta(close, 7) * (1 - rank(decay_linear(volume / ts_mean(volume,
+      20), 9)))) * (1 + rank(ts_mean(returns, 250)))
+    description: 'Alpha#39: Delta times volume rank decay'
+    category: volume
+  alpha003:
+    expression: -1 * correlation(rank(open), rank(volume), 10)
+    description: 'Alpha#3: Open-volume correlation'
+    category: volume
+  alpha001:
+    expression: rank(ts_argmax(signed_power(if_else(returns < 0, stddev(returns, 20),
+      close), 2), 5)) - 0.5
+    description: 'Alpha#1: Conditional signed power rank'
+    category: momentum
+  alpha006:
+    expression: -1 * correlation(open, volume, 10)
+    description: 'Alpha#6: Open-volume correlation'
+    category: volume
+  alpha012:
+    expression: sign(delta(volume, 1)) * -1 * delta(close, 1)
+    description: 'Alpha#12: Volume delta sign times close delta'
+    category: volume
+  alpha020:
+    expression: -1 * rank(open - delay(high, 1)) * rank(open - delay(close, 1)) *
+      rank(open - delay(low, 1))
+    description: 'Alpha#20: Open deviation from prior HLC rank product'
+    category: momentum
+  alpha028:
+    expression: scale(correlation(ts_mean(volume, 20), low, 5) + (high + low) / 2
+      - close)
+    description: 'Alpha#28: Volume-low correlation plus midpoint scaled'
+    category: volume
+  alpha046:
+    expression: if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close,
+      10) - close) / 10 > 0.25, -1, if_else((delay(close, 20) - delay(close, 10))
+      / 10 - (delay(close, 10) - close) / 10 < 0, 1, -1 * delta(close, 1)))
+    description: 'Alpha#46: Long-term trend threshold'
+    category: momentum
+  alpha053:
+    expression: -1 * delta(((close - low) - (high - close)) / replace_zero(close -
+      low, 0.0001), 9)
+    description: 'Alpha#53: High-low close ratio delta'
+    category: momentum
+  alpha054:
+    expression: -1 * (low - close) * power(open, 5) / (replace_zero(low - high, -0.0001)
+      * power(close, 5))
+    description: 'Alpha#54: Low-close open power ratio'
+    category: momentum
+  alpha101:
+    expression: (close - open) / ((high - low) + 0.001)
+    description: 'Alpha#101: Close-open to high-low ratio'
+    category: momentum
+  alpha004:
+    expression: -1 * ts_rank(rank(low), 9)
+    description: 'Alpha#4: TS rank of CS rank of low'
+    category: reversion
+  alpha009:
+    expression: if_else(ts_min(delta(close, 1), 5) > 0, delta(close, 1), if_else(ts_max(delta(close,
+      1), 5) < 0, delta(close, 1), -1 * delta(close, 1)))
+    description: 'Alpha#9: Delta direction'
+    category: momentum
+  alpha010:
+    expression: rank(if_else(ts_min(delta(close, 1), 4) > 0, delta(close, 1), if_else(ts_max(delta(close,
+      1), 4) < 0, delta(close, 1), -1 * delta(close, 1))))
+    description: 'Alpha#10: Ranked delta direction'
+    category: momentum
