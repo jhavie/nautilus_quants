@@ -50,7 +50,7 @@ def compute_config_hash(factor_config: FactorConfig) -> str:
     canonical = {
         "variables": dict(factor_config.variables),
         "factors": {
-            f.name: f.expression for f in factor_config.factors
+            f.name: f.expression for f in factor_config.all_factors
         },
         "parameters": dict(factor_config.parameters),
     }
@@ -71,7 +71,7 @@ def compute_cache_key(
     canonical = {
         "variables": dict(factor_config.variables),
         "factors": {
-            f.name: f.expression for f in factor_config.factors
+            f.name: f.expression for f in factor_config.all_factors
         },
         "parameters": dict(factor_config.parameters),
         "bar_spec": bar_spec,
