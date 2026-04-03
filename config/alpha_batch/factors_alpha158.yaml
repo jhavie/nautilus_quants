@@ -1,0 +1,687 @@
+metadata:
+  name: alpha158
+  version: '1.0'
+  description: Qlib Alpha158 OHLCV factors (157 factors)
+factors:
+  BETA10:
+    expression: ts_slope(close, 10) / close
+    description: Rolling slope of close / current close (window=10)
+    category: momentum
+  BETA20:
+    expression: ts_slope(close, 20) / close
+    description: Rolling slope of close / current close (window=20)
+    category: momentum
+  BETA30:
+    expression: ts_slope(close, 30) / close
+    description: Rolling slope of close / current close (window=30)
+    category: momentum
+  BETA5:
+    expression: ts_slope(close, 5) / close
+    description: Rolling slope of close / current close (window=5)
+    category: momentum
+  BETA60:
+    expression: ts_slope(close, 60) / close
+    description: Rolling slope of close / current close (window=60)
+    category: momentum
+  CNTD10:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 10) - ts_mean(if_else(close
+      < delay(close, 1), 1, 0), 10)
+    description: Net fraction of up vs down days in window (window=10)
+    category: count
+  CNTD20:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 20) - ts_mean(if_else(close
+      < delay(close, 1), 1, 0), 20)
+    description: Net fraction of up vs down days in window (window=20)
+    category: count
+  CNTD30:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 30) - ts_mean(if_else(close
+      < delay(close, 1), 1, 0), 30)
+    description: Net fraction of up vs down days in window (window=30)
+    category: count
+  CNTD5:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 5) - ts_mean(if_else(close
+      < delay(close, 1), 1, 0), 5)
+    description: Net fraction of up vs down days in window (window=5)
+    category: count
+  CNTD60:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 60) - ts_mean(if_else(close
+      < delay(close, 1), 1, 0), 60)
+    description: Net fraction of up vs down days in window (window=60)
+    category: count
+  CNTN10:
+    expression: ts_mean(if_else(close < delay(close, 1), 1, 0), 10)
+    description: Fraction of down days in window (window=10)
+    category: count
+  CNTN20:
+    expression: ts_mean(if_else(close < delay(close, 1), 1, 0), 20)
+    description: Fraction of down days in window (window=20)
+    category: count
+  CNTN30:
+    expression: ts_mean(if_else(close < delay(close, 1), 1, 0), 30)
+    description: Fraction of down days in window (window=30)
+    category: count
+  CNTN5:
+    expression: ts_mean(if_else(close < delay(close, 1), 1, 0), 5)
+    description: Fraction of down days in window (window=5)
+    category: count
+  CNTN60:
+    expression: ts_mean(if_else(close < delay(close, 1), 1, 0), 60)
+    description: Fraction of down days in window (window=60)
+    category: count
+  CNTP10:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 10)
+    description: Fraction of up days in window (window=10)
+    category: count
+  CNTP20:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 20)
+    description: Fraction of up days in window (window=20)
+    category: count
+  CNTP30:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 30)
+    description: Fraction of up days in window (window=30)
+    category: count
+  CNTP5:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 5)
+    description: Fraction of up days in window (window=5)
+    category: count
+  CNTP60:
+    expression: ts_mean(if_else(close > delay(close, 1), 1, 0), 60)
+    description: Fraction of up days in window (window=60)
+    category: count
+  CORD10:
+    expression: correlation(close / delay(close, 1), log(volume / delay(volume, 1)
+      + 1), 10)
+    description: Correlation between close return and log(volume return+1) (window=10)
+    category: correlation
+  CORD20:
+    expression: correlation(close / delay(close, 1), log(volume / delay(volume, 1)
+      + 1), 20)
+    description: Correlation between close return and log(volume return+1) (window=20)
+    category: correlation
+  CORD30:
+    expression: correlation(close / delay(close, 1), log(volume / delay(volume, 1)
+      + 1), 30)
+    description: Correlation between close return and log(volume return+1) (window=30)
+    category: correlation
+  CORD5:
+    expression: correlation(close / delay(close, 1), log(volume / delay(volume, 1)
+      + 1), 5)
+    description: Correlation between close return and log(volume return+1) (window=5)
+    category: correlation
+  CORD60:
+    expression: correlation(close / delay(close, 1), log(volume / delay(volume, 1)
+      + 1), 60)
+    description: Correlation between close return and log(volume return+1) (window=60)
+    category: correlation
+  CORR10:
+    expression: correlation(close, log(volume + 1), 10)
+    description: Correlation between close and log(volume+1) (window=10)
+    category: correlation
+  CORR20:
+    expression: correlation(close, log(volume + 1), 20)
+    description: Correlation between close and log(volume+1) (window=20)
+    category: correlation
+  CORR30:
+    expression: correlation(close, log(volume + 1), 30)
+    description: Correlation between close and log(volume+1) (window=30)
+    category: correlation
+  CORR5:
+    expression: correlation(close, log(volume + 1), 5)
+    description: Correlation between close and log(volume+1) (window=5)
+    category: correlation
+  CORR60:
+    expression: correlation(close, log(volume + 1), 60)
+    description: Correlation between close and log(volume+1) (window=60)
+    category: correlation
+  HIGH0:
+    expression: high / close
+    description: 'Normalized high: high / close'
+    category: price
+  IMAX10:
+    expression: ts_argmax(high, 10) / 10
+    description: Normalized argmax of high within window (window=10)
+    category: momentum
+  IMAX20:
+    expression: ts_argmax(high, 20) / 20
+    description: Normalized argmax of high within window (window=20)
+    category: momentum
+  IMAX30:
+    expression: ts_argmax(high, 30) / 30
+    description: Normalized argmax of high within window (window=30)
+    category: momentum
+  IMAX5:
+    expression: ts_argmax(high, 5) / 5
+    description: Normalized argmax of high within window (window=5)
+    category: momentum
+  IMAX60:
+    expression: ts_argmax(high, 60) / 60
+    description: Normalized argmax of high within window (window=60)
+    category: momentum
+  IMIN10:
+    expression: ts_argmin(low, 10) / 10
+    description: Normalized argmin of low within window (window=10)
+    category: momentum
+  IMIN20:
+    expression: ts_argmin(low, 20) / 20
+    description: Normalized argmin of low within window (window=20)
+    category: momentum
+  IMIN30:
+    expression: ts_argmin(low, 30) / 30
+    description: Normalized argmin of low within window (window=30)
+    category: momentum
+  IMIN5:
+    expression: ts_argmin(low, 5) / 5
+    description: Normalized argmin of low within window (window=5)
+    category: momentum
+  IMIN60:
+    expression: ts_argmin(low, 60) / 60
+    description: Normalized argmin of low within window (window=60)
+    category: momentum
+  IMXD10:
+    expression: (ts_argmax(high, 10) - ts_argmin(low, 10)) / 10
+    description: Normalized distance between argmax(high) and argmin(low) (window=10)
+    category: momentum
+  IMXD20:
+    expression: (ts_argmax(high, 20) - ts_argmin(low, 20)) / 20
+    description: Normalized distance between argmax(high) and argmin(low) (window=20)
+    category: momentum
+  IMXD30:
+    expression: (ts_argmax(high, 30) - ts_argmin(low, 30)) / 30
+    description: Normalized distance between argmax(high) and argmin(low) (window=30)
+    category: momentum
+  IMXD5:
+    expression: (ts_argmax(high, 5) - ts_argmin(low, 5)) / 5
+    description: Normalized distance between argmax(high) and argmin(low) (window=5)
+    category: momentum
+  IMXD60:
+    expression: (ts_argmax(high, 60) - ts_argmin(low, 60)) / 60
+    description: Normalized distance between argmax(high) and argmin(low) (window=60)
+    category: momentum
+  KLEN:
+    expression: (high - low) / open
+    description: 'Kbar length: (high - low) / open'
+    category: kbar
+  KLOW:
+    expression: (min(open, close) - low) / open
+    description: 'Kbar lower shadow: (lesser(open, close) - low) / open'
+    category: kbar
+  KLOW2:
+    expression: (min(open, close) - low) / (high - low + 1e-12)
+    description: 'Kbar lower shadow ratio: lower shadow / bar range'
+    category: kbar
+  KMID:
+    expression: (close - open) / open
+    description: 'Kbar midpoint: (close - open) / open'
+    category: kbar
+  KMID2:
+    expression: (close - open) / (high - low + 1e-12)
+    description: 'Kbar midpoint ratio: (close - open) / (high - low)'
+    category: kbar
+  KSFT:
+    expression: (2 * close - high - low) / open
+    description: 'Kbar shift: (2*close - high - low) / open'
+    category: kbar
+  KSFT2:
+    expression: (2 * close - high - low) / (high - low + 1e-12)
+    description: 'Kbar shift ratio: (2*close - high - low) / bar range'
+    category: kbar
+  KUP:
+    expression: (high - max(open, close)) / open
+    description: 'Kbar upper shadow: (high - greater(open, close)) / open'
+    category: kbar
+  KUP2:
+    expression: (high - max(open, close)) / (high - low + 1e-12)
+    description: 'Kbar upper shadow ratio: upper shadow / bar range'
+    category: kbar
+  LOW0:
+    expression: low / close
+    description: 'Normalized low: low / close'
+    category: price
+  MA10:
+    expression: ts_mean(close, 10) / close
+    description: Moving average of close / current close (window=10)
+    category: momentum
+  MA20:
+    expression: ts_mean(close, 20) / close
+    description: Moving average of close / current close (window=20)
+    category: momentum
+  MA30:
+    expression: ts_mean(close, 30) / close
+    description: Moving average of close / current close (window=30)
+    category: momentum
+  MA5:
+    expression: ts_mean(close, 5) / close
+    description: Moving average of close / current close (window=5)
+    category: momentum
+  MA60:
+    expression: ts_mean(close, 60) / close
+    description: Moving average of close / current close (window=60)
+    category: momentum
+  MAX10:
+    expression: ts_max(high, 10) / close
+    description: Rolling max of high / current close (window=10)
+    category: volatility
+  MAX20:
+    expression: ts_max(high, 20) / close
+    description: Rolling max of high / current close (window=20)
+    category: volatility
+  MAX30:
+    expression: ts_max(high, 30) / close
+    description: Rolling max of high / current close (window=30)
+    category: volatility
+  MAX5:
+    expression: ts_max(high, 5) / close
+    description: Rolling max of high / current close (window=5)
+    category: volatility
+  MAX60:
+    expression: ts_max(high, 60) / close
+    description: Rolling max of high / current close (window=60)
+    category: volatility
+  MIN10:
+    expression: ts_min(low, 10) / close
+    description: Rolling min of low / current close (window=10)
+    category: volatility
+  MIN20:
+    expression: ts_min(low, 20) / close
+    description: Rolling min of low / current close (window=20)
+    category: volatility
+  MIN30:
+    expression: ts_min(low, 30) / close
+    description: Rolling min of low / current close (window=30)
+    category: volatility
+  MIN5:
+    expression: ts_min(low, 5) / close
+    description: Rolling min of low / current close (window=5)
+    category: volatility
+  MIN60:
+    expression: ts_min(low, 60) / close
+    description: Rolling min of low / current close (window=60)
+    category: volatility
+  OPEN0:
+    expression: open / close
+    description: 'Normalized open: open / close'
+    category: price
+  QTLD10:
+    expression: ts_percentile(close, 10, 0.2) / close
+    description: 20th percentile of close / current close (window=10)
+    category: volatility
+  QTLD20:
+    expression: ts_percentile(close, 20, 0.2) / close
+    description: 20th percentile of close / current close (window=20)
+    category: volatility
+  QTLD30:
+    expression: ts_percentile(close, 30, 0.2) / close
+    description: 20th percentile of close / current close (window=30)
+    category: volatility
+  QTLD5:
+    expression: ts_percentile(close, 5, 0.2) / close
+    description: 20th percentile of close / current close (window=5)
+    category: volatility
+  QTLD60:
+    expression: ts_percentile(close, 60, 0.2) / close
+    description: 20th percentile of close / current close (window=60)
+    category: volatility
+  QTLU10:
+    expression: ts_percentile(close, 10, 0.8) / close
+    description: 80th percentile of close / current close (window=10)
+    category: volatility
+  QTLU20:
+    expression: ts_percentile(close, 20, 0.8) / close
+    description: 80th percentile of close / current close (window=20)
+    category: volatility
+  QTLU30:
+    expression: ts_percentile(close, 30, 0.8) / close
+    description: 80th percentile of close / current close (window=30)
+    category: volatility
+  QTLU5:
+    expression: ts_percentile(close, 5, 0.8) / close
+    description: 80th percentile of close / current close (window=5)
+    category: volatility
+  QTLU60:
+    expression: ts_percentile(close, 60, 0.8) / close
+    description: 80th percentile of close / current close (window=60)
+    category: volatility
+  RANK10:
+    expression: ts_rank(close, 10)
+    description: Rolling rank of close (window=10)
+    category: momentum
+  RANK20:
+    expression: ts_rank(close, 20)
+    description: Rolling rank of close (window=20)
+    category: momentum
+  RANK30:
+    expression: ts_rank(close, 30)
+    description: Rolling rank of close (window=30)
+    category: momentum
+  RANK5:
+    expression: ts_rank(close, 5)
+    description: Rolling rank of close (window=5)
+    category: momentum
+  RANK60:
+    expression: ts_rank(close, 60)
+    description: Rolling rank of close (window=60)
+    category: momentum
+  RESI10:
+    expression: ts_residual(close, 10) / close
+    description: Rolling regression residual of close / current close (window=10)
+    category: momentum
+  RESI20:
+    expression: ts_residual(close, 20) / close
+    description: Rolling regression residual of close / current close (window=20)
+    category: momentum
+  RESI30:
+    expression: ts_residual(close, 30) / close
+    description: Rolling regression residual of close / current close (window=30)
+    category: momentum
+  RESI5:
+    expression: ts_residual(close, 5) / close
+    description: Rolling regression residual of close / current close (window=5)
+    category: momentum
+  RESI60:
+    expression: ts_residual(close, 60) / close
+    description: Rolling regression residual of close / current close (window=60)
+    category: momentum
+  ROC10:
+    expression: delay(close, 10) / close
+    description: 'Rate of change: lagged close / current close (window=10)'
+    category: momentum
+  ROC20:
+    expression: delay(close, 20) / close
+    description: 'Rate of change: lagged close / current close (window=20)'
+    category: momentum
+  ROC30:
+    expression: delay(close, 30) / close
+    description: 'Rate of change: lagged close / current close (window=30)'
+    category: momentum
+  ROC5:
+    expression: delay(close, 5) / close
+    description: 'Rate of change: lagged close / current close (window=5)'
+    category: momentum
+  ROC60:
+    expression: delay(close, 60) / close
+    description: 'Rate of change: lagged close / current close (window=60)'
+    category: momentum
+  RSQR10:
+    expression: ts_rsquare(close, 10)
+    description: Rolling R-squared of close trend (window=10)
+    category: momentum
+  RSQR20:
+    expression: ts_rsquare(close, 20)
+    description: Rolling R-squared of close trend (window=20)
+    category: momentum
+  RSQR30:
+    expression: ts_rsquare(close, 30)
+    description: Rolling R-squared of close trend (window=30)
+    category: momentum
+  RSQR5:
+    expression: ts_rsquare(close, 5)
+    description: Rolling R-squared of close trend (window=5)
+    category: momentum
+  RSQR60:
+    expression: ts_rsquare(close, 60)
+    description: Rolling R-squared of close trend (window=60)
+    category: momentum
+  RSV10:
+    expression: (close - ts_min(low, 10)) / (ts_max(high, 10) - ts_min(low, 10) +
+      1e-12)
+    description: 'Stochastic RSV: (close - rolling min) / (rolling max - rolling min)
+      (window=10)'
+    category: momentum
+  RSV20:
+    expression: (close - ts_min(low, 20)) / (ts_max(high, 20) - ts_min(low, 20) +
+      1e-12)
+    description: 'Stochastic RSV: (close - rolling min) / (rolling max - rolling min)
+      (window=20)'
+    category: momentum
+  RSV30:
+    expression: (close - ts_min(low, 30)) / (ts_max(high, 30) - ts_min(low, 30) +
+      1e-12)
+    description: 'Stochastic RSV: (close - rolling min) / (rolling max - rolling min)
+      (window=30)'
+    category: momentum
+  RSV5:
+    expression: (close - ts_min(low, 5)) / (ts_max(high, 5) - ts_min(low, 5) + 1e-12)
+    description: 'Stochastic RSV: (close - rolling min) / (rolling max - rolling min)
+      (window=5)'
+    category: momentum
+  RSV60:
+    expression: (close - ts_min(low, 60)) / (ts_max(high, 60) - ts_min(low, 60) +
+      1e-12)
+    description: 'Stochastic RSV: (close - rolling min) / (rolling max - rolling min)
+      (window=60)'
+    category: momentum
+  STD10:
+    expression: stddev(close, 10) / close
+    description: Rolling std of close / current close (window=10)
+    category: volatility
+  STD20:
+    expression: stddev(close, 20) / close
+    description: Rolling std of close / current close (window=20)
+    category: volatility
+  STD30:
+    expression: stddev(close, 30) / close
+    description: Rolling std of close / current close (window=30)
+    category: volatility
+  STD5:
+    expression: stddev(close, 5) / close
+    description: Rolling std of close / current close (window=5)
+    category: volatility
+  STD60:
+    expression: stddev(close, 60) / close
+    description: Rolling std of close / current close (window=60)
+    category: volatility
+  SUMD10:
+    expression: (ts_sum(max(close - delay(close, 1), 0), 10) - ts_sum(max(delay(close,
+      1) - close, 0), 10)) / (ts_sum(abs(close - delay(close, 1)), 10) + 1e-12)
+    description: Net return sum ratio (RSI-like, price) (window=10)
+    category: rsi_like
+  SUMD20:
+    expression: (ts_sum(max(close - delay(close, 1), 0), 20) - ts_sum(max(delay(close,
+      1) - close, 0), 20)) / (ts_sum(abs(close - delay(close, 1)), 20) + 1e-12)
+    description: Net return sum ratio (RSI-like, price) (window=20)
+    category: rsi_like
+  SUMD30:
+    expression: (ts_sum(max(close - delay(close, 1), 0), 30) - ts_sum(max(delay(close,
+      1) - close, 0), 30)) / (ts_sum(abs(close - delay(close, 1)), 30) + 1e-12)
+    description: Net return sum ratio (RSI-like, price) (window=30)
+    category: rsi_like
+  SUMD5:
+    expression: (ts_sum(max(close - delay(close, 1), 0), 5) - ts_sum(max(delay(close,
+      1) - close, 0), 5)) / (ts_sum(abs(close - delay(close, 1)), 5) + 1e-12)
+    description: Net return sum ratio (RSI-like, price) (window=5)
+    category: rsi_like
+  SUMD60:
+    expression: (ts_sum(max(close - delay(close, 1), 0), 60) - ts_sum(max(delay(close,
+      1) - close, 0), 60)) / (ts_sum(abs(close - delay(close, 1)), 60) + 1e-12)
+    description: Net return sum ratio (RSI-like, price) (window=60)
+    category: rsi_like
+  SUMN10:
+    expression: ts_sum(max(delay(close, 1) - close, 0), 10) / (ts_sum(abs(close -
+      delay(close, 1)), 10) + 1e-12)
+    description: Negative return sum ratio (RSI-like, price) (window=10)
+    category: rsi_like
+  SUMN20:
+    expression: ts_sum(max(delay(close, 1) - close, 0), 20) / (ts_sum(abs(close -
+      delay(close, 1)), 20) + 1e-12)
+    description: Negative return sum ratio (RSI-like, price) (window=20)
+    category: rsi_like
+  SUMN30:
+    expression: ts_sum(max(delay(close, 1) - close, 0), 30) / (ts_sum(abs(close -
+      delay(close, 1)), 30) + 1e-12)
+    description: Negative return sum ratio (RSI-like, price) (window=30)
+    category: rsi_like
+  SUMN5:
+    expression: ts_sum(max(delay(close, 1) - close, 0), 5) / (ts_sum(abs(close - delay(close,
+      1)), 5) + 1e-12)
+    description: Negative return sum ratio (RSI-like, price) (window=5)
+    category: rsi_like
+  SUMN60:
+    expression: ts_sum(max(delay(close, 1) - close, 0), 60) / (ts_sum(abs(close -
+      delay(close, 1)), 60) + 1e-12)
+    description: Negative return sum ratio (RSI-like, price) (window=60)
+    category: rsi_like
+  SUMP10:
+    expression: ts_sum(max(close - delay(close, 1), 0), 10) / (ts_sum(abs(close -
+      delay(close, 1)), 10) + 1e-12)
+    description: Positive return sum ratio (RSI-like, price) (window=10)
+    category: rsi_like
+  SUMP20:
+    expression: ts_sum(max(close - delay(close, 1), 0), 20) / (ts_sum(abs(close -
+      delay(close, 1)), 20) + 1e-12)
+    description: Positive return sum ratio (RSI-like, price) (window=20)
+    category: rsi_like
+  SUMP30:
+    expression: ts_sum(max(close - delay(close, 1), 0), 30) / (ts_sum(abs(close -
+      delay(close, 1)), 30) + 1e-12)
+    description: Positive return sum ratio (RSI-like, price) (window=30)
+    category: rsi_like
+  SUMP5:
+    expression: ts_sum(max(close - delay(close, 1), 0), 5) / (ts_sum(abs(close - delay(close,
+      1)), 5) + 1e-12)
+    description: Positive return sum ratio (RSI-like, price) (window=5)
+    category: rsi_like
+  SUMP60:
+    expression: ts_sum(max(close - delay(close, 1), 0), 60) / (ts_sum(abs(close -
+      delay(close, 1)), 60) + 1e-12)
+    description: Positive return sum ratio (RSI-like, price) (window=60)
+    category: rsi_like
+  VMA10:
+    expression: ts_mean(volume, 10) / (volume + 1e-12)
+    description: Volume moving average / current volume (window=10)
+    category: volume
+  VMA20:
+    expression: ts_mean(volume, 20) / (volume + 1e-12)
+    description: Volume moving average / current volume (window=20)
+    category: volume
+  VMA30:
+    expression: ts_mean(volume, 30) / (volume + 1e-12)
+    description: Volume moving average / current volume (window=30)
+    category: volume
+  VMA5:
+    expression: ts_mean(volume, 5) / (volume + 1e-12)
+    description: Volume moving average / current volume (window=5)
+    category: volume
+  VMA60:
+    expression: ts_mean(volume, 60) / (volume + 1e-12)
+    description: Volume moving average / current volume (window=60)
+    category: volume
+  VSTD10:
+    expression: stddev(volume, 10) / (volume + 1e-12)
+    description: Volume rolling std / current volume (window=10)
+    category: volume
+  VSTD20:
+    expression: stddev(volume, 20) / (volume + 1e-12)
+    description: Volume rolling std / current volume (window=20)
+    category: volume
+  VSTD30:
+    expression: stddev(volume, 30) / (volume + 1e-12)
+    description: Volume rolling std / current volume (window=30)
+    category: volume
+  VSTD5:
+    expression: stddev(volume, 5) / (volume + 1e-12)
+    description: Volume rolling std / current volume (window=5)
+    category: volume
+  VSTD60:
+    expression: stddev(volume, 60) / (volume + 1e-12)
+    description: Volume rolling std / current volume (window=60)
+    category: volume
+  VSUMD10:
+    expression: (ts_sum(max(volume - delay(volume, 1), 0), 10) - ts_sum(max(delay(volume,
+      1) - volume, 0), 10)) / (ts_sum(abs(volume - delay(volume, 1)), 10) + 1e-12)
+    description: Net volume change sum ratio (RSI-like, volume) (window=10)
+    category: volume
+  VSUMD20:
+    expression: (ts_sum(max(volume - delay(volume, 1), 0), 20) - ts_sum(max(delay(volume,
+      1) - volume, 0), 20)) / (ts_sum(abs(volume - delay(volume, 1)), 20) + 1e-12)
+    description: Net volume change sum ratio (RSI-like, volume) (window=20)
+    category: volume
+  VSUMD30:
+    expression: (ts_sum(max(volume - delay(volume, 1), 0), 30) - ts_sum(max(delay(volume,
+      1) - volume, 0), 30)) / (ts_sum(abs(volume - delay(volume, 1)), 30) + 1e-12)
+    description: Net volume change sum ratio (RSI-like, volume) (window=30)
+    category: volume
+  VSUMD5:
+    expression: (ts_sum(max(volume - delay(volume, 1), 0), 5) - ts_sum(max(delay(volume,
+      1) - volume, 0), 5)) / (ts_sum(abs(volume - delay(volume, 1)), 5) + 1e-12)
+    description: Net volume change sum ratio (RSI-like, volume) (window=5)
+    category: volume
+  VSUMD60:
+    expression: (ts_sum(max(volume - delay(volume, 1), 0), 60) - ts_sum(max(delay(volume,
+      1) - volume, 0), 60)) / (ts_sum(abs(volume - delay(volume, 1)), 60) + 1e-12)
+    description: Net volume change sum ratio (RSI-like, volume) (window=60)
+    category: volume
+  VSUMN10:
+    expression: ts_sum(max(delay(volume, 1) - volume, 0), 10) / (ts_sum(abs(volume
+      - delay(volume, 1)), 10) + 1e-12)
+    description: Negative volume change sum ratio (RSI-like, volume) (window=10)
+    category: volume
+  VSUMN20:
+    expression: ts_sum(max(delay(volume, 1) - volume, 0), 20) / (ts_sum(abs(volume
+      - delay(volume, 1)), 20) + 1e-12)
+    description: Negative volume change sum ratio (RSI-like, volume) (window=20)
+    category: volume
+  VSUMN30:
+    expression: ts_sum(max(delay(volume, 1) - volume, 0), 30) / (ts_sum(abs(volume
+      - delay(volume, 1)), 30) + 1e-12)
+    description: Negative volume change sum ratio (RSI-like, volume) (window=30)
+    category: volume
+  VSUMN5:
+    expression: ts_sum(max(delay(volume, 1) - volume, 0), 5) / (ts_sum(abs(volume
+      - delay(volume, 1)), 5) + 1e-12)
+    description: Negative volume change sum ratio (RSI-like, volume) (window=5)
+    category: volume
+  VSUMN60:
+    expression: ts_sum(max(delay(volume, 1) - volume, 0), 60) / (ts_sum(abs(volume
+      - delay(volume, 1)), 60) + 1e-12)
+    description: Negative volume change sum ratio (RSI-like, volume) (window=60)
+    category: volume
+  VSUMP10:
+    expression: ts_sum(max(volume - delay(volume, 1), 0), 10) / (ts_sum(abs(volume
+      - delay(volume, 1)), 10) + 1e-12)
+    description: Positive volume change sum ratio (RSI-like, volume) (window=10)
+    category: volume
+  VSUMP20:
+    expression: ts_sum(max(volume - delay(volume, 1), 0), 20) / (ts_sum(abs(volume
+      - delay(volume, 1)), 20) + 1e-12)
+    description: Positive volume change sum ratio (RSI-like, volume) (window=20)
+    category: volume
+  VSUMP30:
+    expression: ts_sum(max(volume - delay(volume, 1), 0), 30) / (ts_sum(abs(volume
+      - delay(volume, 1)), 30) + 1e-12)
+    description: Positive volume change sum ratio (RSI-like, volume) (window=30)
+    category: volume
+  VSUMP5:
+    expression: ts_sum(max(volume - delay(volume, 1), 0), 5) / (ts_sum(abs(volume
+      - delay(volume, 1)), 5) + 1e-12)
+    description: Positive volume change sum ratio (RSI-like, volume) (window=5)
+    category: volume
+  VSUMP60:
+    expression: ts_sum(max(volume - delay(volume, 1), 0), 60) / (ts_sum(abs(volume
+      - delay(volume, 1)), 60) + 1e-12)
+    description: Positive volume change sum ratio (RSI-like, volume) (window=60)
+    category: volume
+  WVMA10:
+    expression: stddev(abs(close / delay(close, 1) - 1) * volume, 10) / (ts_mean(abs(close
+      / delay(close, 1) - 1) * volume, 10) + 1e-12)
+    description: Weighted volume-return moving average coefficient of variation (window=10)
+    category: volume
+  WVMA20:
+    expression: stddev(abs(close / delay(close, 1) - 1) * volume, 20) / (ts_mean(abs(close
+      / delay(close, 1) - 1) * volume, 20) + 1e-12)
+    description: Weighted volume-return moving average coefficient of variation (window=20)
+    category: volume
+  WVMA30:
+    expression: stddev(abs(close / delay(close, 1) - 1) * volume, 30) / (ts_mean(abs(close
+      / delay(close, 1) - 1) * volume, 30) + 1e-12)
+    description: Weighted volume-return moving average coefficient of variation (window=30)
+    category: volume
+  WVMA5:
+    expression: stddev(abs(close / delay(close, 1) - 1) * volume, 5) / (ts_mean(abs(close
+      / delay(close, 1) - 1) * volume, 5) + 1e-12)
+    description: Weighted volume-return moving average coefficient of variation (window=5)
+    category: volume
+  WVMA60:
+    expression: stddev(abs(close / delay(close, 1) - 1) * volume, 60) / (ts_mean(abs(close
+      / delay(close, 1) - 1) * volume, 60) + 1e-12)
+    description: Weighted volume-return moving average coefficient of variation (window=60)
+    category: volume
