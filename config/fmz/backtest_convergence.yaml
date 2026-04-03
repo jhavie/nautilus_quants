@@ -192,7 +192,8 @@ engine:
       venue_name: "BINANCE"
       currency: "USDT"
       min_equity_ratio: 0
-      guarded_strategy_ids: []    # empty = stop all strategies
+      guarded_strategy_ids: []
+      drawdown_rules: []
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"

@@ -80,8 +80,16 @@ engine:
       venue_name: "OKX"
       currency: "USDT"
       min_equity_ratio: 0.7
-      cooldown_period: "24h"
       guarded_strategy_ids: []
+      drawdown_rules:
+        - name: "monthly"
+          drawdown_window: "30d"
+          drawdown_ratio: 0.8
+          cooldown_period: "72h"
+        - name: "daily"
+          drawdown_window: "1d"
+          drawdown_ratio: 0.95
+          cooldown_period: "24h"
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
