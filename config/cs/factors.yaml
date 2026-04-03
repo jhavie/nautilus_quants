@@ -1,20 +1,34 @@
 # CS Strategy Factor Configuration
-# Single factor: alpha044 — correlation(high, rank(volume), 5)
+# alpha044: -correlation(high, rank(volume), 5) @ 4h bars
+# alpha044_8h: 8h equivalent via 4h bars — window=10 (5 * 2)
 # ICIR=0.265, IC(1d)=0.046 — 全局最强因子
 
 metadata:
   name: alpha101
+  source: "alpha101"
   version: "1.0"
-  description: "Single alpha044 factor for CS strategy"
+  description: "alpha044 (4h) + alpha044_8h (8h equivalent via 4h bars)"
 
-variables:
-  returns: "delta(close, 1) / delay(close, 1)"
+parameters:
+  w4h: 5    # 5 x 4h bars = 20h lookback (original)
+  # w8h: 10   # 5 x 8h bars = 40h lookback, expressed in 4h bars (2x)
+
+# variables:
+  # returns: "delta(close, 1) / delay(close, 1)"
+  # high_8h: "ts_max(high, 2)"       # 8h high = max of 2 consecutive 4h highs
+  # volume_8h: "ts_sum(volume, 2)"   # 8h volume = sum of 2 consecutive 4h volumes
 
 factors:
-  alpha044:
-    expression: "-correlation(high, rank(volume), 5)"
-    description: "Alpha#44: High-price vs volume rank correlation"
+  alpha044_5:
+    expression: "-correlation(high, rank(volume), w4h)"
+    description: "Alpha#44: 5x4h bars"
     category: "volume"
+    prototype: "alpha044"
+    tags: ["volume"]
+  # alpha044_8h:
+  #   expression: "-correlation(high_8h, rank(volume_8h), w8h)"
+  #   description: "Alpha#44 @ 8h equivalent: 5x8h = 10x4h bars"
+  #   category: "volume"
 
 performance:
   enable_timing: true

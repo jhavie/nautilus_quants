@@ -74,7 +74,7 @@ engine:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/cs/factors_alpha_cs.yaml"
+        factor_config_path: "config/cs/factors_alpha101.yaml"
         interval: "4h"
         signal_prefix: "factor"
         max_history: 0
@@ -91,17 +91,13 @@ engine:
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
         venue_name: "BINANCE"
-        selection_policy: "FMZSelectionPolicy"
-        composite_factor: "alpha_score"
+        composite_factor: "composite"
         rebalance_interval: 1
-        rebalance_to_weights: false
-        position_value: 800
+        selection_policy: "FMZSelectionPolicy"
+        position_mode: "fixed"
+        position_value: 300
         n_long: 15
         n_short: 15
-        # topk_long: 15
-        # topk_short: 15
-        # n_drop_long: 3
-        # n_drop_short: 3
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
