@@ -393,8 +393,10 @@ def analyze(
                     file_path=str(config_file),
                 )
 
-                # Register factors
-                repo.register_factors_from_config(factor_config)
+                # Register only factors that have analysis results
+                repo.register_factors_from_config(
+                    factor_config, only_names=set(ic_results.keys()),
+                )
 
                 # Save analysis metrics
                 all_metrics = []
