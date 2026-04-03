@@ -708,27 +708,20 @@ def backtests(
         click.echo(
             f"{'backtest_id':<18} {'strategy':<20} {'tf':<4} "
             f"{'instr':>5} {'sharpe':>8} {'pnl%':>8} {'dd%':>8} "
-            f"{'wr%':>7} {'dur(s)':>7}"
+            f"{'wr%':>7} {'dur(s)':>7}  {'factors'}"
         )
-        click.echo("-" * 100)
+        click.echo("-" * 120)
         for r in runs:
             wr = f"{r.win_rate * 100:>6.1f}%" if r.win_rate else f"{'-':>7}"
             dd = f"{r.max_drawdown * 100:>7.2f}%" if r.max_drawdown else f"{'-':>8}"
+            factors = bt_repo.get_backtest_factors(r.backtest_id)
+            fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
             click.echo(
                 f"{r.backtest_id:<18} {r.strategy_name:<20} {r.timeframe:<4} "
                 f"{r.instrument_count:>5} {_f(r.sharpe_ratio)} "
                 f"{_f(r.total_pnl_pct)} {dd} "
-                f"{wr} {r.duration_seconds:>7.1f}"
+                f"{wr} {r.duration_seconds:>7.1f}  {fids}"
             )
-        # Show factors per backtest
-        for r in runs:
-            factors = bt_repo.get_backtest_factors(r.backtest_id)
-            if factors:
-                fids = [
-                    f"{bf.factor_id}({bf.role[0]})" for bf in factors
-                ]
-                click.echo(f"  factors: {', '.join(fids)}")
-
         click.echo(f"({len(runs)} backtests)")
     finally:
         db.close()
