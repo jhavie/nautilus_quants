@@ -16,3 +16,17 @@ FACTOR_VALUES_CACHE_KEY = "factor_values"
 
 # Cache key for PostLimitExecAlgorithm → ReportGenerator execution states transfer
 EXECUTION_STATES_CACHE_KEY = "execution_states"
+
+# ---------------------------------------------------------------------------
+# Snapshot keys for Grafana monitoring (written by SnapshotAggregatorActor)
+# All stored as JSON under trader-{TRADER_ID}:general:{key} in Redis
+# ---------------------------------------------------------------------------
+
+SNAPSHOT_VENUE_CACHE_KEY = "snapshot:venue"
+SNAPSHOT_EXECUTION_CACHE_KEY = "snapshot:execution"
+SNAPSHOT_FACTOR_CACHE_KEY = "snapshot:factor"
+SNAPSHOT_STRATEGY_CACHE_KEY = "snapshot:strategy"
+SNAPSHOT_HEALTH_CACHE_KEY = "snapshot:health"
+
+# DecisionEngineActor → SnapshotAggregatorActor strategy config metadata
+STRATEGY_CONFIG_CACHE_KEY = "snapshot:strategy_config"

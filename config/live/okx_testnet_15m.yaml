@@ -82,6 +82,15 @@ engine:
         rebalance_interval: 1
         composite_factor: "alpha101"
 
+    - actor_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActor"
+      config_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActorConfig"
+      config:
+        venue_name: "OKX"
+        currency: "USDT"
+        interval_secs: 15
+        strategy_ids: ["CSStrategy-000"]
+        log_directory: "logs/testnet_15m"
+
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
       config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
