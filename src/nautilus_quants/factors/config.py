@@ -20,17 +20,19 @@ import yaml
 class FactorDefinition:
     """
     Definition of a single factor.
-    
+
     Attributes:
-        name: Factor identifier
+        name: Factor key in YAML (e.g. "alpha044_8h")
         expression: Alpha101-style expression string
         description: Human-readable description
-        category: Optional category for grouping (momentum, volatility, etc.)
+        tags: Labels for grouping (replaces category). E.g. ["reversal", "volume"]
+        prototype: Groups parameter variants of the same base factor
     """
     name: str
     expression: str
     description: str = ""
-    category: str = ""
+    tags: list[str] = field(default_factory=list)
+    prototype: str = ""
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class FactorConfig:
     name: str = "default"
     version: str = "1.0"
     description: str = ""
+    source: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
     variables: dict[str, str] = field(default_factory=dict)
     factors: list[FactorDefinition] = field(default_factory=list)
@@ -84,6 +87,20 @@ class FactorConfig:
             if factor.name == name:
                 return factor
         return None
+
+
+def generate_factor_id(source: str, key: str) -> str:
+    """Generate a factor_id from source prefix and YAML key.
+
+    Examples:
+        >>> generate_factor_id("alpha101", "alpha044_8h")
+        'alpha101_alpha044_8h'
+        >>> generate_factor_id("", "sma_60")
+        'sma_60'
+    """
+    if source:
+        return f"{source}_{key}"
+    return key
 
 
 class ConfigValidationError(Exception):
@@ -175,24 +192,30 @@ def load_factor_config(path: str | Path) -> FactorConfig:
     name = metadata.get("name", "default")
     version = metadata.get("version", "1.0")
     description = metadata.get("description", "")
-    
+    source = metadata.get("source", "")
+
     # Parse parameters
     parameters = raw_config.get("parameters", {})
-    
+
     # Parse variables
     variables = raw_config.get("variables", {})
-    
+
     # Parse factors
     factors_raw = raw_config.get("factors", {})
     factors: list[FactorDefinition] = []
     for factor_name, factor_data in factors_raw.items():
         if factor_data is None:
             continue
+        raw_tags = factor_data.get("tags", [])
+        # Backward compat: migrate category → tags if tags empty
+        if not raw_tags and factor_data.get("category"):
+            raw_tags = [factor_data["category"]]
         factors.append(FactorDefinition(
             name=factor_name,
             expression=factor_data.get("expression", ""),
             description=factor_data.get("description", ""),
-            category=factor_data.get("category", ""),
+            tags=raw_tags,
+            prototype=factor_data.get("prototype", ""),
         ))
     
     # Parse performance config
@@ -207,6 +230,7 @@ def load_factor_config(path: str | Path) -> FactorConfig:
         name=name,
         version=version,
         description=description,
+        source=source,
         parameters=parameters,
         variables=variables,
         factors=factors,

@@ -26,61 +26,43 @@ def export_factors_yaml(
     """Generate a complete ``factors.yaml`` from the registry.
 
     The output is directly loadable by ``load_factor_config()``.
-
-    Parameters
-    ----------
-    repo : FactorRepository
-        Repository to query.
-    output_path : Path
-        Destination YAML path.
-    context_id : str
-        Config context to use for variables/parameters.  Empty = no context.
-    status : str
-        Filter factors by this status (default "active").
-    composite_method : str
-        Weighting method: "equal" or "icir_weight".
-    composite_top_n : int
-        Maximum number of factors in the composite.
-    composite_transform : str
-        Transform applied to each factor in the composite expression:
-        "cs_rank", "cs_zscore", or "raw".
-
-    Returns
-    -------
-    Path
-        The output path.
     """
-    # 1. Query factors (exclude any existing "composite" to avoid overwriting
-    #    a user-defined composite expression; sort by |ICIR| descending so
-    #    top-N selects the strongest-signal factors regardless of sign).
-    factors = repo.list_factors(
-        status=status,
-        sort_by="abs_icir",
-        limit=composite_top_n,
-        exclude_ids={"composite"},
-    )
+    # 1. Query factors
+    factors = repo.list_factors(status=status, limit=composite_top_n)
 
-    # 2. Load context (variables / parameters).
+    # 2. Load config snapshot for variables/parameters if context_id given
     variables: dict[str, str] = {}
     parameters: dict[str, Any] = {}
+    source = ""
     if context_id:
-        ctx = repo.get_context(context_id)
-        if ctx is not None:
-            variables = ctx.variables
-            parameters = ctx.parameters
+        snap = repo.get_config_snapshot(context_id)
+        if snap is not None:
+            cj = snap.config_json
+            variables = cj.get("variables", {})
+            parameters = cj.get("parameters", {})
+            source = cj.get("metadata", {}).get("source", "")
 
-    # 3. Compute weights.
-    weights = _compute_weights(factors, composite_method)
+    # If no snapshot, derive variables/parameters from first factor
+    if not variables and factors:
+        variables = factors[0].variables
+    if not parameters and factors:
+        parameters = factors[0].parameters
+    if not source and factors:
+        source = factors[0].source
 
-    # 4. Build composite expression.
+    # 3. Compute weights
+    weights = _compute_weights(factors, composite_method, repo)
+
+    # 4. Build composite expression
     composite_expr = _build_composite_expression(weights, composite_transform)
 
-    # 5. Assemble YAML structure.
+    # 5. Assemble YAML
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     doc: dict[str, Any] = {}
 
     doc["metadata"] = {
         "name": f"registry_export{'_' + context_id if context_id else ''}",
+        "source": source,
         "version": "1.0.0",
         "description": (
             f"Auto-generated from registry ({len(factors)} {status} factors, "
@@ -93,13 +75,15 @@ def export_factors_yaml(
     if variables:
         doc["variables"] = variables
 
-    factors_section: dict[str, dict[str, str]] = {}
+    factors_section: dict[str, dict[str, Any]] = {}
     for f in factors:
-        entry: dict[str, str] = {"expression": f.expression}
+        entry: dict[str, Any] = {"expression": f.expression}
         if f.description:
             entry["description"] = f.description
-        if f.category:
-            entry["category"] = f.category
+        if f.tags:
+            entry["tags"] = f.tags
+        if f.prototype:
+            entry["prototype"] = f.prototype
         factors_section[f.factor_id] = entry
 
     factors_section["composite"] = {
@@ -111,7 +95,7 @@ def export_factors_yaml(
     }
     doc["factors"] = factors_section
 
-    # 6. Write YAML.
+    # 6. Write YAML
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -124,7 +108,10 @@ def export_factors_yaml(
 
     with open(output_path, "w", encoding="utf-8") as fh:
         fh.write(header)
-        yaml.dump(doc, fh, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        yaml.dump(
+            doc, fh, default_flow_style=False,
+            allow_unicode=True, sort_keys=False,
+        )
 
     return output_path
 
@@ -132,23 +119,31 @@ def export_factors_yaml(
 def _compute_weights(
     factors: list[FactorRecord],
     method: str,
+    repo: FactorRepository | None = None,
 ) -> list[tuple[str, float]]:
-    """Compute factor weights as (factor_id, weight) pairs.
-
-    Returns an empty list if no factors are provided.
-    """
+    """Compute factor weights as (factor_id, weight) pairs."""
     if not factors:
         return []
 
-    if method == "icir_weight":
-        # Use absolute ICIR; fall back to equal if no ICIR values.
-        icir_values = [(f.factor_id, abs(f.icir)) for f in factors if f.icir is not None]
+    if method == "icir_weight" and repo is not None:
+        # Get latest ICIR from analysis metrics
+        icir_values: list[tuple[str, float]] = []
+        for f in factors:
+            metrics = repo.get_metrics(f.factor_id)
+            if metrics:
+                best = max(
+                    (m for m in metrics if m.icir is not None),
+                    key=lambda m: abs(m.icir or 0),
+                    default=None,
+                )
+                if best and best.icir is not None:
+                    icir_values.append((f.factor_id, abs(best.icir)))
         if icir_values:
             total = sum(v for _, v in icir_values)
             if total > 0:
                 return [(fid, v / total) for fid, v in icir_values]
 
-    # Default: equal weight.
+    # Default: equal weight
     n = len(factors)
     w = 1.0 / n
     return [(f.factor_id, w) for f in factors]

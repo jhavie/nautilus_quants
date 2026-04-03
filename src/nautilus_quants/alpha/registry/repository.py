@@ -1,9 +1,10 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""FactorRepository — business-logic CRUD, versioning, status, and context management."""
+"""FactorRepository — factor CRUD, config snapshots, and analysis metrics."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -12,254 +13,209 @@ from nautilus_quants.alpha.registry.database import RegistryDatabase
 from nautilus_quants.alpha.registry.models import (
     STATUS_TRANSITIONS,
     VALID_STATUSES,
-    AnalysisResult,
-    ConfigContext,
+    AnalysisMetrics,
+    ConfigSnapshot,
     FactorRecord,
-    FactorVersion,
 )
-from nautilus_quants.factors.config import FactorConfig
+from nautilus_quants.factors.config import FactorConfig, generate_factor_id
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-class FactorRepository:
-    """High-level interface for the Factor Registry.
+def _config_hash(config_dict: dict[str, Any]) -> str:
+    """SHA-256 of canonicalized JSON."""
+    raw = json.dumps(config_dict, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
 
-    Parameters
-    ----------
-    db : RegistryDatabase
-        Opened database connection.
-    """
+
+class FactorRepository:
+    """High-level interface for the Factor Registry v2."""
 
     def __init__(self, db: RegistryDatabase) -> None:
         self._db = db
 
-    # ------------------------------------------------------------------
-    # Factor CRUD
-    # ------------------------------------------------------------------
+    # ── Factor CRUD ──
 
     def upsert_factor(self, record: FactorRecord) -> str:
-        """Insert or update a factor.  Returns ``"new"`` / ``"updated"`` / ``"unchanged"``.
-
-        On expression change, a new version record is auto-created.
-        """
+        """Insert or update a factor. Returns "new" / "updated" / "unchanged"."""
         now = _now_iso()
         existing = self.get_factor(record.factor_id)
 
         if existing is None:
             self._db.execute(
                 "INSERT INTO factors "
-                "(factor_id, expression, description, category, source, status, "
-                " created_at, updated_at, ic_mean, icir, score, bar_spec) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(factor_id, prototype, expression, description, source, "
+                " status, tags, parameters, variables, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     record.factor_id,
+                    record.prototype,
                     record.expression,
                     record.description,
-                    record.category,
                     record.source,
                     record.status,
+                    json.dumps(record.tags),
+                    json.dumps(record.parameters),
+                    json.dumps(record.variables),
                     now,
                     now,
-                    record.ic_mean,
-                    record.icir,
-                    record.score,
-                    record.bar_spec,
                 ],
             )
-            self._create_version(record.factor_id, record.expression, "initial", now)
             return "new"
 
-        expression_changed = existing.expression != record.expression
-        metadata_changed = (
-            existing.description != record.description
-            or existing.category != record.category
+        changed = (
+            existing.expression != record.expression
+            or existing.description != record.description
+            or existing.prototype != record.prototype
+            or existing.tags != record.tags
+            or existing.parameters != record.parameters
+            or existing.variables != record.variables
         )
-
-        if not expression_changed and not metadata_changed:
+        if not changed:
             return "unchanged"
 
-        # Update mutable fields; preserve status/source/scores from DB.
         self._db.execute(
-            "UPDATE factors SET expression = ?, description = ?, category = ?, "
-            "updated_at = ? WHERE factor_id = ?",
-            [record.expression, record.description, record.category, now, record.factor_id],
+            "UPDATE factors SET prototype = ?, expression = ?, description = ?, "
+            "tags = ?, parameters = ?, variables = ?, updated_at = ? "
+            "WHERE factor_id = ?",
+            [
+                record.prototype,
+                record.expression,
+                record.description,
+                json.dumps(record.tags),
+                json.dumps(record.parameters),
+                json.dumps(record.variables),
+                now,
+                record.factor_id,
+            ],
         )
-        if expression_changed:
-            self._create_version(record.factor_id, record.expression, "", now)
         return "updated"
 
     def get_factor(self, factor_id: str) -> FactorRecord | None:
-        """Get a single factor by ID."""
         row = self._db.fetch_one(
-            "SELECT factor_id, expression, description, category, source, status, "
-            "created_at, updated_at, ic_mean, icir, score, bar_spec "
+            "SELECT factor_id, expression, prototype, description, source, "
+            "status, tags, parameters, variables, created_at, updated_at "
             "FROM factors WHERE factor_id = ?",
             [factor_id],
         )
         if row is None:
             return None
-        return FactorRecord(*row)
+        return FactorRecord(
+            factor_id=row[0],
+            expression=row[1],
+            prototype=row[2] or "",
+            description=row[3] or "",
+            source=row[4] or "",
+            status=row[5] or "candidate",
+            tags=json.loads(row[6]) if row[6] else [],
+            parameters=json.loads(row[7]) if row[7] else {},
+            variables=json.loads(row[8]) if row[8] else {},
+            created_at=str(row[9]) if row[9] else "",
+            updated_at=str(row[10]) if row[10] else "",
+        )
 
     def delete_factor(self, factor_id: str) -> None:
-        """Delete a factor and its version history."""
-        self._db.execute("DELETE FROM factor_versions WHERE factor_id = ?", [factor_id])
-        self._db.execute("DELETE FROM factors WHERE factor_id = ?", [factor_id])
-
-    # ------------------------------------------------------------------
-    # List / Query
-    # ------------------------------------------------------------------
+        self._db.execute(
+            "DELETE FROM factors WHERE factor_id = ?", [factor_id],
+        )
 
     def list_factors(
         self,
         status: str | None = None,
-        category: str | None = None,
         source: str | None = None,
+        prototype: str | None = None,
         sort_by: str = "factor_id",
         descending: bool = False,
         limit: int | None = None,
-        exclude_ids: set[str] | None = None,
     ) -> list[FactorRecord]:
-        """Query factors with optional filters, sorting, and limit.
-
-        Parameters
-        ----------
-        sort_by : str
-            Column to sort by.  Use ``"abs_icir"`` for ``ABS(icir) DESC
-            NULLS LAST`` (selects strongest-signal factors regardless of
-            sign).
-        descending : bool
-            Sort descending (ignored when ``sort_by="abs_icir"``).
-        exclude_ids : set[str] | None
-            Factor IDs to exclude from results.
-        """
         clauses: list[str] = []
         params: list[Any] = []
 
         if status is not None:
             clauses.append("status = ?")
             params.append(status)
-        if category is not None:
-            clauses.append("category = ?")
-            params.append(category)
         if source is not None:
             clauses.append("source = ?")
             params.append(source)
-        if exclude_ids:
-            placeholders = ", ".join("?" for _ in exclude_ids)
-            clauses.append(f"factor_id NOT IN ({placeholders})")
-            params.extend(sorted(exclude_ids))
+        if prototype is not None:
+            clauses.append("prototype = ?")
+            params.append(prototype)
 
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-
-        # Whitelist sort columns to prevent SQL injection.
-        allowed_sort = {
-            "factor_id", "category", "source", "status",
-            "created_at", "updated_at", "ic_mean", "icir", "score",
-            "abs_icir",
-        }
-        if sort_by not in allowed_sort:
+        allowed = {"factor_id", "source", "status", "prototype", "created_at"}
+        if sort_by not in allowed:
             sort_by = "factor_id"
-
-        if sort_by == "abs_icir":
-            order_clause = "ABS(icir) DESC NULLS LAST"
-        else:
-            direction = "DESC" if descending else "ASC"
-            order_clause = f"{sort_by} {direction} NULLS LAST"
+        direction = "DESC" if descending else "ASC"
 
         sql = (
-            "SELECT factor_id, expression, description, category, source, status, "
-            "created_at, updated_at, ic_mean, icir, score, bar_spec "
-            f"FROM factors{where} ORDER BY {order_clause}"
+            "SELECT factor_id, expression, prototype, description, source, "
+            "status, tags, parameters, variables, created_at, updated_at "
+            f"FROM factors{where} ORDER BY {sort_by} {direction}"
         )
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
 
         rows = self._db.fetch_all(sql, params if params else None)
-        return [FactorRecord(*row) for row in rows]
+        return [
+            FactorRecord(
+                factor_id=r[0],
+                expression=r[1],
+                prototype=r[2] or "",
+                description=r[3] or "",
+                source=r[4] or "",
+                status=r[5] or "candidate",
+                tags=json.loads(r[6]) if r[6] else [],
+                parameters=json.loads(r[7]) if r[7] else {},
+                variables=json.loads(r[8]) if r[8] else {},
+                created_at=str(r[9]) if r[9] else "",
+                updated_at=str(r[10]) if r[10] else "",
+            )
+            for r in rows
+        ]
 
-    # ------------------------------------------------------------------
-    # Status transitions
-    # ------------------------------------------------------------------
+    # ── Status transitions ──
 
     def set_status(self, factor_id: str, new_status: str) -> None:
-        """Transition a factor's status.
-
-        Raises
-        ------
-        ValueError
-            If the factor doesn't exist or the transition is invalid.
-        """
         if new_status not in VALID_STATUSES:
-            raise ValueError(f"无效状态: {new_status}（合法值: {VALID_STATUSES}）")
-
+            raise ValueError(f"Invalid status: {new_status}")
         factor = self.get_factor(factor_id)
         if factor is None:
-            raise ValueError(f"因子不存在: {factor_id}")
-
+            raise ValueError(f"Factor not found: {factor_id}")
         allowed = STATUS_TRANSITIONS.get(factor.status, set())
         if new_status not in allowed:
             raise ValueError(
-                f"非法状态转换 {factor.status} → {new_status}"
-                f"（{factor.status} 只能转换到 {allowed}）"
+                f"Cannot transition {factor.status} → {new_status} "
+                f"(allowed: {allowed})"
             )
-
         self._db.execute(
             "UPDATE factors SET status = ?, updated_at = ? WHERE factor_id = ?",
             [new_status, _now_iso(), factor_id],
         )
 
-    # ------------------------------------------------------------------
-    # Version management
-    # ------------------------------------------------------------------
+    # ── Register from FactorConfig ──
 
-    def get_versions(self, factor_id: str) -> list[FactorVersion]:
-        """Get all version records for a factor, ordered by version number."""
-        rows = self._db.fetch_all(
-            "SELECT factor_id, version, expression, reason, created_at "
-            "FROM factor_versions WHERE factor_id = ? ORDER BY version",
-            [factor_id],
-        )
-        return [FactorVersion(*row) for row in rows]
-
-    def _create_version(
-        self, factor_id: str, expression: str, reason: str, created_at: str,
-    ) -> None:
-        row = self._db.fetch_one(
-            "SELECT COALESCE(MAX(version), 0) FROM factor_versions WHERE factor_id = ?",
-            [factor_id],
-        )
-        next_version = (row[0] if row else 0) + 1
-        self._db.execute(
-            "INSERT INTO factor_versions (factor_id, version, expression, reason, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [factor_id, next_version, expression, reason, created_at],
-        )
-
-    # ------------------------------------------------------------------
-    # Import from FactorConfig
-    # ------------------------------------------------------------------
-
-    def import_from_config(
-        self,
-        config: FactorConfig,
-        source: str = "",
-        context_id: str = "",
+    def register_factors_from_config(
+        self, config: FactorConfig,
     ) -> tuple[int, int, int]:
-        """Batch-import factors from a ``FactorConfig`` (as loaded from YAML).
+        """Batch-register factors from a FactorConfig.
 
-        Returns ``(new_count, updated_count, unchanged_count)``.
+        Returns (new, updated, unchanged).
         """
         new = updated = unchanged = 0
+        source = config.source
         for fdef in config.factors:
+            fid = generate_factor_id(source, fdef.name)
             record = FactorRecord(
-                factor_id=fdef.name,
+                factor_id=fid,
                 expression=fdef.expression,
+                prototype=fdef.prototype,
                 description=fdef.description,
-                category=fdef.category,
                 source=source,
+                tags=fdef.tags,
+                parameters=config.parameters,
+                variables=config.variables,
             )
             result = self.upsert_factor(record)
             if result == "new":
@@ -268,117 +224,198 @@ class FactorRepository:
                 updated += 1
             else:
                 unchanged += 1
-
-        # Store config context.
-        cid = context_id or config.name
-        ctx = ConfigContext(
-            context_id=cid,
-            variables=config.variables,
-            parameters=config.parameters,
-            metadata={
-                "name": config.name,
-                "version": config.version,
-                "description": config.description,
-            },
-        )
-        self.upsert_context(ctx)
-
         return new, updated, unchanged
 
-    # ------------------------------------------------------------------
-    # Config context
-    # ------------------------------------------------------------------
+    # ── Config snapshots ──
 
-    def upsert_context(self, ctx: ConfigContext) -> None:
-        """Insert or update a config context."""
-        now = _now_iso()
-        existing = self.get_context(ctx.context_id)
-        if existing is None:
-            self._db.execute(
-                "INSERT INTO config_context "
-                "(context_id, variables, parameters, metadata, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                    ctx.context_id,
-                    json.dumps(ctx.variables),
-                    json.dumps(ctx.parameters),
-                    json.dumps(ctx.metadata),
-                    now,
-                    now,
-                ],
-            )
-        else:
-            self._db.execute(
-                "UPDATE config_context SET variables = ?, parameters = ?, "
-                "metadata = ?, updated_at = ? WHERE context_id = ?",
-                [
-                    json.dumps(ctx.variables),
-                    json.dumps(ctx.parameters),
-                    json.dumps(ctx.metadata),
-                    now,
-                    ctx.context_id,
-                ],
-            )
+    def save_config_snapshot(
+        self,
+        config_dict: dict[str, Any],
+        config_type: str,
+        config_name: str = "",
+        file_path: str = "",
+    ) -> str:
+        """Save a config snapshot. Returns the config_id.
 
-    def get_context(self, context_id: str) -> ConfigContext | None:
-        """Get a config context by ID."""
+        Deduplicates by content hash — same content is not stored twice.
+        """
+        h = _config_hash(config_dict)
+        config_id = f"{config_type}_{h[:12]}"
+
+        existing = self._db.fetch_one(
+            "SELECT config_id FROM configs_snapshot WHERE config_id = ?",
+            [config_id],
+        )
+        if existing is not None:
+            return config_id
+
+        self._db.execute(
+            "INSERT INTO configs_snapshot "
+            "(config_id, type, config_name, config_json, file_path, "
+            " config_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                config_id,
+                config_type,
+                config_name,
+                json.dumps(config_dict, ensure_ascii=False),
+                file_path,
+                h,
+                _now_iso(),
+            ],
+        )
+        return config_id
+
+    def get_config_snapshot(self, config_id: str) -> ConfigSnapshot | None:
         row = self._db.fetch_one(
-            "SELECT context_id, variables, parameters, metadata, created_at "
-            "FROM config_context WHERE context_id = ?",
-            [context_id],
+            "SELECT config_id, type, config_name, config_json, file_path, "
+            "config_hash, created_at FROM configs_snapshot WHERE config_id = ?",
+            [config_id],
         )
         if row is None:
             return None
-        return ConfigContext(
-            context_id=row[0],
-            variables=json.loads(row[1]) if row[1] else {},
-            parameters=json.loads(row[2]) if row[2] else {},
-            metadata=json.loads(row[3]) if row[3] else {},
-            created_at=row[4],
+        return ConfigSnapshot(
+            config_id=row[0],
+            type=row[1],
+            config_name=row[2] or "",
+            config_json=json.loads(row[3]) if row[3] else {},
+            file_path=row[4] or "",
+            config_hash=row[5] or "",
+            created_at=str(row[6]) if row[6] else "",
         )
 
-    def list_contexts(self) -> list[ConfigContext]:
-        """List all config contexts."""
-        rows = self._db.fetch_all(
-            "SELECT context_id, variables, parameters, metadata, created_at "
-            "FROM config_context ORDER BY context_id"
-        )
-        return [
-            ConfigContext(
-                context_id=r[0],
-                variables=json.loads(r[1]) if r[1] else {},
-                parameters=json.loads(r[2]) if r[2] else {},
-                metadata=json.loads(r[3]) if r[3] else {},
-                created_at=r[4],
-            )
-            for r in rows
-        ]
+    # ── Analysis metrics ──
 
-    # ------------------------------------------------------------------
-    # Analysis results (interface for Feature 035)
-    # ------------------------------------------------------------------
-
-    def save_analysis(self, results: list[AnalysisResult]) -> None:
-        """Save analysis results (upsert by composite PK)."""
-        for r in results:
+    def save_metrics(self, metrics: list[AnalysisMetrics]) -> None:
+        """Save analysis metrics (INSERT OR REPLACE by PK)."""
+        for m in metrics:
             self._db.execute(
-                "INSERT OR REPLACE INTO analysis_cache "
-                "(factor_id, bar_spec, period, ic_mean, ic_std, icir, "
-                " mean_return, turnover, analyzed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO alpha_analysis_metrics "
+                "(run_id, factor_id, period, ic_mean, ic_std, icir, "
+                " t_stat_ic, p_value_ic, t_stat_nw, p_value_nw, n_eff, "
+                " ic_skew, ic_kurtosis, n_samples, "
+                " win_rate, monotonicity, ic_half_life, ic_linearity, ic_ar1, "
+                " coverage, mean_return, turnover, "
+                " factor_config_id, analysis_config_id, "
+                " output_dir, timeframe, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    r.factor_id, r.bar_spec, r.period,
-                    r.ic_mean, r.ic_std, r.icir,
-                    r.mean_return, r.turnover, r.analyzed_at,
+                    m.run_id, m.factor_id, m.period,
+                    m.ic_mean, m.ic_std, m.icir,
+                    m.t_stat_ic, m.p_value_ic, m.t_stat_nw, m.p_value_nw,
+                    m.n_eff, m.ic_skew, m.ic_kurtosis, m.n_samples,
+                    m.win_rate, m.monotonicity, m.ic_half_life,
+                    m.ic_linearity, m.ic_ar1,
+                    m.coverage, m.mean_return, m.turnover,
+                    m.factor_config_id, m.analysis_config_id,
+                    m.output_dir, m.timeframe,
+                    m.created_at or _now_iso(),
                 ],
             )
 
-    def get_analysis(self, factor_id: str, bar_spec: str) -> list[AnalysisResult]:
-        """Get analysis results for a factor at a given bar_spec."""
+    def get_metrics(
+        self,
+        factor_id: str,
+        run_id: str | None = None,
+        timeframe: str | None = None,
+    ) -> list[AnalysisMetrics]:
+        clauses = ["factor_id = ?"]
+        params: list[Any] = [factor_id]
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        if timeframe is not None:
+            clauses.append("timeframe = ?")
+            params.append(timeframe)
+
+        where = " AND ".join(clauses)
         rows = self._db.fetch_all(
-            "SELECT factor_id, bar_spec, period, ic_mean, ic_std, icir, "
-            "mean_return, turnover, analyzed_at "
-            "FROM analysis_cache WHERE factor_id = ? AND bar_spec = ? ORDER BY period",
-            [factor_id, bar_spec],
+            "SELECT run_id, factor_id, period, ic_mean, ic_std, icir, "
+            "t_stat_ic, p_value_ic, t_stat_nw, p_value_nw, n_eff, "
+            "ic_skew, ic_kurtosis, n_samples, "
+            "win_rate, monotonicity, ic_half_life, ic_linearity, ic_ar1, "
+            "coverage, mean_return, turnover, "
+            "factor_config_id, analysis_config_id, output_dir, timeframe, "
+            "created_at "
+            f"FROM alpha_analysis_metrics WHERE {where} "
+            "ORDER BY created_at DESC, period",
+            params,
         )
-        return [AnalysisResult(*r) for r in rows]
+        return [_row_to_metrics(r) for r in rows]
+
+    def get_latest_metrics(
+        self, factor_id: str, timeframe: str,
+    ) -> list[AnalysisMetrics]:
+        """Get metrics from the most recent run for a factor + timeframe."""
+        row = self._db.fetch_one(
+            "SELECT run_id FROM alpha_analysis_metrics "
+            "WHERE factor_id = ? AND timeframe = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            [factor_id, timeframe],
+        )
+        if row is None:
+            return []
+        return self.get_metrics(factor_id, run_id=row[0])
+
+    def get_best_factors(
+        self,
+        timeframe: str,
+        period: str,
+        metric: str = "icir",
+        limit: int = 20,
+    ) -> list[AnalysisMetrics]:
+        """Get top factors by a metric for a given timeframe and period."""
+        allowed_metrics = {
+            "icir", "ic_mean", "monotonicity", "win_rate", "ic_linearity",
+        }
+        if metric not in allowed_metrics:
+            metric = "icir"
+
+        rows = self._db.fetch_all(
+            "SELECT run_id, factor_id, period, ic_mean, ic_std, icir, "
+            "t_stat_ic, p_value_ic, t_stat_nw, p_value_nw, n_eff, "
+            "ic_skew, ic_kurtosis, n_samples, "
+            "win_rate, monotonicity, ic_half_life, ic_linearity, ic_ar1, "
+            "coverage, mean_return, turnover, "
+            "factor_config_id, analysis_config_id, output_dir, timeframe, "
+            "created_at "
+            "FROM alpha_analysis_metrics "
+            f"WHERE timeframe = ? AND period = ? "
+            f"ORDER BY ABS({metric}) DESC NULLS LAST "
+            f"LIMIT {int(limit)}",
+            [timeframe, period],
+        )
+        return [_row_to_metrics(r) for r in rows]
+
+
+def _row_to_metrics(r: tuple) -> AnalysisMetrics:
+    return AnalysisMetrics(
+        run_id=r[0],
+        factor_id=r[1],
+        period=str(r[2]) if r[2] is not None else "",
+        ic_mean=r[3],
+        ic_std=r[4],
+        icir=r[5],
+        t_stat_ic=r[6],
+        p_value_ic=r[7],
+        t_stat_nw=r[8],
+        p_value_nw=r[9],
+        n_eff=r[10],
+        ic_skew=r[11],
+        ic_kurtosis=r[12],
+        n_samples=r[13],
+        win_rate=r[14],
+        monotonicity=r[15],
+        ic_half_life=r[16],
+        ic_linearity=r[17],
+        ic_ar1=r[18],
+        coverage=r[19],
+        mean_return=r[20],
+        turnover=r[21],
+        factor_config_id=r[22] or "",
+        analysis_config_id=r[23] or "",
+        output_dir=r[24] or "",
+        timeframe=r[25] or "",
+        created_at=str(r[26]) if r[26] else "",
+    )
