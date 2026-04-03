@@ -387,11 +387,20 @@ def score_factors(
 
     # Map back to factor-period
     idx = 0
-    factor_scores: dict[str, dict[str, float]] = {}
+    factor_scores: dict[str, dict[str, Any]] = {}
 
     for factor_id, period_data in factor_period_data.items():
         per_period_scores = []
-        for period, _ in period_data.items():
+        pred_scores = []
+        stab_scores = []
+        mono_scores = []
+        raw_icir_vals = []
+        raw_t_nw_vals = []
+        raw_wr_vals = []
+        raw_lin_vals = []
+        raw_mono_vals = []
+
+        for period, d in period_data.items():
             r_icir = rank_icir[idx]
             r_t_nw = rank_t_nw[idx]
             r_lin = rank_lin[idx]
@@ -402,10 +411,21 @@ def score_factors(
             stab = sub_w.stab_ic_linearity * r_lin + sub_w.stab_win_rate * r_wr
             mono = r_mono
 
+            pred_scores.append(pred)
+            stab_scores.append(stab)
+            mono_scores.append(mono)
+
             # per_period = 0.30*pred + 0.25*stab + 0.20*mono
             pp_score = 0.30 * pred + 0.25 * stab + 0.20 * mono
             per_period_scores.append(pp_score)
             idx += 1
+
+            # Collect raw values for CSV transparency
+            raw_icir_vals.append(d["icir"])
+            raw_t_nw_vals.append(d["t_nw"])
+            raw_wr_vals.append(d["wr_dev"] + 0.5)  # restore original win_rate
+            raw_lin_vals.append(d["lin"])
+            raw_mono_vals.append(d["mono"])
 
         # Consistency: min/max ratio
         if per_period_scores:
@@ -419,8 +439,17 @@ def score_factors(
 
         factor_scores[factor_id] = {
             "avg_period_score": avg_period_score,
+            "pred_score": float(np.mean(pred_scores)) if pred_scores else 0.0,
+            "stab_score": float(np.mean(stab_scores)) if stab_scores else 0.0,
+            "mono_score": float(np.mean(mono_scores)) if mono_scores else 0.0,
             "consistency": consistency,
             "per_period_scores": per_period_scores,
+            # Raw metric averages
+            "avg_icir": float(np.mean(raw_icir_vals)),
+            "avg_t_stat_nw": float(np.mean(raw_t_nw_vals)),
+            "avg_win_rate": float(np.mean(raw_wr_vals)),
+            "avg_ic_linearity": float(np.mean(raw_lin_vals)),
+            "avg_monotonicity": float(np.mean(raw_mono_vals)),
         }
 
     # Turnover friendliness: mean(|ic_ar1|) across valid periods
@@ -453,10 +482,19 @@ def score_factors(
             + 0.10 * turnover_rank
         )
         final_scores[factor_id] = {
+            "final_score": final,
             "avg_period_score": fs["avg_period_score"],
+            "pred_score": fs["pred_score"],
+            "stab_score": fs["stab_score"],
+            "mono_score": fs["mono_score"],
             "consistency": fs["consistency"],
             "turnover_friendliness": turnover_rank,
-            "final_score": final,
+            # Raw metric averages
+            "avg_icir": fs["avg_icir"],
+            "avg_t_stat_nw": fs["avg_t_stat_nw"],
+            "avg_win_rate": fs["avg_win_rate"],
+            "avg_ic_linearity": fs["avg_ic_linearity"],
+            "avg_monotonicity": fs["avg_monotonicity"],
         }
 
     score_df = pd.DataFrame.from_dict(final_scores, orient="index")
@@ -701,8 +739,12 @@ def migrate_factors(
     target_db: RegistryDatabase,
     factor_ids: list[str],
     target_status: str = "active",
+    scores: pd.DataFrame | None = None,
 ) -> dict[str, int]:
     """Copy factors, metrics, and config snapshots from source to target.
+
+    If ``scores`` is provided, ``final_score`` is stored in each
+    factor's ``parameters["promote_score"]`` for display in ``list``.
 
     Returns dict with counts: {"factors", "metrics", "configs"}.
     """
@@ -723,7 +765,11 @@ def migrate_factors(
             logger.warning("Factor not found in source: %s", fid)
             continue
 
-        # Clone with target status
+        # Clone with target status + inject score
+        params = dict(factor.parameters) if factor.parameters else {}
+        if scores is not None and fid in scores.index:
+            params["promote_score"] = round(float(scores.loc[fid, "final_score"]), 4)
+
         promoted = FactorRecord(
             factor_id=factor.factor_id,
             expression=factor.expression,
@@ -732,7 +778,7 @@ def migrate_factors(
             source=factor.source,
             status=target_status,
             tags=factor.tags,
-            parameters=factor.parameters,
+            parameters=params,
             variables=factor.variables,
         )
         result = tgt_repo.upsert_factor(promoted)
