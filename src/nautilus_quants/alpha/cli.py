@@ -759,5 +759,288 @@ def export_factors(
         db.close()
 
 
+@cli.command()
+@click.option(
+    "--source-env", default="test",
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Source registry environment.",
+)
+@click.option(
+    "--target-env", default="dev",
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Target registry environment.",
+)
+@click.option(
+    "--config", "config_path",
+    default="config/scoring.yaml",
+    type=click.Path(exists=True, path_type=Path),
+    help="Scoring configuration file.",
+)
+@click.option("--dry-run", is_flag=True, help="Score and rank without migrating.")
+@click.option("--skip-corr", is_flag=True, help="Skip correlation computation (fingerprint dedup only).")
+@click.option("--max-factors", default=None, type=int, help="Override max factors to promote.")
+@_DB_DIR_OPTION
+def promote(
+    source_env: str,
+    target_env: str,
+    config_path: Path,
+    dry_run: bool,
+    skip_corr: bool,
+    max_factors: int | None,
+    db_dir: str,
+) -> None:
+    """Score, deduplicate, decorrelate, and promote factors to target env.
+
+    Full pipeline:
+      1. Load metrics from source env
+      2. Apply hard filters (per-period)
+      3. Score factors (5-dimension)
+      4. Fingerprint deduplication
+      5. Spearman correlation dedup + greedy selection (unless --skip-corr)
+      6. Migrate to target env (unless --dry-run)
+
+    \b
+    Examples:
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --dry-run
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --skip-corr
+      python -m nautilus_quants.alpha promote --config config/scoring.yaml --max-factors 50
+    """
+    from datetime import datetime, timezone
+
+    from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.scoring import (
+        apply_hard_filters,
+        compute_factor_correlation,
+        dedup_by_fingerprint,
+        greedy_select,
+        load_scoring_config,
+        load_scoring_data,
+        migrate_factors,
+        score_factors,
+    )
+
+    start_time = time.time()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    try:
+        # 0. Load scoring config
+        scoring_cfg = load_scoring_config(config_path)
+        if max_factors is not None:
+            # Override from CLI
+            scoring_cfg = scoring_cfg.__class__(
+                periods=scoring_cfg.periods,
+                hard_filters=scoring_cfg.hard_filters,
+                weights=scoring_cfg.weights,
+                sub_weights=scoring_cfg.sub_weights,
+                dedup=scoring_cfg.dedup,
+                promote=scoring_cfg.promote.__class__(
+                    max_factors=max_factors,
+                    target_status=scoring_cfg.promote.target_status,
+                ),
+                data=scoring_cfg.data,
+            )
+
+        click.echo("=" * 80)
+        click.echo("Nautilus Quants - Factor Promotion Pipeline")
+        click.echo("=" * 80)
+        click.echo(f"  Source: {source_env}.duckdb")
+        click.echo(f"  Target: {target_env}.duckdb")
+        click.echo(f"  Config: {config_path}")
+        click.echo(f"  Periods: {scoring_cfg.periods}")
+        click.echo(f"  Dry run: {dry_run}")
+        click.echo(f"  Skip corr: {skip_corr}")
+        click.echo(f"  Max factors: {scoring_cfg.promote.max_factors}")
+        click.echo("=" * 80)
+        click.echo()
+
+        # 1. Load data from source
+        click.echo("Phase 1: Loading scoring data...")
+        source_db = RegistryDatabase.for_environment(source_env, db_dir)
+        df = load_scoring_data(source_db, scoring_cfg.periods)
+
+        if df.empty:
+            click.echo("Error: No metrics found in source database.", err=True)
+            source_db.close()
+            sys.exit(1)
+
+        click.echo(f"  Loaded {len(df)} factors with metrics across {scoring_cfg.periods}")
+
+        # 2. Hard filters
+        click.echo()
+        click.echo("Phase 1.1: Applying hard filters...")
+        n_before = len(df)
+        df = apply_hard_filters(df, scoring_cfg.hard_filters, scoring_cfg.periods)
+        n_after = len(df)
+        click.echo(f"  {n_before} → {n_after} factors ({n_before - n_after} eliminated)")
+
+        if df.empty:
+            click.echo("Error: No factors passed hard filters.", err=True)
+            source_db.close()
+            sys.exit(1)
+
+        # Show valid period distribution
+        period_counts = df["n_valid_periods"].value_counts().sort_index()
+        for n_periods, count in period_counts.items():
+            click.echo(f"    {n_periods} valid periods: {count} factors")
+
+        # 3. Fingerprint dedup
+        click.echo()
+        click.echo("Phase 2.1: Fingerprint deduplication...")
+        n_before_dedup = len(df)
+        df = dedup_by_fingerprint(
+            df, scoring_cfg.periods,
+            threshold=scoring_cfg.dedup.fingerprint_threshold,
+        )
+        n_removed = n_before_dedup - len(df)
+        click.echo(f"  {n_before_dedup} → {len(df)} factors ({n_removed} duplicates removed)")
+
+        # 4. Scoring
+        click.echo()
+        click.echo("Phase 1.2: Computing 5-dimension scores...")
+        df = score_factors(df, scoring_cfg)
+
+        # Print top factors table
+        display_cols = ["final_score", "avg_period_score", "consistency",
+                        "turnover_friendliness", "n_valid_periods"]
+        available = [c for c in display_cols if c in df.columns]
+
+        click.echo()
+        click.echo(f"  Top {min(30, len(df))} factors by final_score:")
+        click.echo(f"  {'factor_id':<40} {'score':>7} {'avg_pp':>7} {'cons':>6} "
+                   f"{'turn':>6} {'#pd':>4}")
+        click.echo("  " + "-" * 72)
+        for i, (fid, row) in enumerate(df.head(30).iterrows()):
+            click.echo(
+                f"  {fid:<40} {row.get('final_score', 0):>7.4f} "
+                f"{row.get('avg_period_score', 0):>7.4f} "
+                f"{row.get('consistency', 0):>6.3f} "
+                f"{row.get('turnover_friendliness', 0):>6.3f} "
+                f"{int(row.get('n_valid_periods', 0)):>4}"
+            )
+
+        # 5. Correlation-based greedy selection
+        if not skip_corr:
+            click.echo()
+            click.echo("Phase 2.2: Computing factor correlations...")
+            candidate_ids = df.index.tolist()
+            try:
+                corr_matrix = compute_factor_correlation(candidate_ids, scoring_cfg)
+
+                if not corr_matrix.empty:
+                    click.echo(
+                        f"  Correlation matrix: {corr_matrix.shape[0]} × {corr_matrix.shape[1]}"
+                    )
+
+                    # Save correlation matrix CSV
+                    corr_dir = Path("logs/scoring")
+                    corr_dir.mkdir(parents=True, exist_ok=True)
+                    corr_csv = corr_dir / f"correlation_matrix_{timestamp}.csv"
+                    corr_matrix.to_csv(corr_csv)
+                    click.echo(f"  Saved: {corr_csv}")
+
+                    # Save heatmap
+                    try:
+                        import matplotlib
+                        matplotlib.use("Agg")
+                        import matplotlib.pyplot as plt
+                        import seaborn as sns
+
+                        fig, ax = plt.subplots(figsize=(20, 16))
+                        sns.heatmap(
+                            corr_matrix, vmin=-1, vmax=1, center=0,
+                            cmap="RdBu_r", ax=ax,
+                            xticklabels=True, yticklabels=True,
+                        )
+                        ax.set_title("Factor Spearman Correlation (cross-sectional avg)")
+                        plt.tight_layout()
+                        heatmap_path = corr_dir / f"correlation_heatmap_{timestamp}.png"
+                        fig.savefig(heatmap_path, dpi=100)
+                        plt.close(fig)
+                        click.echo(f"  Saved: {heatmap_path}")
+                    except Exception as e:
+                        click.echo(f"  Warning: Heatmap generation failed: {e}", err=True)
+
+                    # Greedy selection
+                    click.echo()
+                    click.echo("Phase 2.3: Greedy selection (max corr "
+                               f"≤ {scoring_cfg.dedup.max_corr})...")
+                    selected_ids = greedy_select(
+                        df, corr_matrix,
+                        max_corr=scoring_cfg.dedup.max_corr,
+                        max_factors=scoring_cfg.promote.max_factors,
+                    )
+                    click.echo(f"  Selected {len(selected_ids)} factors")
+                else:
+                    click.echo("  Warning: Empty correlation matrix, skipping greedy selection")
+                    selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+            except Exception as e:
+                click.echo(f"  Warning: Correlation computation failed: {e}", err=True)
+                click.echo("  Falling back to score-only selection")
+                selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+        else:
+            click.echo()
+            click.echo("Phase 2.2: Skipping correlation (--skip-corr)")
+            selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+
+        # Save scores CSV
+        scores_dir = Path("logs/scoring")
+        scores_dir.mkdir(parents=True, exist_ok=True)
+        scores_csv = scores_dir / f"factor_scores_{timestamp}.csv"
+        score_cols = ["final_score", "avg_period_score", "consistency",
+                      "turnover_friendliness", "n_valid_periods"]
+        save_cols = [c for c in score_cols if c in df.columns]
+        df[save_cols].to_csv(scores_csv)
+        click.echo(f"\n  Scores saved: {scores_csv}")
+
+        # Summary
+        click.echo()
+        click.echo("=" * 80)
+        click.echo("PROMOTION SUMMARY")
+        click.echo("=" * 80)
+        click.echo(f"  Candidates after hard filter: {n_after}")
+        click.echo(f"  After fingerprint dedup: {n_after - n_removed}")
+        click.echo(f"  Final selected: {len(selected_ids)}")
+        click.echo()
+
+        # Print selected factors
+        click.echo(f"  Selected factors ({len(selected_ids)}):")
+        for i, fid in enumerate(selected_ids, 1):
+            score = df.loc[fid, "final_score"] if fid in df.index else 0
+            click.echo(f"    {i:3d}. {fid:<40} score={score:.4f}")
+
+        # 6. Migrate (unless dry run)
+        if dry_run:
+            click.echo()
+            click.echo("  [DRY RUN] No migration performed.")
+        else:
+            click.echo()
+            click.echo(f"Phase 3: Migrating {len(selected_ids)} factors "
+                       f"to {target_env}.duckdb...")
+            target_db = RegistryDatabase.for_environment(target_env, db_dir)
+            try:
+                counts = migrate_factors(
+                    source_db, target_db, selected_ids,
+                    target_status=scoring_cfg.promote.target_status,
+                )
+                click.echo(f"  Migrated: {counts['factors']} factors, "
+                           f"{counts['metrics']} metrics, "
+                           f"{counts['configs']} config snapshots")
+            finally:
+                target_db.close()
+
+        source_db.close()
+        duration = time.time() - start_time
+        click.echo()
+        click.echo(f"  Duration: {duration:.2f}s")
+        click.echo("=" * 80)
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()
