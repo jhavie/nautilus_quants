@@ -39,10 +39,36 @@ Unified panel-based (timestamps × instruments) factor computation engine:
 
 Factor quality evaluation using alphalens-reloaded:
 
-- IC / ICIR analysis with Newey-West correction
-- Quantile returns analysis
+- IC / ICIR analysis with Newey-West correction (20+ metrics)
+- Factor signal quality: Monotonicity, IC Linearity, IC AR(1), IC Half-Life, Win Rate, Coverage
 - Parallel evaluation via ProcessPoolExecutor
-- Visualization and reporting
+- Auto-persist to DuckDB registry (configurable via YAML)
+
+### Factor Registry (`nautilus_quants.alpha.registry`)
+
+DuckDB-backed factor lifecycle management with multi-environment support:
+
+- **5 tables**: `factors` (core) → `alpha_analysis_metrics` (1:N) ↔ `backtest_run_metrics` (M:N via `backtest_factors`) + `configs_snapshot`
+- **Auto-persist**: `alpha analyze` and `backtest run` auto-register factors and save metrics
+- **Multi-env**: `test.duckdb` / `dev.duckdb` / `prod.duckdb` (separate DB files per environment)
+- **Config as JSON**: Full YAML configs stored in `configs_snapshot` for reproducibility
+- **Parametric factors**: Different params = different `factor_id`, grouped by `prototype` field
+
+```yaml
+# Add to any analysis/backtest YAML to enable auto-persist
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+```
+
+```bash
+# CLI commands
+python -m nautilus_quants.alpha register config/cs/factors.yaml
+python -m nautilus_quants.alpha list --prototype alpha044
+python -m nautilus_quants.alpha inspect alpha101_alpha044_8h
+python -m nautilus_quants.alpha metrics alpha101_alpha044_8h
+```
 
 ### Backtest (`nautilus_quants.backtest`)
 

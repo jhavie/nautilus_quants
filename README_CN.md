@@ -42,10 +42,36 @@
 
 基于 alphalens-reloaded 的因子质量评估：
 
-- IC / ICIR 分析（含 Newey-West 校正）
-- 分位数收益分析
+- IC / ICIR 分析（含 Newey-West 校正，20+ 指标）
+- 因子信号质量：Monotonicity、IC Linearity、IC AR(1)、IC Half-Life、Win Rate、Coverage
 - 基于 ProcessPoolExecutor 的并行评估
-- 可视化报告生成
+- 自动入库 DuckDB 注册表（通过 YAML 配置）
+
+### 因子注册表 (`nautilus_quants.alpha.registry`)
+
+基于 DuckDB 的因子全生命周期管理，支持多环境：
+
+- **5 张表**：`factors`（核心）→ `alpha_analysis_metrics`（1:N）↔ `backtest_run_metrics`（M:N via `backtest_factors`）+ `configs_snapshot`
+- **自动入库**：`alpha analyze` 和 `backtest run` 自动注册因子并保存指标
+- **多环境**：`test.duckdb` / `dev.duckdb` / `prod.duckdb`（独立数据库文件）
+- **配置快照**：完整 YAML 配置以 JSON 存入 `configs_snapshot`，支持完整还原
+- **参数化因子**：不同参数 = 不同 `factor_id`，通过 `prototype` 字段分组
+
+```yaml
+# 在分析/回测 YAML 中添加以下配置启用自动入库
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+```
+
+```bash
+# CLI 命令
+python -m nautilus_quants.alpha register config/cs/factors.yaml
+python -m nautilus_quants.alpha list --prototype alpha044
+python -m nautilus_quants.alpha inspect alpha101_alpha044_8h
+python -m nautilus_quants.alpha metrics alpha101_alpha044_8h
+```
 
 ### 回测 (`nautilus_quants.backtest`)
 
