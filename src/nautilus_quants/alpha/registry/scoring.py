@@ -782,17 +782,19 @@ def migrate_factors(
             variables=factor.variables,
         )
         result = tgt_repo.upsert_factor(promoted)
-        if result != "unchanged":
-            counts["factors"] += 1
-            # Force status to target (upsert doesn't change status)
-            try:
-                tgt_repo._db.execute(
-                    "UPDATE factors SET status = ?, updated_at = ? "
-                    "WHERE factor_id = ?",
-                    [target_status, _now_iso(), fid],
-                )
-            except Exception:
-                pass
+        counts["factors"] += 1
+
+        # Always force status + parameters (upsert may not update these)
+        try:
+            import json as _json
+
+            tgt_repo._db.execute(
+                "UPDATE factors SET status = ?, parameters = ?, updated_at = ? "
+                "WHERE factor_id = ?",
+                [target_status, _json.dumps(params), _now_iso(), fid],
+            )
+        except Exception:
+            pass
 
         # 2. Copy metrics
         metrics = src_repo.get_metrics(fid)
