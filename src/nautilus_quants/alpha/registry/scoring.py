@@ -53,9 +53,9 @@ class ScoringWeights:
 
     predictiveness: float = 0.30
     stability: float = 0.25
-    monotonicity: float = 0.20
+    monotonicity: float = 0.10
     consistency: float = 0.15
-    turnover_friendliness: float = 0.10
+    turnover_friendliness: float = 0.20
 
 
 @dataclass(frozen=True)
@@ -415,8 +415,12 @@ def score_factors(
             stab_scores.append(stab)
             mono_scores.append(mono)
 
-            # per_period = 0.30*pred + 0.25*stab + 0.20*mono
-            pp_score = 0.30 * pred + 0.25 * stab + 0.20 * mono
+            # per_period weighted by config (pred + stab + mono dimensions)
+            pp_score = (
+                weights.predictiveness * pred
+                + weights.stability * stab
+                + weights.monotonicity * mono
+            )
             per_period_scores.append(pp_score)
             idx += 1
 
@@ -471,15 +475,20 @@ def score_factors(
     ar1_ranks = _percentile_rank(ar1_arr)
     ar1_rank_map = dict(zip(factor_scores.keys(), ar1_ranks))
 
-    # Final score
+    # Final score: per-period dimensions + cross-period dimensions
+    # per_period_weight = sum of pred + stab + mono weights
+    pp_weight = weights.predictiveness + weights.stability + weights.monotonicity
+    cons_weight = weights.consistency
+    turn_weight = weights.turnover_friendliness
+
     df = df.copy()
     final_scores = {}
     for factor_id, fs in factor_scores.items():
         turnover_rank = ar1_rank_map.get(factor_id, 0.0)
         final = (
-            0.75 * fs["avg_period_score"]
-            + 0.15 * fs["consistency"]
-            + 0.10 * turnover_rank
+            pp_weight * fs["avg_period_score"]
+            + cons_weight * fs["consistency"]
+            + turn_weight * turnover_rank
         )
         final_scores[factor_id] = {
             "final_score": final,
@@ -708,8 +717,9 @@ def greedy_select(
         if len(selected) >= max_factors:
             break
         if factor_id not in corr_matrix.index:
-            # No correlation data — accept by default
-            selected.append(factor_id)
+            logger.warning(
+                "Greedy skip: %s not in correlation matrix", factor_id,
+            )
             continue
 
         correlated = False

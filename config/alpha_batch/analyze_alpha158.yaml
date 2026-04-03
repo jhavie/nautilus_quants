@@ -49,10 +49,13 @@ instrument_ids:
     - "EGLDUSDT.BINANCE"
     - "THETAUSDT.BINANCE"
 
-periods: [1, 3, 6, 12, 18, 42]
+periods: [1, 2, 3, 6]
 quantiles: 5
 max_loss: 0.50
 filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
 
 registry:
   enabled: true

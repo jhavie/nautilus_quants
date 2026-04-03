@@ -1,5 +1,6 @@
 metadata:
   name: alpha191
+  source: alpha191
   version: '1.0'
   description: GTJA Alpha191 OHLCV factors (128 factors)
 variables:
@@ -11,152 +12,184 @@ factors:
     description: 'Alpha191#1: Correlation between ranked volume change and ranked
       intraday return'
     category: volume
+    prototype: alpha191_001
   alpha191_002:
     expression: -1 * delta(((close - low) - (high - close)) / (high - low), 1)
     description: 'Alpha191#2: Change in Williams %R-like indicator'
     category: reversion
+    prototype: alpha191_002
   alpha191_003:
     expression: ts_sum(if_else(close == delay(close, 1), 0, if_else(close > delay(close,
       1), close - min(low, delay(close, 1)), close - max(high, delay(close, 1)))),
       6)
     description: 'Alpha191#3: Cumulative directional price movement over 6 days'
     category: momentum
+    prototype: alpha191_003
   alpha191_004:
     expression: if_else(ts_mean(close, 8) + stddev(close, 8) < ts_mean(close, 2),
       -1, if_else(ts_mean(close, 2) < ts_mean(close, 8) - stddev(close, 8), 1, if_else(volume
       / ts_mean(volume, 20) >= 1, 1, -1)))
     description: 'Alpha191#4: Mean-std breakout with volume confirmation'
     category: reversion
+    prototype: alpha191_004
   alpha191_005:
     expression: -1 * ts_max(correlation(ts_rank(volume, 5), ts_rank(high, 5), 5),
       3)
     description: 'Alpha191#5: Max rolling correlation of volume and high ranks'
     category: volume
+    prototype: alpha191_005
   alpha191_006:
     expression: -1 * rank(sign(delta(open * 0.85 + high * 0.15, 4)))
     description: 'Alpha191#6: Ranked sign of weighted open-high delta'
     category: momentum
+    prototype: alpha191_006
   alpha191_009:
     expression: ts_mean(((high + low) / 2 - (delay(high, 1) + delay(low, 1)) / 2)
       * (high - low) / volume, 7)
     description: 'Alpha191#9: Midpoint change weighted by range and inverse volume'
     category: volume
+    prototype: alpha191_009
   alpha191_010:
     expression: rank(ts_max(power(if_else(returns < 0, stddev(returns, 20), close),
       2), 5))
     description: 'Alpha191#10: Ranked max of conditional squared value'
     category: volatility
+    prototype: alpha191_010
   alpha191_011:
     expression: ts_sum(((close - low) - (high - close)) / (high - low) * volume, 6)
     description: 'Alpha191#11: Accumulation/distribution over 6 days'
     category: volume
+    prototype: alpha191_011
   alpha191_014:
     expression: close - delay(close, 5)
     description: 'Alpha191#14: 5-day price change'
     category: momentum
+    prototype: alpha191_014
   alpha191_015:
     expression: open / delay(close, 1) - 1
     description: 'Alpha191#15: Overnight return'
     category: momentum
+    prototype: alpha191_015
   alpha191_018:
     expression: close / delay(close, 5)
     description: 'Alpha191#18: 5-day price ratio'
     category: momentum
+    prototype: alpha191_018
   alpha191_019:
     expression: if_else(close < delay(close, 5), (close - delay(close, 5)) / delay(close,
       5), if_else(close == delay(close, 5), 0, (close - delay(close, 5)) / close))
     description: 'Alpha191#19: Asymmetric 5-day return'
     category: momentum
+    prototype: alpha191_019
   alpha191_020:
     expression: (close - delay(close, 6)) / delay(close, 6) * 100
     description: 'Alpha191#20: 6-day percentage return'
     category: momentum
+    prototype: alpha191_020
   alpha191_022:
     expression: ts_mean((close - ts_mean(close, 6)) / ts_mean(close, 6) - delay((close
       - ts_mean(close, 6)) / ts_mean(close, 6), 3), 12)
     description: 'Alpha191#22: Smoothed change in close deviation from 6-day mean'
     category: reversion
+    prototype: alpha191_022
   alpha191_023:
     expression: ts_mean(if_else(close > delay(close, 1), stddev(close, 20), 0), 20)
       / (ts_mean(if_else(close > delay(close, 1), stddev(close, 20), 0), 20) + ts_mean(if_else(close
       <= delay(close, 1), stddev(close, 20), 0), 20)) * 100
     description: 'Alpha191#23: Volatility-weighted RSI analog'
     category: momentum
+    prototype: alpha191_023
   alpha191_024:
     expression: ts_mean(close - delay(close, 5), 5)
     description: 'Alpha191#24: Smoothed 5-day price change'
     category: momentum
+    prototype: alpha191_024
   alpha191_025:
     expression: -1 * rank(delta(close, 7) * (1 - rank(decay_linear(volume / ts_mean(volume,
       20), 9)))) * (1 + rank(ts_sum(returns, 250)))
     description: 'Alpha191#25: Volume-adjusted momentum reversal'
     category: momentum
+    prototype: alpha191_025
   alpha191_029:
     expression: (close - delay(close, 6)) / delay(close, 6) * volume
     description: 'Alpha191#29: 6-day return scaled by volume'
     category: volume
+    prototype: alpha191_029
   alpha191_031:
     expression: (close - ts_mean(close, 12)) / ts_mean(close, 12) * 100
     description: 'Alpha191#31: Percent deviation from 12-day mean'
     category: reversion
+    prototype: alpha191_031
   alpha191_032:
     expression: -1 * ts_sum(rank(correlation(rank(high), rank(volume), 3)), 3)
     description: 'Alpha191#32: Cumulative high-volume correlation rank'
     category: volume
+    prototype: alpha191_032
   alpha191_033:
     expression: ((-1 * ts_min(low, 5) + delay(ts_min(low, 5), 5)) * rank((ts_sum(returns,
       240) - ts_sum(returns, 20)) / 220)) * ts_rank(volume, 5)
     description: 'Alpha191#33: Low support break with long-term momentum and volume
       rank'
     category: momentum
+    prototype: alpha191_033
   alpha191_034:
     expression: ts_mean(close, 12) / close
     description: 'Alpha191#34: 12-day mean to close ratio'
     category: reversion
+    prototype: alpha191_034
   alpha191_035:
     expression: min(rank(decay_linear(delta(open, 1), 15)), rank(decay_linear(correlation(volume,
       open, 17), 7))) * -1
     description: 'Alpha191#35: Min of open momentum and volume-open correlation decays'
     category: momentum
+    prototype: alpha191_035
   alpha191_037:
     expression: -1 * rank(ts_sum(open, 5) * ts_sum(returns, 5) - delay(ts_sum(open,
       5) * ts_sum(returns, 5), 10))
     description: 'Alpha191#37: Open-weighted returns momentum change'
     category: momentum
+    prototype: alpha191_037
   alpha191_038:
     expression: if_else(ts_mean(high, 20) < high, -1 * delta(high, 2), 0)
     description: 'Alpha191#38: High above mean reversal'
     category: reversion
+    prototype: alpha191_038
   alpha191_040:
     expression: ts_sum(if_else(close > delay(close, 1), volume, 0), 26) / ts_sum(if_else(close
       <= delay(close, 1), volume, 0), 26) * 100
     description: 'Alpha191#40: Up/down volume ratio over 26 days'
     category: volume
+    prototype: alpha191_040
   alpha191_042:
     expression: -1 * rank(stddev(high, 10)) * correlation(high, volume, 10)
     description: 'Alpha191#42: High volatility rank times high-volume correlation'
     category: volatility
+    prototype: alpha191_042
   alpha191_043:
     expression: ts_sum(if_else(close > delay(close, 1), volume, if_else(close < delay(close,
       1), -1 * volume, 0)), 6)
     description: 'Alpha191#43: On-balance volume over 6 days'
     category: volume
+    prototype: alpha191_043
   alpha191_046:
     expression: (ts_mean(close, 3) + ts_mean(close, 6) + ts_mean(close, 12) + ts_mean(close,
       24)) / (4 * close)
     description: 'Alpha191#46: Multi-period moving average ratio'
     category: reversion
+    prototype: alpha191_046
   alpha191_047:
     expression: ts_mean((ts_max(high, 6) - close) / (ts_max(high, 6) - ts_min(low,
       6)) * 100, 9)
     description: 'Alpha191#47: Williams %R smoothed over 9 days'
     category: reversion
+    prototype: alpha191_047
   alpha191_048:
     expression: -1 * rank(sign(close - delay(close, 1)) + sign(delay(close, 1) - delay(close,
       2)) + sign(delay(close, 2) - delay(close, 3))) * ts_sum(volume, 5) / ts_sum(volume,
       20)
     description: 'Alpha191#48: Consecutive direction rank with volume ratio'
     category: momentum
+    prototype: alpha191_048
   alpha191_049:
     expression: ts_sum(if_else(high + low > delay(high, 1) + delay(low, 1), 0, max(abs(high
       - delay(high, 1)), abs(low - delay(low, 1)))), 12) / (ts_sum(if_else(high +
@@ -165,6 +198,7 @@ factors:
       1), 0, max(abs(high - delay(high, 1)), abs(low - delay(low, 1)))), 12))
     description: 'Alpha191#49: Directional indicator ratio (down component)'
     category: momentum
+    prototype: alpha191_049
   alpha191_050:
     expression: (ts_sum(if_else(high + low <= delay(high, 1) + delay(low, 1), 0, max(abs(high
       - delay(high, 1)), abs(low - delay(low, 1)))), 12) - ts_sum(if_else(high + low
@@ -175,6 +209,7 @@ factors:
       - delay(low, 1)))), 12))
     description: 'Alpha191#50: Directional indicator difference (DX analog)'
     category: momentum
+    prototype: alpha191_050
   alpha191_051:
     expression: ts_sum(if_else(high + low <= delay(high, 1) + delay(low, 1), 0, max(abs(high
       - delay(high, 1)), abs(low - delay(low, 1)))), 12) / (ts_sum(if_else(high +
@@ -183,71 +218,86 @@ factors:
       1), 0, max(abs(high - delay(high, 1)), abs(low - delay(low, 1)))), 12))
     description: 'Alpha191#51: Directional indicator ratio (up component)'
     category: momentum
+    prototype: alpha191_051
   alpha191_052:
     expression: ts_sum(max(high - delay((high + low + close) / 3, 1), 0), 26) / ts_sum(max(delay((high
       + low + close) / 3, 1) - low, 0), 26) * 100
     description: 'Alpha191#52: Pivotal high/low pressure ratio'
     category: momentum
+    prototype: alpha191_052
   alpha191_053:
     expression: ts_sum(if_else(close > delay(close, 1), 1, 0), 12) / 12 * 100
     description: 'Alpha191#53: Percentage of up days in 12-day window'
     category: momentum
+    prototype: alpha191_053
   alpha191_054:
     expression: -1 * rank(stddev(abs(close - open), 20) + (close - open) + correlation(close,
       open, 10))
     description: 'Alpha191#54: Ranked intraday spread with open-close correlation'
     category: volatility
+    prototype: alpha191_054
   alpha191_056:
     expression: if_else(rank(open - ts_min(open, 12)) < rank(power(rank(correlation(ts_sum((high
       + low) / 2, 19), ts_sum(ts_mean(volume, 40), 19), 13)), 5)), 1, 0)
     description: 'Alpha191#56: Open breakout vs volume-price correlation rank'
     category: momentum
+    prototype: alpha191_056
   alpha191_057:
     expression: ts_mean((close - ts_min(low, 9)) / (ts_max(high, 9) - ts_min(low,
       9)) * 100, 3)
     description: 'Alpha191#57: Stochastic %K smoothed'
     category: reversion
+    prototype: alpha191_057
   alpha191_058:
     expression: ts_sum(if_else(close > delay(close, 1), 1, 0), 20) / 20 * 100
     description: 'Alpha191#58: Percentage of up days in 20-day window'
     category: momentum
+    prototype: alpha191_058
   alpha191_059:
     expression: ts_sum(if_else(close == delay(close, 1), 0, if_else(close > delay(close,
       1), close - min(low, delay(close, 1)), close - max(high, delay(close, 1)))),
       20)
     description: 'Alpha191#59: Cumulative directional price movement over 20 days'
     category: momentum
+    prototype: alpha191_059
   alpha191_060:
     expression: ts_sum(((close - low) - (high - close)) / (high - low) * volume, 20)
     description: 'Alpha191#60: Accumulation/distribution over 20 days'
     category: volume
+    prototype: alpha191_060
   alpha191_062:
     expression: -1 * correlation(high, rank(volume), 5)
     description: 'Alpha191#62: High-volume rank correlation (negated)'
     category: volume
+    prototype: alpha191_062
   alpha191_063:
     expression: ts_mean(max(close - delay(close, 1), 0), 6) / ts_mean(abs(close -
       delay(close, 1)), 6) * 100
     description: 'Alpha191#63: RSI analog (6-day)'
     category: momentum
+    prototype: alpha191_063
   alpha191_065:
     expression: ts_mean(close, 6) / close
     description: 'Alpha191#65: 6-day mean to close ratio'
     category: reversion
+    prototype: alpha191_065
   alpha191_066:
     expression: (close - ts_mean(close, 6)) / ts_mean(close, 6) * 100
     description: 'Alpha191#66: Percent deviation from 6-day mean'
     category: reversion
+    prototype: alpha191_066
   alpha191_067:
     expression: ts_mean(max(close - delay(close, 1), 0), 24) / ts_mean(abs(close -
       delay(close, 1)), 24) * 100
     description: 'Alpha191#67: RSI analog (24-day)'
     category: momentum
+    prototype: alpha191_067
   alpha191_068:
     expression: ts_mean(((high + low) / 2 - (delay(high, 1) + delay(low, 1)) / 2)
       * (high - low) / volume, 15)
     description: 'Alpha191#68: Midpoint change weighted by range/volume (15-day)'
     category: volume
+    prototype: alpha191_068
   alpha191_069:
     expression: if_else(ts_sum(if_else(open <= delay(open, 1), 0, max(high - open,
       open - delay(open, 1))), 20) > ts_sum(if_else(open >= delay(open, 1), 0, max(open
@@ -262,150 +312,182 @@ factors:
       >= delay(open, 1), 0, max(open - low, open - delay(open, 1))), 20)))
     description: 'Alpha191#69: DTM/DBM directional trend indicator'
     category: momentum
+    prototype: alpha191_069
   alpha191_071:
     expression: (close - ts_mean(close, 24)) / ts_mean(close, 24) * 100
     description: 'Alpha191#71: Percent deviation from 24-day mean'
     category: reversion
+    prototype: alpha191_071
   alpha191_072:
     expression: ts_mean((ts_max(high, 6) - close) / (ts_max(high, 6) - ts_min(low,
       6)) * 100, 15)
     description: 'Alpha191#72: Williams %R smoothed over 15 days'
     category: reversion
+    prototype: alpha191_072
   alpha191_076:
     expression: stddev(abs(close / delay(close, 1) - 1) / volume, 20) / ts_mean(abs(close
       / delay(close, 1) - 1) / volume, 20)
     description: 'Alpha191#76: Coefficient of variation of return/volume'
     category: volatility
+    prototype: alpha191_076
   alpha191_078:
     expression: ((high + low + close) / 3 - ts_mean((high + low + close) / 3, 12))
       / (0.015 * ts_mean(abs(close - ts_mean((high + low + close) / 3, 12)), 12))
     description: 'Alpha191#78: CCI (Commodity Channel Index, 12-day)'
     category: reversion
+    prototype: alpha191_078
   alpha191_079:
     expression: ts_mean(max(close - delay(close, 1), 0), 12) / ts_mean(abs(close -
       delay(close, 1)), 12) * 100
     description: 'Alpha191#79: RSI analog (12-day)'
     category: momentum
+    prototype: alpha191_079
   alpha191_080:
     expression: (volume - delay(volume, 5)) / delay(volume, 5) * 100
     description: 'Alpha191#80: 5-day volume percentage change'
     category: volume
+    prototype: alpha191_080
   alpha191_081:
     expression: ts_mean(volume, 21)
     description: 'Alpha191#81: 21-day volume moving average'
     category: volume
+    prototype: alpha191_081
   alpha191_082:
     expression: ts_mean((ts_max(high, 6) - close) / (ts_max(high, 6) - ts_min(low,
       6)) * 100, 20)
     description: 'Alpha191#82: Williams %R smoothed over 20 days'
     category: reversion
+    prototype: alpha191_082
   alpha191_083:
     expression: -1 * rank(covariance(rank(high), rank(volume), 5))
     description: 'Alpha191#83: Ranked high-volume covariance (negated)'
     category: volume
+    prototype: alpha191_083
   alpha191_084:
     expression: ts_sum(if_else(close > delay(close, 1), volume, if_else(close < delay(close,
       1), -1 * volume, 0)), 20)
     description: 'Alpha191#84: On-balance volume over 20 days'
     category: volume
+    prototype: alpha191_084
   alpha191_085:
     expression: ts_rank(volume / ts_mean(volume, 20), 20) * ts_rank(-1 * delta(close,
       7), 8)
     description: 'Alpha191#85: Volume ratio rank times close momentum rank'
     category: volume
+    prototype: alpha191_085
   alpha191_086:
     expression: if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close,
       10) - close) / 10 > 0.25, -1, if_else((delay(close, 20) - delay(close, 10))
       / 10 - (delay(close, 10) - close) / 10 < 0, 1, -1 * delta(close, 1)))
     description: 'Alpha191#86: Acceleration-based momentum signal'
     category: momentum
+    prototype: alpha191_086
   alpha191_088:
     expression: (close - delay(close, 20)) / delay(close, 20) * 100
     description: 'Alpha191#88: 20-day percentage return'
     category: momentum
+    prototype: alpha191_088
   alpha191_089:
     expression: 2 * (ts_mean(close, 13) - ts_mean(close, 27) - ts_mean(ts_mean(close,
       13) - ts_mean(close, 27), 10))
     description: 'Alpha191#89: MACD-like oscillator'
     category: momentum
+    prototype: alpha191_089
   alpha191_091:
     expression: rank(close - ts_max(close, 5)) * rank(correlation(ts_mean(volume,
       40), low, 5)) * -1
     description: 'Alpha191#91: Close-high rank times volume-low correlation rank'
     category: reversion
+    prototype: alpha191_091
   alpha191_093:
     expression: ts_sum(if_else(open >= delay(open, 1), 0, max(open - low, open - delay(open,
       1))), 20)
     description: 'Alpha191#93: Cumulative downward open pressure'
     category: momentum
+    prototype: alpha191_093
   alpha191_094:
     expression: ts_sum(if_else(close > delay(close, 1), volume, if_else(close < delay(close,
       1), -1 * volume, 0)), 30)
     description: 'Alpha191#94: On-balance volume over 30 days'
     category: volume
+    prototype: alpha191_094
   alpha191_096:
     expression: ts_mean(ts_mean((close - ts_min(low, 9)) / (ts_max(high, 9) - ts_min(low,
       9)) * 100, 3), 3)
     description: 'Alpha191#96: Stochastic %D (double smoothed %K)'
     category: reversion
+    prototype: alpha191_096
   alpha191_097:
     expression: stddev(volume, 10)
     description: 'Alpha191#97: 10-day volume standard deviation'
     category: volume
+    prototype: alpha191_097
   alpha191_098:
     expression: if_else(delta(ts_sum(close, 100) / 100, 100) / delay(close, 100) <=
       0.05, -1 * (close - ts_min(close, 100)), -1 * delta(close, 3))
     description: 'Alpha191#98: Mean change threshold (100-day)'
     category: reversion
+    prototype: alpha191_098
   alpha191_099:
     expression: -1 * rank(covariance(rank(close), rank(volume), 5))
     description: 'Alpha191#99: Ranked close-volume covariance (negated)'
     category: volume
+    prototype: alpha191_099
   alpha191_100:
     expression: stddev(volume, 20)
     description: 'Alpha191#100: 20-day volume standard deviation'
     category: volume
+    prototype: alpha191_100
   alpha191_102:
     expression: ts_mean(max(volume - delay(volume, 1), 0), 6) / ts_mean(abs(volume
       - delay(volume, 1)), 6) * 100
     description: 'Alpha191#102: Volume RSI (6-day)'
     category: volume
+    prototype: alpha191_102
   alpha191_103:
     expression: (20 - ts_argmin(low, 20)) / 20 * 100
     description: 'Alpha191#103: Days since 20-day low (normalized)'
     category: momentum
+    prototype: alpha191_103
   alpha191_104:
     expression: -1 * delta(correlation(high, volume, 5), 5) * rank(stddev(close, 20))
     description: 'Alpha191#104: Change in high-volume correlation times volatility
       rank'
     category: volume
+    prototype: alpha191_104
   alpha191_105:
     expression: -1 * correlation(rank(open), rank(volume), 10)
     description: 'Alpha191#105: Ranked open-volume correlation (negated)'
     category: volume
+    prototype: alpha191_105
   alpha191_106:
     expression: close - delay(close, 20)
     description: 'Alpha191#106: 20-day price change'
     category: momentum
+    prototype: alpha191_106
   alpha191_107:
     expression: -1 * rank(open - delay(high, 1)) * rank(open - delay(close, 1)) *
       rank(open - delay(low, 1))
     description: 'Alpha191#107: Open gap rank triple product'
     category: momentum
+    prototype: alpha191_107
   alpha191_109:
     expression: ts_mean(high - low, 10) / ts_mean(ts_mean(high - low, 10), 10)
     description: 'Alpha191#109: Range ratio (short vs double-smoothed)'
     category: volatility
+    prototype: alpha191_109
   alpha191_110:
     expression: ts_sum(max(high - delay(close, 1), 0), 20) / ts_sum(max(delay(close,
       1) - low, 0), 20) * 100
     description: 'Alpha191#110: True range up/down ratio (20-day)'
     category: momentum
+    prototype: alpha191_110
   alpha191_111:
     expression: ts_mean(volume * ((close - low) - (high - close)) / (high - low),
       11) - ts_mean(volume * ((close - low) - (high - close)) / (high - low), 4)
     description: 'Alpha191#111: AD oscillator (11-day vs 4-day)'
     category: volume
+    prototype: alpha191_111
   alpha191_112:
     expression: (ts_sum(if_else(close - delay(close, 1) > 0, close - delay(close,
       1), 0), 12) - ts_sum(if_else(close - delay(close, 1) < 0, abs(close - delay(close,
@@ -414,46 +496,55 @@ factors:
       1)), 0), 12)) * 100
     description: 'Alpha191#112: Directional movement balance (12-day)'
     category: momentum
+    prototype: alpha191_112
   alpha191_113:
     expression: -1 * rank(ts_sum(delay(close, 5), 20) / 20) * correlation(close, volume,
       2) * rank(correlation(ts_sum(close, 5), ts_sum(close, 20), 2))
     description: 'Alpha191#113: Delayed close rank times price-volume short correlations'
     category: volume
+    prototype: alpha191_113
   alpha191_115:
     expression: power(rank(correlation(high * 0.9 + close * 0.1, ts_mean(volume, 30),
       10)), rank(correlation(ts_rank((high + low) / 2, 4), ts_rank(volume, 10), 7)))
     description: 'Alpha191#115: Price-volume correlation power rank'
     category: volume
+    prototype: alpha191_115
   alpha191_117:
     expression: ts_rank(volume, 32) * (1 - ts_rank(close + high - low, 16)) * (1 -
       ts_rank(returns, 32))
     description: 'Alpha191#117: Volume rank times price range and return rank interaction'
     category: volume
+    prototype: alpha191_117
   alpha191_118:
     expression: ts_sum(high - open, 20) / ts_sum(open - low, 20) * 100
     description: 'Alpha191#118: Upper shadow to lower shadow ratio (20-day)'
     category: volatility
+    prototype: alpha191_118
   alpha191_122:
     expression: (ts_mean(ts_mean(ts_mean(log(close), 13), 13), 13) - delay(ts_mean(ts_mean(ts_mean(log(close),
       13), 13), 13), 1)) / delay(ts_mean(ts_mean(ts_mean(log(close), 13), 13), 13),
       1)
     description: 'Alpha191#122: Triple-smoothed log close momentum'
     category: momentum
+    prototype: alpha191_122
   alpha191_123:
     expression: if_else(rank(correlation(ts_sum((high + low) / 2, 20), ts_sum(ts_mean(volume,
       60), 20), 9)) < rank(correlation(low, volume, 6)), -1, 0)
     description: 'Alpha191#123: Volume-price midpoint vs low-volume correlation rank
       comparison'
     category: volume
+    prototype: alpha191_123
   alpha191_126:
     expression: (close + high + low) / 3
     description: 'Alpha191#126: Typical price'
     category: reversion
+    prototype: alpha191_126
   alpha191_127:
     expression: sqrt(ts_mean(power(100 * (close - ts_max(close, 12)) / ts_max(close,
       12), 2), 12))
     description: 'Alpha191#127: RMS deviation from 12-day high'
     category: volatility
+    prototype: alpha191_127
   alpha191_128:
     expression: 100 - 100 / (1 + ts_sum(if_else((high + low + close) / 3 > delay((high
       + low + close) / 3, 1), (high + low + close) / 3 * volume, 0), 14) / ts_sum(if_else((high
@@ -461,32 +552,39 @@ factors:
       / 3 * volume, 0), 14))
     description: 'Alpha191#128: Money Flow Index (14-day)'
     category: volume
+    prototype: alpha191_128
   alpha191_129:
     expression: ts_sum(if_else(close - delay(close, 1) < 0, abs(close - delay(close,
       1)), 0), 12)
     description: 'Alpha191#129: Cumulative negative price change (12-day)'
     category: momentum
+    prototype: alpha191_129
   alpha191_133:
     expression: (20 - ts_argmax(high, 20)) / 20 * 100 - (20 - ts_argmin(low, 20))
       / 20 * 100
     description: 'Alpha191#133: High day vs low day position difference'
     category: momentum
+    prototype: alpha191_133
   alpha191_134:
     expression: (close - delay(close, 12)) / delay(close, 12) * volume
     description: 'Alpha191#134: 12-day return scaled by volume'
     category: volume
+    prototype: alpha191_134
   alpha191_135:
     expression: ts_mean(delay(close / delay(close, 20), 1), 20)
     description: 'Alpha191#135: Smoothed lagged 20-day return'
     category: momentum
+    prototype: alpha191_135
   alpha191_136:
     expression: -1 * rank(delta(returns, 3)) * correlation(open, volume, 10)
     description: 'Alpha191#136: Return acceleration rank times open-volume correlation'
     category: volume
+    prototype: alpha191_136
   alpha191_139:
     expression: -1 * correlation(open, volume, 10)
     description: 'Alpha191#139: Open-volume correlation (negated)'
     category: volume
+    prototype: alpha191_139
   alpha191_140:
     expression: min(rank(decay_linear(rank(open) + rank(low) - rank(high) - rank(close),
       8)), ts_rank(decay_linear(correlation(ts_rank(close, 8), ts_rank(ts_mean(volume,
@@ -494,143 +592,174 @@ factors:
     description: 'Alpha191#140: Min of rank-spread decay and close-volume correlation
       decay'
     category: reversion
+    prototype: alpha191_140
   alpha191_141:
     expression: rank(correlation(rank(high), rank(ts_mean(volume, 15)), 9)) * -1
     description: 'Alpha191#141: High rank vs average volume rank correlation'
     category: volume
+    prototype: alpha191_141
   alpha191_142:
     expression: -1 * rank(ts_rank(close, 10)) * rank(delta(delta(close, 1), 1)) *
       rank(ts_rank(volume / ts_mean(volume, 20), 5))
     description: 'Alpha191#142: Close rank times acceleration times volume rank'
     category: momentum
+    prototype: alpha191_142
   alpha191_145:
     expression: (ts_mean(volume, 9) - ts_mean(volume, 26)) / ts_mean(volume, 12) *
       100
     description: 'Alpha191#145: Volume oscillator (9/26/12)'
     category: volume
+    prototype: alpha191_145
   alpha191_148:
     expression: if_else(rank(correlation(open, ts_sum(ts_mean(volume, 60), 9), 6))
       < rank(open - ts_min(open, 14)), -1, 0)
     description: 'Alpha191#148: Open-volume correlation vs open breakout rank comparison'
     category: momentum
+    prototype: alpha191_148
   alpha191_150:
     expression: (close + high + low) / 3 * volume
     description: 'Alpha191#150: Typical price times volume (money flow)'
     category: volume
+    prototype: alpha191_150
   alpha191_151:
     expression: ts_mean(close - delay(close, 20), 20)
     description: 'Alpha191#151: Smoothed 20-day price change'
     category: momentum
+    prototype: alpha191_151
   alpha191_152:
     expression: ts_mean(ts_mean(delay(ts_mean(delay(close / delay(close, 9), 1), 9),
       1), 12) - ts_mean(delay(ts_mean(delay(close / delay(close, 9), 1), 9), 1), 26),
       9)
     description: 'Alpha191#152: Double-smoothed return MACD signal'
     category: momentum
+    prototype: alpha191_152
   alpha191_153:
     expression: (ts_mean(close, 3) + ts_mean(close, 6) + ts_mean(close, 12) + ts_mean(close,
       24)) / 4
     description: 'Alpha191#153: Multi-period moving average composite'
     category: reversion
+    prototype: alpha191_153
   alpha191_155:
     expression: ts_mean(volume, 13) - ts_mean(volume, 27) - ts_mean(ts_mean(volume,
       13) - ts_mean(volume, 27), 10)
     description: 'Alpha191#155: Volume MACD histogram'
     category: volume
+    prototype: alpha191_155
   alpha191_157:
     expression: ts_min(ts_product(rank(rank(log(ts_sum(ts_min(rank(rank(-1 * rank(delta(close
       - 1, 5)))), 2), 1)))), 1), 5) + ts_rank(delay(-1 * returns, 6), 5)
     description: 'Alpha191#157: Complex nested rank of delta with lagged return rank'
     category: momentum
+    prototype: alpha191_157
   alpha191_158:
     expression: (high - low) / close
     description: 'Alpha191#158: Range as percentage of close'
     category: volatility
+    prototype: alpha191_158
   alpha191_160:
     expression: ts_mean(if_else(close <= delay(close, 1), stddev(close, 20), 0), 20)
     description: 'Alpha191#160: Smoothed conditional downside volatility'
     category: volatility
+    prototype: alpha191_160
   alpha191_161:
     expression: ts_mean(max(max(high - low, abs(delay(close, 1) - high)), abs(delay(close,
       1) - low)), 12)
     description: 'Alpha191#161: Average True Range (12-day)'
     category: volatility
+    prototype: alpha191_161
   alpha191_167:
     expression: ts_sum(if_else(close > delay(close, 1), close - delay(close, 1), 0),
       12)
     description: 'Alpha191#167: Cumulative positive price change (12-day)'
     category: momentum
+    prototype: alpha191_167
   alpha191_168:
     expression: -1 * volume / ts_mean(volume, 20)
     description: 'Alpha191#168: Negated volume ratio'
     category: volume
+    prototype: alpha191_168
   alpha191_169:
     expression: ts_mean(ts_mean(delay(ts_mean(close - delay(close, 1), 9), 1), 12)
       - ts_mean(delay(ts_mean(close - delay(close, 1), 9), 1), 26), 10)
     description: 'Alpha191#169: Smoothed momentum MACD signal'
     category: momentum
+    prototype: alpha191_169
   alpha191_171:
     expression: -1 * (low - close) * power(open, 5) / ((close - high) * power(close,
       5))
     description: 'Alpha191#171: Power-weighted intraday range ratio'
     category: momentum
+    prototype: alpha191_171
   alpha191_173:
     expression: 3 * ts_mean(close, 13) - 2 * ts_mean(ts_mean(close, 13), 13) + ts_mean(ts_mean(ts_mean(log(close),
       13), 13), 13)
     description: 'Alpha191#173: Triple-smoothed price indicator (TRIX-like)'
     category: momentum
+    prototype: alpha191_173
   alpha191_174:
     expression: ts_mean(if_else(close > delay(close, 1), stddev(close, 20), 0), 20)
     description: 'Alpha191#174: Smoothed conditional upside volatility'
     category: volatility
+    prototype: alpha191_174
   alpha191_175:
     expression: ts_mean(max(max(high - low, abs(delay(close, 1) - high)), abs(delay(close,
       1) - low)), 6)
     description: 'Alpha191#175: Average True Range (6-day)'
     category: volatility
+    prototype: alpha191_175
   alpha191_176:
     expression: correlation(rank((close - ts_min(low, 12)) / (ts_max(high, 12) - ts_min(low,
       12))), rank(volume), 6)
     description: 'Alpha191#176: Stochastic position rank vs volume rank correlation'
     category: volume
+    prototype: alpha191_176
   alpha191_177:
     expression: (20 - ts_argmax(high, 20)) / 20 * 100
     description: 'Alpha191#177: Days since 20-day high (normalized)'
     category: momentum
+    prototype: alpha191_177
   alpha191_178:
     expression: (close - delay(close, 1)) / delay(close, 1) * volume
     description: 'Alpha191#178: Daily return scaled by volume'
     category: volume
+    prototype: alpha191_178
   alpha191_180:
     expression: if_else(ts_mean(volume, 20) < volume, -1 * ts_rank(abs(delta(close,
       7)), 60) * sign(delta(close, 7)), -1 * volume)
     description: 'Alpha191#180: Volume-conditional momentum reversal'
     category: volume
+    prototype: alpha191_180
   alpha191_184:
     expression: rank(correlation(delay(open - close, 1), close, 200)) + rank(open
       - close)
     description: 'Alpha191#184: Long-term open-close correlation rank plus current
       rank'
     category: reversion
+    prototype: alpha191_184
   alpha191_185:
     expression: rank(-1 * power(1 - open / close, 2))
     description: 'Alpha191#185: Ranked squared intraday return'
     category: momentum
+    prototype: alpha191_185
   alpha191_187:
     expression: ts_sum(if_else(open <= delay(open, 1), 0, max(high - open, open -
       delay(open, 1))), 20)
     description: 'Alpha191#187: Cumulative upward open pressure'
     category: momentum
+    prototype: alpha191_187
   alpha191_188:
     expression: (high - low - ts_mean(high - low, 11)) / ts_mean(high - low, 11) *
       100
     description: 'Alpha191#188: Range deviation from smoothed range'
     category: volatility
+    prototype: alpha191_188
   alpha191_189:
     expression: ts_mean(abs(close - ts_mean(close, 6)), 6)
     description: 'Alpha191#189: Mean absolute deviation from 6-day mean'
     category: volatility
+    prototype: alpha191_189
   alpha191_191:
     expression: correlation(ts_mean(volume, 20), low, 5) + (high + low) / 2 - close
     description: 'Alpha191#191: Volume-low correlation plus midpoint minus close'
     category: volume
+    prototype: alpha191_191

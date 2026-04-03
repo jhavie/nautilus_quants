@@ -1,5 +1,6 @@
 metadata:
   name: alpha101
+  source: alpha101
   version: '1.0'
   description: Alpha101 OHLCV-only factors (52 factors)
 variables:
@@ -10,250 +11,302 @@ factors:
       close), 2), 5)) - 0.5
     description: 'Alpha#1: Conditional signed power rank'
     category: momentum
+    prototype: alpha001
   alpha002:
     expression: -1 * correlation(rank(delta(log(volume), 2)), rank((close - open)
       / open), 6)
     description: 'Alpha#2: Volume-price correlation'
     category: volume
+    prototype: alpha002
   alpha003:
     expression: -1 * correlation(rank(open), rank(volume), 10)
     description: 'Alpha#3: Open-volume correlation'
     category: volume
+    prototype: alpha003
   alpha004:
     expression: -1 * ts_rank(rank(low), 9)
     description: 'Alpha#4: TS rank of CS rank of low'
     category: reversion
+    prototype: alpha004
   alpha006:
     expression: -1 * correlation(open, volume, 10)
     description: 'Alpha#6: Open-volume correlation'
     category: volume
+    prototype: alpha006
   alpha007:
     expression: if_else(ts_mean(volume, 20) < volume, -1 * ts_rank(abs(delta(close,
       7)), 60) * sign(delta(close, 7)), -1)
     description: 'Alpha#7: Volume conditional momentum'
     category: volume
+    prototype: alpha007
   alpha008:
     expression: -1 * rank(ts_sum(open, 5) * ts_sum(returns, 5) - delay(ts_sum(open,
       5) * ts_sum(returns, 5), 10))
     description: 'Alpha#8: Open-returns sum momentum'
     category: momentum
+    prototype: alpha008
   alpha009:
     expression: if_else(ts_min(delta(close, 1), 5) > 0, delta(close, 1), if_else(ts_max(delta(close,
       1), 5) < 0, delta(close, 1), -1 * delta(close, 1)))
     description: 'Alpha#9: Delta direction'
     category: momentum
+    prototype: alpha009
   alpha010:
     expression: rank(if_else(ts_min(delta(close, 1), 4) > 0, delta(close, 1), if_else(ts_max(delta(close,
       1), 4) < 0, delta(close, 1), -1 * delta(close, 1))))
     description: 'Alpha#10: Ranked delta direction'
     category: momentum
+    prototype: alpha010
   alpha012:
     expression: sign(delta(volume, 1)) * -1 * delta(close, 1)
     description: 'Alpha#12: Volume delta sign times close delta'
     category: volume
+    prototype: alpha012
   alpha013:
     expression: -1 * rank(covariance(rank(close), rank(volume), 5))
     description: 'Alpha#13: Rank covariance rank'
     category: volume
+    prototype: alpha013
   alpha014:
     expression: -1 * rank(delta(returns, 3)) * correlation(open, volume, 10)
     description: 'Alpha#14: Returns delta rank times open-volume correlation'
     category: volume
+    prototype: alpha014
   alpha015:
     expression: -1 * ts_sum(rank(correlation(rank(high), rank(volume), 3)), 3)
     description: 'Alpha#15: High-volume correlation rank sum'
     category: volume
+    prototype: alpha015
   alpha016:
     expression: -1 * rank(covariance(rank(high), rank(volume), 5))
     description: 'Alpha#16: High-volume covariance rank'
     category: volume
+    prototype: alpha016
   alpha017:
     expression: -1 * rank(ts_rank(close, 10)) * rank(delta(delta(close, 1), 1)) *
       rank(ts_rank(volume / ts_mean(volume, 20), 5))
     description: 'Alpha#17: Rank triple product'
     category: momentum
+    prototype: alpha017
   alpha018:
     expression: -1 * rank(stddev(abs(close - open), 5) + (close - open) + correlation(close,
       open, 10))
     description: 'Alpha#18: Close-open deviation rank'
     category: volatility
+    prototype: alpha018
   alpha019:
     expression: -1 * sign((close - delay(close, 7)) + delta(close, 7)) * (1 + rank(1
       + ts_sum(returns, 250)))
     description: 'Alpha#19: 7-day change sign with returns sum'
     category: momentum
+    prototype: alpha019
   alpha020:
     expression: -1 * rank(open - delay(high, 1)) * rank(open - delay(close, 1)) *
       rank(open - delay(low, 1))
     description: 'Alpha#20: Open deviation from prior HLC rank product'
     category: momentum
+    prototype: alpha020
   alpha021:
     expression: if_else(ts_mean(close, 8) + stddev(close, 8) < ts_mean(close, 2),
       -1, if_else(ts_mean(close, 2) < ts_mean(close, 8) - stddev(close, 8), 1, if_else(volume
       / ts_mean(volume, 20) >= 1, 1, -1)))
     description: 'Alpha#21: Mean-std breakout'
     category: reversion
+    prototype: alpha021
   alpha022:
     expression: -1 * delta(correlation(high, volume, 5), 5) * rank(stddev(close, 20))
     description: 'Alpha#22: High-volume correlation change'
     category: volume
+    prototype: alpha022
   alpha023:
     expression: if_else(ts_mean(high, 20) < high, -1 * delta(high, 2), 0)
     description: 'Alpha#23: High above mean reversal'
     category: reversion
+    prototype: alpha023
   alpha024:
     expression: if_else(delta(ts_mean(close, 100), 100) / delay(close, 100) <= 0.05,
       -1 * (close - ts_min(close, 100)), -1 * delta(close, 3))
     description: 'Alpha#24: Mean change threshold'
     category: reversion
+    prototype: alpha024
   alpha026:
     expression: -1 * ts_max(correlation(ts_rank(volume, 5), ts_rank(high, 5), 5),
       3)
     description: 'Alpha#26: Max correlation rank'
     category: volume
+    prototype: alpha026
   alpha028:
     expression: scale(correlation(ts_mean(volume, 20), low, 5) + (high + low) / 2
       - close)
     description: 'Alpha#28: Volume-low correlation plus midpoint scaled'
     category: volume
+    prototype: alpha028
   alpha029:
     expression: ts_min(rank(rank(scale(log(ts_sum(rank(rank(-1 * rank(delta(close
       - 1, 5)))), 2))))), 5) + ts_rank(delay(-1 * returns, 6), 5)
     description: 'Alpha#29: Complex rank of delta'
     category: momentum
+    prototype: alpha029
   alpha030:
     expression: (1 - rank(sign(close - delay(close, 1)) + sign(delay(close, 1) - delay(close,
       2)) + sign(delay(close, 2) - delay(close, 3)))) * ts_sum(volume, 5) / ts_sum(volume,
       20)
     description: 'Alpha#30: Price sign rank volume ratio'
     category: volume
+    prototype: alpha030
   alpha031:
     expression: rank(rank(rank(decay_linear(-1 * rank(rank(delta(close, 10))), 10))))
       + rank(-1 * delta(close, 3)) + sign(scale(correlation(ts_mean(volume, 20), low,
       12)))
     description: 'Alpha#31: Triple rank delta with volume correlation'
     category: momentum
+    prototype: alpha031
   alpha033:
     expression: rank(-1 + open / close)
     description: 'Alpha#33: Open to close ratio rank'
     category: momentum
+    prototype: alpha033
   alpha034:
     expression: rank(2 - rank(stddev(returns, 2) / stddev(returns, 5)) - rank(delta(close,
       1)))
     description: 'Alpha#34: Std ratio rank plus delta rank'
     category: volatility
+    prototype: alpha034
   alpha035:
     expression: ts_rank(volume, 32) * (1 - ts_rank(close + high - low, 16)) * (1 -
       ts_rank(returns, 32))
     description: 'Alpha#35: Volume rank times range rank'
     category: volume
+    prototype: alpha035
   alpha037:
     expression: rank(correlation(delay(open - close, 1), close, 200)) + rank(open
       - close)
     description: 'Alpha#37: Open-close correlation rank'
     category: momentum
+    prototype: alpha037
   alpha038:
     expression: -1 * rank(ts_rank(open, 10)) * rank(close / open)
     description: 'Alpha#38: Close rank ratio'
     category: reversion
+    prototype: alpha038
   alpha039:
     expression: -1 * rank(delta(close, 7) * (1 - rank(decay_linear(volume / ts_mean(volume,
       20), 9)))) * (1 + rank(ts_mean(returns, 250)))
     description: 'Alpha#39: Delta times volume rank decay'
     category: volume
+    prototype: alpha039
   alpha040:
     expression: -1 * rank(stddev(high, 10)) * correlation(high, volume, 10)
     description: 'Alpha#40: High std rank times correlation'
     category: volatility
+    prototype: alpha040
   alpha043:
     expression: ts_rank(volume / ts_mean(volume, 20), 20) * ts_rank(-1 * delta(close,
       7), 8)
     description: 'Alpha#43: Volume ratio rank times delta rank'
     category: volume
+    prototype: alpha043
   alpha044:
     expression: -1 * correlation(high, rank(volume), 5)
     description: 'Alpha#44: High-volume rank correlation'
     category: volume
+    prototype: alpha044
   alpha045:
     expression: -1 * rank(ts_mean(delay(close, 5), 20)) * correlation(close, volume,
       2) * rank(correlation(ts_sum(close, 5), ts_sum(close, 20), 2))
     description: 'Alpha#45: Delayed mean times correlations'
     category: volume
+    prototype: alpha045
   alpha046:
     expression: if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close,
       10) - close) / 10 > 0.25, -1, if_else((delay(close, 20) - delay(close, 10))
       / 10 - (delay(close, 10) - close) / 10 < 0, 1, -1 * delta(close, 1)))
     description: 'Alpha#46: Long-term trend threshold'
     category: momentum
+    prototype: alpha046
   alpha049:
     expression: if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close,
       10) - close) / 10 < -0.1, 1, -1 * delta(close, 1))
     description: 'Alpha#49: Long-term decline signal'
     category: reversion
+    prototype: alpha049
   alpha051:
     expression: if_else((delay(close, 20) - delay(close, 10)) / 10 - (delay(close,
       10) - close) / 10 < -0.05, 1, -1 * delta(close, 1))
     description: 'Alpha#51: Long-term decline signal v2'
     category: reversion
+    prototype: alpha051
   alpha052:
     expression: -1 * delta(ts_min(low, 5), 5) * rank((ts_sum(returns, 240) - ts_sum(returns,
       20)) / 220) * ts_rank(volume, 5)
     description: 'Alpha#52: Low min change with returns sum rank'
     category: momentum
+    prototype: alpha052
   alpha053:
     expression: -1 * delta(((close - low) - (high - close)) / replace_zero(close -
       low, 0.0001), 9)
     description: 'Alpha#53: High-low close ratio delta'
     category: momentum
+    prototype: alpha053
   alpha054:
     expression: -1 * (low - close) * power(open, 5) / (replace_zero(low - high, -0.0001)
       * power(close, 5))
     description: 'Alpha#54: Low-close open power ratio'
     category: momentum
+    prototype: alpha054
   alpha055:
     expression: -1 * correlation(rank((close - ts_min(low, 12)) / replace_zero(ts_max(high,
       12) - ts_min(low, 12), 0.0001)), rank(volume), 6)
     description: 'Alpha#55: Normalized close rank volume correlation'
     category: volume
+    prototype: alpha055
   alpha060:
     expression: 0 - (2 * scale(rank(((close - low) - (high - close)) / replace_zero(high
       - low, 0.0001) * volume)) - scale(rank(ts_argmax(close, 10))))
     description: 'Alpha#60: Combined rank product'
     category: volume
+    prototype: alpha060
   alpha068:
     expression: (ts_rank(correlation(rank(high), rank(ts_mean(volume, 15)), 9), 14)
       < rank(delta(close * 0.518371 + low * 0.481629, 2)) * 14) * -1
     description: 'Alpha#68: Open delta correlation vs combo delta'
     category: volume
+    prototype: alpha068
   alpha085:
     expression: power(rank(correlation(high * 0.876703 + close * 0.123297, ts_mean(volume,
       30), 10)), rank(correlation(ts_rank((high + low) / 2, 4), ts_rank(volume, 10),
       7)))
     description: 'Alpha#85: Open-close combo correlation rank'
     category: volume
+    prototype: alpha085
   alpha088:
     expression: min(rank(decay_linear((rank(open) + rank(low)) - (rank(high) + rank(close)),
       8)), ts_rank(decay_linear(correlation(ts_rank(close, 8), ts_rank(ts_mean(volume,
       60), 21), 8), 7), 3))
     description: 'Alpha#88: Min of rank decay and correlation rank'
     category: momentum
+    prototype: alpha088
   alpha092:
     expression: min(ts_rank(decay_linear(if_else((high + low) / 2 + close < low +
       open, 1, 0), 15), 19), ts_rank(decay_linear(correlation(rank(low), rank(ts_mean(volume,
       30)), 8), 7), 7))
     description: 'Alpha#92: Min of HLV rank decay'
     category: volume
+    prototype: alpha092
   alpha095:
     expression: rank(open - ts_min(open, 12)) * 12 < ts_rank(power(rank(correlation(ts_mean((high
       + low) / 2, 19), ts_mean(ts_mean(volume, 40), 19), 13)), 5), 12)
     description: 'Alpha#95: Open min rank vs OHLC-volume correlation'
     category: volume
+    prototype: alpha095
   alpha099:
     expression: if_else(rank(correlation(ts_sum((high + low) / 2, 20), ts_sum(ts_mean(volume,
       60), 20), 9)) < rank(correlation(low, volume, 6)), -1, 0)
     description: 'Alpha#99: Close-volume rank covariance'
     category: volume
+    prototype: alpha099
   alpha101:
     expression: (close - open) / ((high - low) + 0.001)
     description: 'Alpha#101: Close-open to high-low ratio'
     category: momentum
+    prototype: alpha101
