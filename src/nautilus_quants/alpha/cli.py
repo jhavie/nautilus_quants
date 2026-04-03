@@ -635,20 +635,25 @@ def metrics(
             click.echo(f"No metrics found for {factor_id}")
             return
 
+        def _f(v: float | None, w: int = 8, d: int = 4) -> str:
+            return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
+
         click.echo(
-            f"{'run_id':<18} {'period':<8} {'ICIR':>8} {'mono':>8} "
-            f"{'win%':>8} {'IC_lin':>8} {'IC_kur':>8}"
+            f"{'run_id':<18} {'period':<6} "
+            f"{'IC':>8} {'ICIR':>8} {'t(NW)':>8} {'p(NW)':>10} "
+            f"{'mono':>6} {'win%':>7} {'IC_lin':>7} "
+            f"{'IC_skew':>8} {'IC_kur':>8} {'AR1':>7} {'N':>6}"
         )
-        click.echo("-" * 76)
+        click.echo("-" * 112)
         for m in results:
-            def _fmt(v: float | None, w: int = 8, d: int = 4) -> str:
-                return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
-            wr = f"{m.win_rate * 100:>7.1f}%" if m.win_rate is not None else f"{'-':>8}"
+            wr = f"{m.win_rate * 100:>6.1f}%" if m.win_rate is not None else f"{'-':>7}"
+            p_nw = f"{m.p_value_nw:>10.2e}" if m.p_value_nw is not None else f"{'-':>10}"
+            n = f"{m.n_samples:>6}" if m.n_samples is not None else f"{'-':>6}"
             click.echo(
-                f"{m.run_id:<18} {m.period:<8} "
-                f"{_fmt(m.icir)} {_fmt(m.monotonicity, 8, 2)} "
-                f"{wr} {_fmt(m.ic_linearity, 8, 3)} "
-                f"{_fmt(m.ic_kurtosis, 8, 3)}"
+                f"{m.run_id:<18} {m.period:<6} "
+                f"{_f(m.ic_mean)} {_f(m.icir)} {_f(m.t_stat_nw, 8, 2)} {p_nw} "
+                f"{_f(m.monotonicity, 6, 2)} {wr} {_f(m.ic_linearity, 7, 3)} "
+                f"{_f(m.ic_skew)} {_f(m.ic_kurtosis)} {_f(m.ic_ar1, 7, 3)} {n}"
             )
     finally:
         db.close()
