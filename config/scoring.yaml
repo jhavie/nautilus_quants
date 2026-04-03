@@ -28,9 +28,9 @@ scoring:
   weights:
     predictiveness: 0.30
     stability: 0.25
-    monotonicity: 0.20
+    monotonicity: 0.10
     consistency: 0.15
-    turnover_friendliness: 0.10
+    turnover_friendliness: 0.20
 
   # Sub-dimension weights within each dimension
   sub_weights:
