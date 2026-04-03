@@ -388,6 +388,112 @@ def compute_all_factor_metrics(
 
 
 
+def build_analysis_metrics(
+    run_id: str,
+    factor_id: str,
+    timeframe: str,
+    ic_summary: pd.DataFrame,
+    metrics_result: FactorMetricsResult | None = None,
+    factor_config_id: str = "",
+    analysis_config_id: str = "",
+    output_dir: str = "",
+) -> list:
+    """Build AnalysisMetrics from IC summary and FactorMetricsResult.
+
+    Returns a list of AnalysisMetrics (one per period).
+    Imported lazily to avoid circular imports.
+    """
+    from nautilus_quants.alpha.registry.models import AnalysisMetrics
+
+    now = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
+    result = []
+
+    for period_label in ic_summary.index:
+        row = ic_summary.loc[period_label]
+
+        # Signal quality metrics (per-period from FactorMetricsResult)
+        win_rate_val = None
+        mono_val = None
+        hl_val = None
+        lin_val = None
+        ar1_val = None
+        cov_val = None
+        if metrics_result is not None:
+            if period_label in metrics_result.win_rate.index:
+                win_rate_val = _safe_float(
+                    metrics_result.win_rate[period_label],
+                )
+            if period_label in metrics_result.monotonicity.index:
+                mono_val = _safe_float(
+                    metrics_result.monotonicity[period_label],
+                )
+            if period_label in metrics_result.ic_half_life.index:
+                hl_val = _safe_float(
+                    metrics_result.ic_half_life[period_label],
+                )
+            if period_label in metrics_result.ic_linearity.index:
+                lin_val = _safe_float(
+                    metrics_result.ic_linearity[period_label],
+                )
+            if period_label in metrics_result.ic_ar1.index:
+                ar1_val = _safe_float(
+                    metrics_result.ic_ar1[period_label],
+                )
+            cov_val = _safe_float(metrics_result.coverage)
+
+        result.append(AnalysisMetrics(
+            run_id=run_id,
+            factor_id=factor_id,
+            period=str(period_label),
+            ic_mean=_safe_float(row.get("IC Mean")),
+            ic_std=_safe_float(row.get("IC Std.")),
+            icir=_safe_float(row.get("Risk-Adjusted IC")),
+            t_stat_ic=_safe_float(row.get("t-stat(IC)")),
+            p_value_ic=_safe_float(row.get("p-value(IC)")),
+            t_stat_nw=_safe_float(row.get("t-stat(NW)")),
+            p_value_nw=_safe_float(row.get("p-value(NW)")),
+            n_eff=_safe_int(row.get("N_eff")),
+            ic_skew=_safe_float(row.get("IC Skew")),
+            ic_kurtosis=_safe_float(row.get("IC Kurtosis")),
+            n_samples=_safe_int(row.get("N")),
+            win_rate=win_rate_val,
+            monotonicity=mono_val,
+            ic_half_life=hl_val,
+            ic_linearity=lin_val,
+            ic_ar1=ar1_val,
+            coverage=cov_val,
+            factor_config_id=factor_config_id,
+            analysis_config_id=analysis_config_id,
+            output_dir=output_dir,
+            timeframe=timeframe,
+            created_at=now,
+        ))
+
+    return result
+
+
+def _safe_float(val: Any) -> float | None:
+    """Convert to float, returning None for NaN/None."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if np.isnan(f) else f
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(val: Any) -> int | None:
+    """Convert to int, returning None for NaN/None."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if np.isnan(f) else int(f)
+    except (ValueError, TypeError):
+        return None
+
+
 def _chart_quantile_returns_bar(factor_data: pd.DataFrame, period: str, **kwargs: Any) -> None:
     import alphalens.performance as perf
     import alphalens.plotting as plotting

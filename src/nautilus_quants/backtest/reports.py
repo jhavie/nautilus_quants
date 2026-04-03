@@ -293,10 +293,34 @@ class ReportGenerator:
                 combined["total_pnl"] = combined["PnL (total)"]
             if "PnL% (total)" in combined:
                 combined["total_pnl_pct"] = combined["PnL% (total)"]
-            if "Sharpe Ratio" in combined:
-                combined["sharpe_ratio"] = combined["Sharpe Ratio"]
-            if "Max Drawdown" in combined:
-                combined["max_drawdown"] = combined["Max Drawdown"]
+            # Sharpe — NT may return "Sharpe Ratio (252 days)"
+            for k in list(combined):
+                if k.startswith("Sharpe Ratio"):
+                    combined["sharpe_ratio"] = combined[k]
+                    break
+            # Max Drawdown — try NT key first, fallback to manual calc
+            dd_found = False
+            for k in list(combined):
+                kl = k.lower()
+                if "drawdown" in kl and "duration" not in kl:
+                    combined["max_drawdown"] = combined[k]
+                    dd_found = True
+                    break
+            if not dd_found:
+                # Compute max drawdown from portfolio equity curve
+                try:
+                    import numpy as _np
+                    returns_series = analyzer.returns()
+                    if returns_series is not None and len(returns_series) > 1:
+                        cumulative = (1 + returns_series).cumprod()
+                        running_max = cumulative.cummax()
+                        drawdowns = (cumulative - running_max) / running_max
+                        max_dd = float(drawdowns.min())
+                        if not _np.isnan(max_dd):
+                            combined["Max Drawdown"] = max_dd
+                            combined["max_drawdown"] = max_dd
+                except Exception:
+                    pass
             if "Win Rate" in combined:
                 combined["win_rate"] = combined["Win Rate"]
 

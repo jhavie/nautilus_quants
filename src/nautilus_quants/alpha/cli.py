@@ -103,7 +103,12 @@ def cli() -> None:
 @click.argument("config_file", type=click.Path(exists=True, path_type=Path))
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output")
-def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
+@click.option("--no-registry", is_flag=True, help="Skip writing to registry database")
+@click.option("--env", "env_name", default=None, help="Registry environment (test/dev/prod)")
+def analyze(
+    config_file: Path, verbose: bool, quiet: bool,
+    no_registry: bool, env_name: str | None,
+) -> None:
     """Execute factor analysis from a YAML configuration file.
 
     Loads bar data from catalog, computes factor values using FactorEngine,
@@ -350,6 +355,80 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
                 factor_metrics_results, output_dir,
             )
 
+        # ── Registry auto-persist ──
+        registry_enabled = config.registry_enabled and not no_registry
+        if registry_enabled:
+            try:
+                import yaml as _yaml
+
+                from nautilus_quants.alpha.analysis.report import (
+                    build_analysis_metrics,
+                    compute_ic_summary,
+                )
+                from nautilus_quants.alpha.registry.database import RegistryDatabase
+                from nautilus_quants.alpha.registry.environment import resolve_env
+                from nautilus_quants.alpha.registry.repository import FactorRepository
+                from nautilus_quants.factors.config import generate_factor_id
+
+                env = resolve_env(env_name, config.registry_env)
+                reg_db = RegistryDatabase.for_environment(
+                    env, config.registry_db_dir,
+                )
+                repo = FactorRepository(reg_db)
+
+                # Save config snapshots
+                with open(config.factor_config_path, encoding="utf-8") as _f:
+                    factor_yaml_dict = _yaml.safe_load(_f)
+                factor_cfg_id = repo.save_config_snapshot(
+                    factor_yaml_dict, "factors",
+                    config_name=factor_config.name,
+                    file_path=str(config.factor_config_path),
+                )
+
+                with open(config_file, encoding="utf-8") as _f:
+                    analysis_yaml_dict = _yaml.safe_load(_f)
+                analysis_cfg_id = repo.save_config_snapshot(
+                    analysis_yaml_dict, "analysis",
+                    config_name=str(config_file.stem),
+                    file_path=str(config_file),
+                )
+
+                # Register factors
+                repo.register_factors_from_config(factor_config)
+
+                # Save analysis metrics
+                all_metrics = []
+                for fname, ic_df in ic_results.items():
+                    fid = generate_factor_id(factor_config.source, fname)
+                    ic_summary = compute_ic_summary(ic_df)
+                    fm = (
+                        factor_metrics_results.get(fname)
+                        if factor_metrics_results else None
+                    )
+                    all_metrics.extend(build_analysis_metrics(
+                        run_id=run_id,
+                        factor_id=fid,
+                        timeframe=config.bar_spec,
+                        ic_summary=ic_summary,
+                        metrics_result=fm,
+                        factor_config_id=factor_cfg_id,
+                        analysis_config_id=analysis_cfg_id,
+                        output_dir=str(output_dir),
+                    ))
+
+                repo.save_metrics(all_metrics)
+                reg_db.close()
+
+                if not quiet:
+                    click.echo(
+                        f"  Registry: {len(all_metrics)} metrics saved to "
+                        f"{env}.duckdb"
+                    )
+            except Exception as e:
+                click.echo(
+                    f"  Warning: Registry write failed: {e}", err=True,
+                )
+
         duration = time.time() - start_time
 
         # 10. Print results
@@ -390,30 +469,36 @@ def analyze(config_file: Path, verbose: bool, quiet: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Registry commands (Feature 035)
+# Registry commands (v2)
 # ---------------------------------------------------------------------------
 
-_DB_OPTION = click.option(
-    "--db", "db_path", default="data/factor_registry.duckdb",
-    help="Path to DuckDB registry file.",
+_ENV_OPTION = click.option(
+    "--env", "env_name", default=None,
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Registry environment (default: test).",
+)
+_DB_DIR_OPTION = click.option(
+    "--db-dir", default="logs/registry",
+    help="Registry database directory.",
 )
 
 
-def _open_repo(db_path: str):
-    """Lazy-import and open a FactorRepository."""
+def _open_repo(env_name: str | None, db_dir: str):
+    """Open a FactorRepository for the given environment."""
     from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.environment import resolve_env
     from nautilus_quants.alpha.registry.repository import FactorRepository
 
-    db = RegistryDatabase(db_path)
+    env = resolve_env(env_name)
+    db = RegistryDatabase.for_environment(env, db_dir)
     return FactorRepository(db), db
 
 
 @cli.command()
 @click.argument("config_file", type=click.Path(exists=True, path_type=Path))
-@click.option("--source", default="", help="Factor source label (e.g. alpha101, fmz, mined).")
-@click.option("--context-id", default="", help="Config context ID (defaults to metadata.name).")
-@_DB_OPTION
-def register(config_file: Path, source: str, context_id: str, db_path: str) -> None:
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
     """Register factors from a YAML config file into the registry."""
     from nautilus_quants.factors.config import load_factor_config
 
@@ -423,59 +508,52 @@ def register(config_file: Path, source: str, context_id: str, db_path: str) -> N
         click.echo(f"Error loading config: {e}", err=True)
         sys.exit(1)
 
-    repo, db = _open_repo(db_path)
+    repo, db = _open_repo(env_name, db_dir)
     try:
-        new, updated, unchanged = repo.import_from_config(
-            config, source=source, context_id=context_id,
-        )
-        cid = context_id or config.name
+        new, updated, unchanged = repo.register_factors_from_config(config)
         click.echo(
-            f"已注册 {new + updated + unchanged} 个因子"
-            f"（{new} 新增, {updated} 更新, {unchanged} 无变化）"
+            f"Registered {new + updated + unchanged} factors "
+            f"({new} new, {updated} updated, {unchanged} unchanged)"
         )
-        click.echo(f"已保存配置上下文: {cid}")
     finally:
         db.close()
 
 
 @cli.command("list")
-@click.option("--status", default=None, help="Filter by status (candidate/active/archived).")
-@click.option("--sort", "sort_by", default="factor_id", help="Sort column.")
-@click.option("--category", default=None, help="Filter by category.")
+@click.option("--status", default=None, help="Filter by status.")
 @click.option("--source", default=None, help="Filter by source.")
+@click.option("--prototype", default=None, help="Filter by prototype.")
 @click.option("--limit", default=None, type=int, help="Max rows.")
-@_DB_OPTION
+@_ENV_OPTION
+@_DB_DIR_OPTION
 def list_factors(
     status: str | None,
-    sort_by: str,
-    category: str | None,
     source: str | None,
+    prototype: str | None,
     limit: int | None,
-    db_path: str,
+    env_name: str | None,
+    db_dir: str,
 ) -> None:
     """List factors in the registry."""
-    repo, db = _open_repo(db_path)
+    repo, db = _open_repo(env_name, db_dir)
     try:
         factors = repo.list_factors(
-            status=status, category=category, source=source,
-            sort_by=sort_by, limit=limit,
+            status=status, source=source, prototype=prototype, limit=limit,
         )
         if not factors:
             click.echo("(no factors found)")
             return
 
-        # Header
         click.echo(
-            f"{'factor_id':<16} {'category':<14} {'status':<12} "
-            f"{'source':<10} {'ICIR':>8} {'score':>8}"
+            f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
+            f"{'source':<10} {'tags'}"
         )
-        click.echo("-" * 70)
+        click.echo("-" * 80)
         for f in factors:
-            icir_str = f"{f.icir:.4f}" if f.icir is not None else "-"
-            score_str = f"{f.score:.1f}" if f.score is not None else "-"
+            tags_str = ", ".join(f.tags) if f.tags else "-"
             click.echo(
-                f"{f.factor_id:<16} {f.category:<14} {f.status:<12} "
-                f"{f.source:<10} {icir_str:>8} {score_str:>8}"
+                f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
+                f"{f.source:<10} {tags_str}"
             )
         click.echo(f"({len(factors)} factors)")
     finally:
@@ -484,10 +562,11 @@ def list_factors(
 
 @cli.command()
 @click.argument("factor_id")
-@_DB_OPTION
-def inspect(factor_id: str, db_path: str) -> None:
-    """Inspect a factor's details and version history."""
-    repo, db = _open_repo(db_path)
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def inspect(factor_id: str, env_name: str | None, db_dir: str) -> None:
+    """Inspect a factor's details and latest metrics."""
+    repo, db = _open_repo(env_name, db_dir)
     try:
         f = repo.get_factor(factor_id)
         if f is None:
@@ -496,30 +575,22 @@ def inspect(factor_id: str, db_path: str) -> None:
 
         click.echo(f"Factor: {f.factor_id}")
         click.echo(f"Expression: {f.expression}")
-        click.echo(f"Category: {f.category or '(none)'}")
+        click.echo(f"Prototype: {f.prototype or '(none)'}")
         click.echo(f"Source: {f.source or '(none)'}")
         click.echo(f"Status: {f.status}")
-        click.echo(f"Created: {f.created_at}")
-        click.echo(f"Updated: {f.updated_at}")
+        click.echo(f"Tags: {', '.join(f.tags) if f.tags else '(none)'}")
+        click.echo(f"Parameters: {f.parameters}")
+        click.echo(f"Variables: {f.variables}")
 
-        if f.icir is not None:
-            click.echo(f"ICIR: {f.icir:.4f}")
-        if f.score is not None:
-            click.echo(f"Score: {f.score:.1f}")
-
-        versions = repo.get_versions(factor_id)
-        if versions:
-            click.echo(f"\nVersions ({len(versions)}):")
-            for v in versions:
-                reason = f"  {v.reason}" if v.reason else ""
-                click.echo(f"  v{v.version}  {v.created_at}{reason}")
-
-        analysis = repo.get_analysis(factor_id, f.bar_spec or "")
-        if analysis:
-            click.echo(f"\nAnalysis ({f.bar_spec}):")
-            for a in analysis:
-                icir_str = f"{a.icir:.4f}" if a.icir is not None else "-"
-                click.echo(f"  period={a.period}  ICIR={icir_str}")
+        metrics = repo.get_metrics(factor_id)
+        if metrics:
+            click.echo(f"\nAnalysis metrics ({len(metrics)} records):")
+            for m in metrics[:12]:
+                icir_str = f"{m.icir:.4f}" if m.icir is not None else "-"
+                click.echo(
+                    f"  run={m.run_id} period={m.period} "
+                    f"ICIR={icir_str} timeframe={m.timeframe}"
+                )
     finally:
         db.close()
 
@@ -527,15 +598,19 @@ def inspect(factor_id: str, db_path: str) -> None:
 @cli.command()
 @click.argument("factor_id")
 @click.argument("new_status")
-@_DB_OPTION
-def status(factor_id: str, new_status: str, db_path: str) -> None:
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def status(
+    factor_id: str, new_status: str,
+    env_name: str | None, db_dir: str,
+) -> None:
     """Change a factor's status (candidate/active/archived)."""
-    repo, db = _open_repo(db_path)
+    repo, db = _open_repo(env_name, db_dir)
     try:
         f = repo.get_factor(factor_id)
         old_status = f.status if f else "?"
         repo.set_status(factor_id, new_status)
-        click.echo(f"{factor_id}: {old_status} → {new_status} ✓")
+        click.echo(f"{factor_id}: {old_status} → {new_status}")
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
@@ -543,25 +618,58 @@ def status(factor_id: str, new_status: str, db_path: str) -> None:
         db.close()
 
 
+@cli.command()
+@click.argument("factor_id")
+@click.option("--timeframe", default=None, help="Filter by timeframe.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def metrics(
+    factor_id: str, timeframe: str | None,
+    env_name: str | None, db_dir: str,
+) -> None:
+    """Show analysis metrics for a factor."""
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        results = repo.get_metrics(factor_id, timeframe=timeframe)
+        if not results:
+            click.echo(f"No metrics found for {factor_id}")
+            return
+
+        click.echo(
+            f"{'run_id':<18} {'period':<8} {'ICIR':>8} {'mono':>8} "
+            f"{'win%':>8} {'IC_lin':>8} {'IC_kur':>8}"
+        )
+        click.echo("-" * 76)
+        for m in results:
+            def _fmt(v: float | None, w: int = 8, d: int = 4) -> str:
+                return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
+            wr = f"{m.win_rate * 100:>7.1f}%" if m.win_rate is not None else f"{'-':>8}"
+            click.echo(
+                f"{m.run_id:<18} {m.period:<8} "
+                f"{_fmt(m.icir)} {_fmt(m.monotonicity, 8, 2)} "
+                f"{wr} {_fmt(m.ic_linearity, 8, 3)} "
+                f"{_fmt(m.ic_kurtosis, 8, 3)}"
+            )
+    finally:
+        db.close()
+
+
 @cli.command("export-factors")
-@click.option("--context-id", default="", help="Config context for variables/parameters.")
-@click.option("--method", default="equal", help="Composite weighting method (equal/icir_weight).")
-@click.option("--top", "top_n", default=30, type=int, help="Max factors in composite.")
-@click.option("--transform", default="cs_rank", help="Transform function (cs_rank/cs_zscore/raw).")
+@click.option("--context-id", default="", help="Config snapshot ID for variables/parameters.")
+@click.option("--method", default="equal", help="Composite weighting (equal/icir_weight).")
+@click.option("--top", "top_n", default=30, type=int, help="Max factors.")
+@click.option("--transform", default="cs_rank", help="Transform (cs_rank/cs_zscore/raw).")
 @click.option("-o", "--output", "output_path", required=True, type=click.Path(path_type=Path))
-@_DB_OPTION
+@_ENV_OPTION
+@_DB_DIR_OPTION
 def export_factors(
-    context_id: str,
-    method: str,
-    top_n: int,
-    transform: str,
-    output_path: Path,
-    db_path: str,
+    context_id: str, method: str, top_n: int, transform: str,
+    output_path: Path, env_name: str | None, db_dir: str,
 ) -> None:
     """Export active factors + composite to a factors.yaml file."""
     from nautilus_quants.alpha.registry.export import export_factors_yaml
 
-    repo, db = _open_repo(db_path)
+    repo, db = _open_repo(env_name, db_dir)
     try:
         export_factors_yaml(
             repo, output_path,
@@ -570,10 +678,7 @@ def export_factors(
             composite_top_n=top_n,
             composite_transform=transform,
         )
-        click.echo(
-            f"已导出到 {output_path}\n"
-            f"method={method}, transform={transform}, context={context_id or '(none)'}"
-        )
+        click.echo(f"Exported to {output_path}")
     finally:
         db.close()
 
