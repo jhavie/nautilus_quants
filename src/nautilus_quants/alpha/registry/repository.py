@@ -198,14 +198,21 @@ class FactorRepository:
 
     def register_factors_from_config(
         self, config: FactorConfig,
+        only_names: set[str] | None = None,
     ) -> tuple[int, int, int]:
         """Batch-register factors from a FactorConfig.
+
+        Args:
+            config: Factor configuration to register.
+            only_names: If provided, only register factors whose name is in this set.
 
         Returns (new, updated, unchanged).
         """
         new = updated = unchanged = 0
         source = config.source
         for fdef in config.factors:
+            if only_names is not None and fdef.name not in only_names:
+                continue
             fid = generate_factor_id(source, fdef.name)
             record = FactorRecord(
                 factor_id=fid,
