@@ -190,9 +190,6 @@ class EquityGuardController(Controller):
         if equity is None:
             return
 
-        now_ns = self.clock.timestamp_ns()
-        self._equity_history.append((now_ns, equity))
-
         # Layer 2: Absolute guard (highest priority, permanent halt)
         abs_ratio = equity / self._initial_balance
         if abs_ratio < self.config.min_equity_ratio:
@@ -206,6 +203,9 @@ class EquityGuardController(Controller):
         # No drawdown rules configured — only absolute guard applies
         if not self._rules:
             return
+
+        now_ns = self.clock.timestamp_ns()
+        self._equity_history.append((now_ns, equity))
 
         # Global history pruning to max window
         if self._max_window_ns is not None and self._max_window_ns > 0:
