@@ -620,28 +620,28 @@ def list_factors(
             )
             click.echo(
                 f"{'#':<4} {'factor_id':<30} {'score':>7} {'status':<10} "
-                f"{'source':<10} {'tags':<20} {'expression'}"
+                f"{'source':<10} {'tags'}"
             )
-            click.echo("-" * 140)
+            click.echo("-" * 90)
             for i, f in enumerate(factors, 1):
+                tags_str = ", ".join(f.tags) if f.tags else "-"
                 score = f.parameters.get("promote_score")
                 score_str = f"{score:>7.4f}" if score is not None else f"{'-':>7}"
-                tags_str = ", ".join(f.tags) if f.tags else "-"
                 click.echo(
                     f"{i:<4} {f.factor_id:<30} {score_str} {f.status:<10} "
-                    f"{f.source:<10} {tags_str:<20} {f.expression}"
+                    f"{f.source:<10} {tags_str}"
                 )
         else:
             click.echo(
                 f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
-                f"{'source':<10} {'tags':<20} {'expression'}"
+                f"{'source':<10} {'tags'}"
             )
-            click.echo("-" * 140)
+            click.echo("-" * 80)
             for f in factors:
                 tags_str = ", ".join(f.tags) if f.tags else "-"
                 click.echo(
                     f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
-                    f"{f.source:<10} {tags_str:<20} {f.expression}"
+                    f"{f.source:<10} {tags_str}"
                 )
         click.echo(f"({len(factors)} factors)")
     finally:
@@ -1159,8 +1159,14 @@ def promote(
         scores_dir = Path("logs/scoring")
         scores_dir.mkdir(parents=True, exist_ok=True)
         scores_csv = scores_dir / f"factor_scores_{timestamp}.csv"
-        score_cols = ["final_score", "avg_period_score", "consistency",
-                      "turnover_friendliness", "n_valid_periods"]
+        score_cols = [
+            "final_score", "avg_period_score",
+            "pred_score", "stab_score", "mono_score",
+            "consistency", "turnover_friendliness",
+            "avg_icir", "avg_t_stat_nw", "avg_win_rate",
+            "avg_ic_linearity", "avg_monotonicity",
+            "n_valid_periods",
+        ]
         save_cols = [c for c in score_cols if c in df.columns]
         df[save_cols].to_csv(scores_csv)
         click.echo(f"\n  Scores saved: {scores_csv}")
@@ -1194,6 +1200,7 @@ def promote(
                 counts = migrate_factors(
                     source_db, target_db, selected_ids,
                     target_status=scoring_cfg.promote.target_status,
+                    scores=df,
                 )
                 click.echo(f"  Migrated: {counts['factors']} factors, "
                            f"{counts['metrics']} metrics, "
