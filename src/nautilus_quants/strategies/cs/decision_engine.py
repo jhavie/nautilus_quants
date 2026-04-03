@@ -46,9 +46,7 @@ from nautilus_quants.strategies.cs.selection_policy import (
     TopKDropoutSelectionPolicy,
 )
 from nautilus_quants.strategies.cs.types import RebalanceOrders
-from nautilus_quants.strategies.cs.worldquant_selection_policy import (
-    WorldQuantSelectionPolicy,
-)
+from nautilus_quants.strategies.cs.worldquant_selection_policy import WorldQuantSelectionPolicy
 
 _SELECTION_POLICIES: dict[str, type] = {
     "FMZSelectionPolicy": FMZSelectionPolicy,
@@ -114,6 +112,20 @@ class DecisionEngineActor(Actor):
             f"rebalance_interval={self.config.rebalance_interval}"
         )
 
+        # Publish config metadata for SnapshotAggregatorActor
+        import json
+
+        from nautilus_quants.utils.cache_keys import STRATEGY_CONFIG_CACHE_KEY
+
+        config_meta = {
+            "selection_policy": self.config.selection_policy,
+            "position_mode": self.config.position_mode,
+            "position_value": self.config.position_value,
+            "rebalance_interval": self.config.rebalance_interval,
+            "composite_factor": self.config.composite_factor,
+        }
+        self.cache.add(STRATEGY_CONFIG_CACHE_KEY, json.dumps(config_meta).encode())
+
     def on_data(self, data: object) -> None:
         """Process FactorValues and publish RebalanceOrders."""
         if not isinstance(data, FactorValues):
@@ -153,7 +165,10 @@ class DecisionEngineActor(Actor):
 
         # Compute rebalance orders from latest targets
         orders = self._compute_orders_from_targets(
-            targets, composite, current_long, current_short,
+            targets,
+            composite,
+            current_long,
+            current_short,
         )
 
         if orders:
@@ -195,7 +210,10 @@ class DecisionEngineActor(Actor):
         if targets is None:
             return []
         return self._compute_orders_from_targets(
-            targets, composite, current_long, current_short,
+            targets,
+            composite,
+            current_long,
+            current_short,
         )
 
     def _compute_orders_from_targets(
@@ -244,29 +262,24 @@ class DecisionEngineActor(Actor):
             rank = rank_lookup.get(t.symbol, -1)
 
             if is_long:
-                tag = (
-                    "FLIP_TO_LONG" if was_short
-                    else "HOLD_LONG" if was_long
-                    else "NEW_LONG"
-                )
+                tag = "FLIP_TO_LONG" if was_short else "HOLD_LONG" if was_long else "NEW_LONG"
             else:
-                tag = (
-                    "FLIP_TO_SHORT" if was_long
-                    else "HOLD_SHORT" if was_short
-                    else "NEW_SHORT"
-                )
+                tag = "FLIP_TO_SHORT" if was_long else "HOLD_SHORT" if was_short else "NEW_SHORT"
 
             orders.append(
                 self._rebalance_order(
-                    t.symbol, side, target_value,
-                    [tag, f"rank:{rank}"], rank, t.factor,
+                    t.symbol,
+                    side,
+                    target_value,
+                    [tag, f"rank:{rank}"],
+                    rank,
+                    t.factor,
                 )
             )
 
         # Close dropped positions (currently held but not in targets)
         for inst_id in sorted(
-            ((current_long | current_short) & instruments_with_data)
-            - target_longs - target_shorts
+            ((current_long | current_short) & instruments_with_data) - target_longs - target_shorts
         ):
             side = "SELL" if inst_id in current_long else "BUY"
             rank = -1
@@ -274,8 +287,12 @@ class DecisionEngineActor(Actor):
             tag = "DROPPED_LONG" if inst_id in current_long else "DROPPED_SHORT"
             orders.append(
                 self._rebalance_order(
-                    inst_id, side, 0,
-                    [tag, f"rank:{rank}"], rank, comp,
+                    inst_id,
+                    side,
+                    0,
+                    [tag, f"rank:{rank}"],
+                    rank,
+                    comp,
                 )
             )
 
@@ -308,10 +325,7 @@ class DecisionEngineActor(Actor):
                 return self.config.position_value
             is_long = t.weight > 0
             n = len(target_longs) if is_long else len(target_shorts)
-            share = (
-                self.config.long_share if is_long
-                else (1.0 - self.config.long_share)
-            )
+            share = self.config.long_share if is_long else (1.0 - self.config.long_share)
             return nav * share / max(n, 1)
 
         if mode == "weighted":

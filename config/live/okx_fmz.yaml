@@ -90,6 +90,14 @@ engine:
         max_history: 500
         publish_signals: true
 
+    - actor_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActor"
+      config_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActorConfig"
+      config:
+        venue_name: "OKX"
+        currency: "USDT"
+        interval_secs: 15
+        log_directory: "logs/live"
+
   strategies:
     - strategy_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategy"
       config_path: "nautilus_quants.strategies.fmz.strategy:FMZFactorStrategyConfig"
