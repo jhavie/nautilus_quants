@@ -57,7 +57,8 @@ def test_export_composite_present(
     out = tmp_path / "factors.yaml"
     export_factors_yaml(repo, out, status="active")
     config = load_factor_config(out)
-    names = {f.name for f in config.factors}
+    # composite is in all_factors (auto-generated from composite section)
+    names = {f.name for f in config.all_factors}
     assert "composite" in names
 
 
@@ -71,8 +72,10 @@ def test_export_equal_weights(
     )
     config = load_factor_config(out)
     composite = config.get_factor("composite")
-    assert composite is not None
-    assert "0.5000" in composite.expression
+    # composite is now in all_factors, not factors
+    assert composite is None  # not in base factors
+    all_names = {f.name for f in config.all_factors}
+    assert "composite" in all_names
 
 
 def test_export_empty_registry(
@@ -81,9 +84,9 @@ def test_export_empty_registry(
     out = tmp_path / "factors.yaml"
     export_factors_yaml(repo, out, status="active")
     config = load_factor_config(out)
-    composite = config.get_factor("composite")
-    assert composite is not None
-    assert composite.expression == "0"
+    # No factors, no composite section generated
+    assert len(config.factors) == 0
+    assert len(config.all_factors) == 0
 
 
 def test_export_with_context(

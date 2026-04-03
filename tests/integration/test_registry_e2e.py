@@ -110,6 +110,6 @@ def test_full_registry_workflow(tmp_path: Path) -> None:
 
     # 8. Round-trip: load_factor_config must succeed
     config = load_factor_config(export_path)
-    factor_names = {f.name for f in config.factors}
-    assert "composite" in factor_names
-    assert len(factor_names) >= 4  # 3 active + composite
+    assert len(config.factors) == 3  # 3 active base factors
+    all_names = {f.name for f in config.all_factors}
+    assert "composite" in all_names  # composite auto-generated from section
