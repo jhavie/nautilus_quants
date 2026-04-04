@@ -578,6 +578,7 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
 @click.option("--status", default=None, help="Filter by status.")
 @click.option("--source", default=None, help="Filter by source.")
 @click.option("--prototype", default=None, help="Filter by prototype.")
+@click.option("--tag", default=None, help="Filter by tag.")
 @click.option("--limit", default=None, type=int, help="Max rows.")
 @_ENV_OPTION
 @_DB_DIR_OPTION
@@ -585,6 +586,7 @@ def list_factors(
     status: str | None,
     source: str | None,
     prototype: str | None,
+    tag: str | None,
     limit: int | None,
     env_name: str | None,
     db_dir: str,
@@ -595,7 +597,8 @@ def list_factors(
     repo, db = _open_repo(env_name, db_dir)
     try:
         factors = repo.list_factors(
-            status=status, source=source, prototype=prototype, limit=limit,
+            status=status, source=source, prototype=prototype,
+            tag=tag, limit=limit,
         )
         if not factors:
             click.echo("(no factors found)")
