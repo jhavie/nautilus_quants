@@ -76,6 +76,11 @@ class AlphaAnalysisConfig:
     factor_cache_path: str = ""
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
 
+    # FR/OI data injection
+    funding_rate: bool = False
+    oi_data_path: str = ""
+    oi_timeframe: str = "4h"
+
     # Registry auto-persist configuration
     registry_env: str = "test"
     registry_db_dir: str = "logs/registry"
@@ -123,6 +128,9 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         output_format=tuple(output_format),
         factor_cache_path=raw.get("factor_cache_path", ""),
         metrics=_parse_metrics_config(raw.get("metrics", {})),
+        funding_rate=raw.get("funding_rate", False),
+        oi_data_path=raw.get("oi_data_path", ""),
+        oi_timeframe=raw.get("oi_timeframe", "4h"),
         registry_env=reg.get("env", "test"),
         registry_db_dir=reg.get("db_dir", "logs/registry"),
         registry_enabled=reg.get("enabled", True),

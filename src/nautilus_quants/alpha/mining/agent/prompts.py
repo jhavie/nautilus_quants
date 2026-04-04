@@ -139,7 +139,9 @@ _CONSTRUCTION_RULES = """\
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects
    - High volatility — use shorter windows (6-42 bars) for responsiveness
-   - Only OHLCV data — no fundamentals, no order book, no funding rate
+   - OHLCV + funding_rate + open_interest available
+   - funding_rate: sentiment indicator (positive=longs pay shorts, negative=shorts pay longs)
+   - open_interest: market participation / leverage indicator
    - {window_guide}
 
 6. **Avoid strict equalities.** Use ranges instead of `==`:
@@ -154,8 +156,12 @@ _CONSTRUCTION_RULES = """\
 
 
 _AVAILABLE_VARIABLES = (
-    "close, open, high, low, volume, returns "
-    "(returns = delta(close,1)/delay(close,1), pre-computed)"
+    "close, open, high, low, volume, returns, funding_rate, open_interest\n"
+    "- returns = delta(close,1)/delay(close,1), pre-computed\n"
+    "- funding_rate = 8-hour perpetual funding rate from Bybit "
+    "(typically ±0.01%, forward-filled across bars)\n"
+    "- open_interest = total open interest in base asset units from Bybit "
+    "(e.g. BTC quantity, 4h granularity)"
 )
 
 

@@ -171,7 +171,7 @@ def analyze(
 
         # 4. Load factor config and create evaluator
         factor_config = load_factor_config(config.factor_config_path)
-        evaluator = FactorEvaluator(factor_config)
+        evaluator = FactorEvaluator(factor_config, analysis_config=config)
 
         # 5. Compute factors (with lazy cache support)
         from nautilus_quants.factors.cache import (
