@@ -1,0 +1,74 @@
+# Alpha101 Priority Batch — 20 high-value OHLCV factors
+# Usage: python -m nautilus_quants.alpha analyze config/alpha_batch/analyze_alpha101_p1.yaml --env batch
+
+catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+factor_config_path: "config/alpha_batch/factors_alpha101_p1.yaml"
+
+# 40-coin universe (top liquidity, full 4-year coverage)
+instrument_ids:
+    - "BTCUSDT.BINANCE"
+    - "ETHUSDT.BINANCE"
+    - "BNBUSDT.BINANCE"
+    - "SOLUSDT.BINANCE"
+    - "XRPUSDT.BINANCE"
+    - "ADAUSDT.BINANCE"
+    - "DOGEUSDT.BINANCE"
+    - "LINKUSDT.BINANCE"
+    - "DOTUSDT.BINANCE"
+    - "AVAXUSDT.BINANCE"
+    - "LTCUSDT.BINANCE"
+    - "ETCUSDT.BINANCE"
+    - "UNIUSDT.BINANCE"
+    - "ATOMUSDT.BINANCE"
+    - "NEARUSDT.BINANCE"
+    - "FILUSDT.BINANCE"
+    - "AAVEUSDT.BINANCE"
+    - "INJUSDT.BINANCE"
+    - "MKRUSDT.BINANCE"
+    - "GRTUSDT.BINANCE"
+    - "TRXUSDT.BINANCE"
+    - "MATICUSDT.BINANCE"
+    - "FTMUSDT.BINANCE"
+    - "SANDUSDT.BINANCE"
+    - "AXSUSDT.BINANCE"
+    - "CRVUSDT.BINANCE"
+    - "COMPUSDT.BINANCE"
+    - "SNXUSDT.BINANCE"
+    - "ALGOUSDT.BINANCE"
+    - "VETUSDT.BINANCE"
+    - "CHZUSDT.BINANCE"
+    - "XLMUSDT.BINANCE"
+    - "BCHUSDT.BINANCE"
+    - "DASHUSDT.BINANCE"
+    - "ZECUSDT.BINANCE"
+    - "HBARUSDT.BINANCE"
+    - "RUNEUSDT.BINANCE"
+    - "ICPUSDT.BINANCE"
+    - "EGLDUSDT.BINANCE"
+    - "THETAUSDT.BINANCE"
+
+# 4h bars: 1=4h, 3=12h, 6=1d, 12=2d, 18=3d, 42=7d
+periods: [1, 2, 3, 6]
+quantiles: 5
+max_loss: 0.35
+filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
+
+# Registry
+registry:
+  enabled: true
+  env: "test"
+
+# Charts (minimal for batch speed)
+charts:
+  - quantile_returns_bar
+  - ic_time_series
+  - monthly_ic_heatmap
+
+output_dir: "logs/alpha_batch/alpha101_p1"
+output_format:
+  - png

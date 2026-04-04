@@ -76,6 +76,8 @@ registry:
 | `status` | Change factor status (candidate/active/archived) | `status alpha101_alpha044_8h active` |
 | `register` | Register factors from YAML without analysis | `register config/cs/factors.yaml` |
 | `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
+| `promote` | Score, dedup, decorrelate & promote factors across envs | `promote --source-env test --target-env dev --dry-run` |
+| `promote` | Promote with scoring config file | `promote --config config/examples/scoring.yaml` |
 
 **Backtest CLI (`python -m nautilus_quants.backtest`):**
 

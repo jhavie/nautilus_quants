@@ -105,9 +105,14 @@ def cli() -> None:
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output")
 @click.option("--no-registry", is_flag=True, help="Skip writing to registry database")
 @click.option("--env", "env_name", default=None, help="Registry environment (test/dev/prod)")
+@click.option("--force-reanalyze", is_flag=True,
+              help="Re-analyze even if metrics already exist for the expression")
+@click.option("--workers", type=int, default=None,
+              help="Max parallel workers for alphalens (default: min(factors, 4))")
 def analyze(
     config_file: Path, verbose: bool, quiet: bool,
-    no_registry: bool, env_name: str | None,
+    no_registry: bool, env_name: str | None, force_reanalyze: bool,
+    workers: int | None,
 ) -> None:
     """Execute factor analysis from a YAML configuration file.
 
@@ -246,6 +251,54 @@ def analyze(
             )
             sys.exit(1)
 
+        # 6b. Skip factors with existing metrics (default behavior)
+        registry_enabled = config.registry_enabled and not no_registry
+        if registry_enabled and not force_reanalyze:
+            from nautilus_quants.alpha.registry.database import RegistryDatabase
+            from nautilus_quants.alpha.registry.environment import resolve_env
+            from nautilus_quants.factors.expression.normalize import (
+                expression_hash as _expr_hash,
+            )
+
+            _env = resolve_env(env_name, config.registry_env)
+            _db = RegistryDatabase.for_environment(_env, config.registry_db_dir)
+            already: set[str] = set()
+            for fname in list(factor_series.keys()):
+                fdef = factor_config.get_factor(fname)
+                if fdef is None:
+                    continue
+                try:
+                    h = _expr_hash(fdef.expression)
+                except Exception:
+                    continue
+                row = _db.fetch_one(
+                    "SELECT f.factor_id FROM factors f "
+                    "JOIN alpha_analysis_metrics m "
+                    "ON f.factor_id = m.factor_id "
+                    "WHERE f.expression_hash = ? LIMIT 1",
+                    [h],
+                )
+                if row is not None:
+                    already.add(fname)
+            _db.close()
+
+            if already:
+                factor_series = {
+                    k: v for k, v in factor_series.items()
+                    if k not in already
+                }
+                if not quiet:
+                    click.echo(
+                        f"  Skipped {len(already)} factors "
+                        f"with existing metrics"
+                    )
+            if not factor_series:
+                if not quiet:
+                    click.echo(
+                        "All factors already analyzed. Nothing to do."
+                    )
+                return
+
         if not quiet:
             click.echo(
                 f"Analyzing {len(factor_series)} factors across "
@@ -273,7 +326,7 @@ def analyze(
         al_results: dict[str, dict] = {}
 
         # Phase 1: Parallel alphalens analysis (CPU-bound, no matplotlib)
-        n_workers = min(len(factor_series), 4)
+        n_workers = workers if workers is not None else min(len(factor_series), 4)
         if not quiet:
             click.echo(f"  Running alphalens in parallel ({n_workers} workers)...")
 
@@ -512,11 +565,18 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
 
     repo, db = _open_repo(env_name, db_dir)
     try:
-        new, updated, unchanged = repo.register_factors_from_config(config)
-        click.echo(
-            f"Registered {new + updated + unchanged} factors "
-            f"({new} new, {updated} updated, {unchanged} unchanged)"
+        new, updated, unchanged, duplicate = repo.register_factors_from_config(
+            config,
         )
+        total = new + updated + unchanged + duplicate
+        msg = (
+            f"Registered {total} factors "
+            f"({new} new, {updated} updated, {unchanged} unchanged"
+        )
+        if duplicate:
+            msg += f", {duplicate} duplicate skipped"
+        msg += ")"
+        click.echo(msg)
     finally:
         db.close()
 
@@ -546,78 +606,188 @@ def list_factors(
             click.echo("(no factors found)")
             return
 
-        click.echo(
-            f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
-            f"{'source':<10} {'tags'}"
+        # Check if any factor has promote_score
+        has_scores = any(
+            f.parameters.get("promote_score") is not None for f in factors
         )
-        click.echo("-" * 80)
-        for f in factors:
-            tags_str = ", ".join(f.tags) if f.tags else "-"
-            click.echo(
-                f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
-                f"{f.source:<10} {tags_str}"
+
+        if has_scores:
+            # Sort by score descending
+            factors = sorted(
+                factors,
+                key=lambda f: f.parameters.get("promote_score", 0) or 0,
+                reverse=True,
             )
+            click.echo(
+                f"{'#':<4} {'factor_id':<30} {'score':>7} {'status':<10} "
+                f"{'source':<10} {'tags':<20} {'expression'}"
+            )
+            click.echo("-" * 140)
+            for i, f in enumerate(factors, 1):
+                score = f.parameters.get("promote_score")
+                score_str = f"{score:>7.4f}" if score is not None else f"{'-':>7}"
+                tags_str = ", ".join(f.tags) if f.tags else "-"
+                click.echo(
+                    f"{i:<4} {f.factor_id:<30} {score_str} {f.status:<10} "
+                    f"{f.source:<10} {tags_str:<20} {f.expression}"
+                )
+        else:
+            click.echo(
+                f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
+                f"{'source':<10} {'tags':<20} {'expression'}"
+            )
+            click.echo("-" * 140)
+            for f in factors:
+                tags_str = ", ".join(f.tags) if f.tags else "-"
+                click.echo(
+                    f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
+                    f"{f.source:<10} {tags_str:<20} {f.expression}"
+                )
         click.echo(f"({len(factors)} factors)")
     finally:
         db.close()
 
 
 @cli.command()
-@click.argument("factor_id")
+@click.argument("factor_id", required=False, default=None)
+@click.option("--prototype", "proto_name", default=None,
+              help="Inspect all factors sharing this prototype.")
 @_ENV_OPTION
 @_DB_DIR_OPTION
-def inspect(factor_id: str, env_name: str | None, db_dir: str) -> None:
-    """Inspect a factor's details and latest metrics."""
+def inspect(
+    factor_id: str | None, proto_name: str | None,
+    env_name: str | None, db_dir: str,
+) -> None:
+    """Inspect a factor or prototype group.
+
+    With FACTOR_ID: show factor details + metrics + backtests.
+    With --prototype: show template expression + all parameter variants.
+    """
+    if not factor_id and not proto_name:
+        click.echo("Error: provide FACTOR_ID or --prototype NAME", err=True)
+        sys.exit(1)
+
     repo, db = _open_repo(env_name, db_dir)
     try:
-        f = repo.get_factor(factor_id)
-        if f is None:
-            click.echo(f"Error: factor not found: {factor_id}", err=True)
-            sys.exit(1)
-
-        click.echo(f"Factor: {f.factor_id}")
-        click.echo(f"Expression: {f.expression}")
-        click.echo(f"Prototype: {f.prototype or '(none)'}")
-        click.echo(f"Source: {f.source or '(none)'}")
-        click.echo(f"Status: {f.status}")
-        click.echo(f"Tags: {', '.join(f.tags) if f.tags else '(none)'}")
-        click.echo(f"Parameters: {f.parameters}")
-        click.echo(f"Variables: {f.variables}")
-
-        metrics = repo.get_metrics(factor_id)
-        if metrics:
-            click.echo(f"\nAnalysis metrics ({len(metrics)} records):")
-            for m in metrics[:12]:
-                icir_str = f"{m.icir:.4f}" if m.icir is not None else "-"
-                ic_str = f"{m.ic_mean:.4f}" if m.ic_mean is not None else "-"
-                click.echo(
-                    f"  run={m.run_id} period={m.period} "
-                    f"IC={ic_str} ICIR={icir_str} timeframe={m.timeframe}"
-                )
-
-        from nautilus_quants.alpha.registry.backtest_repository import (
-            BacktestRepository,
-        )
-
-        bt_repo = BacktestRepository(db)
-        runs = bt_repo.list_backtests(factor_id=factor_id)
-        if runs:
-            click.echo(f"\nBacktests ({len(runs)} records):")
-            for r in runs:
-                def _v(v: float | None, fmt: str = ".4f") -> str:
-                    return f"{v:{fmt}}" if v is not None else "-"
-                dd = f"{r.max_drawdown:.2%}" if r.max_drawdown else "-"
-                factors = bt_repo.get_backtest_factors(r.backtest_id)
-                fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
-                click.echo(
-                    f"  {r.backtest_id}  sharpe={_v(r.sharpe_ratio)} "
-                    f"pnl%={_v(r.total_pnl_pct, '.2f')} "
-                    f"max_dd={dd} timeframe={r.timeframe} "
-                    f"instr={r.instrument_count} "
-                    f"factors=[{fids}]"
-                )
+        if proto_name:
+            _inspect_prototype(repo, proto_name)
+        else:
+            _inspect_factor(repo, db, factor_id)  # type: ignore[arg-type]
     finally:
         db.close()
+
+
+def _inspect_prototype(repo, proto_name: str) -> None:
+    """Show prototype template + parameter variants."""
+    from nautilus_quants.factors.expression.normalize import expression_template
+
+    factors = repo.list_factors(prototype=proto_name)
+    if not factors:
+        click.echo(f"No factors with prototype '{proto_name}'")
+        return
+
+    sources = {f.source for f in factors if f.source}
+    source_str = ", ".join(sorted(sources)) if sources else "(none)"
+    click.echo(f"Prototype: {proto_name}  ({len(factors)} factors, "
+               f"source: {source_str})")
+
+    # Compute template from first factor
+    try:
+        tmpl, _ = expression_template(factors[0].expression)
+        click.echo(f"Template:  {tmpl}")
+    except Exception:
+        click.echo(f"Template:  (parse error)")
+
+    click.echo("-" * 70)
+
+    # Collect parameter names from all factors
+    all_params: list[tuple[str, dict[str, float], str]] = []
+    for f in factors:
+        try:
+            _, vals = expression_template(f.expression)
+            params = {f"p{i}": v for i, v in enumerate(vals)}
+        except Exception:
+            params = {}
+        all_params.append((f.factor_id, params, f.status))
+
+    if not all_params:
+        return
+
+    # Determine which p* keys actually vary across the group
+    p_keys = sorted({k for _, p, _ in all_params for k in p_keys_of(p)})
+    # Compute column width from longest factor_id
+    max_id_len = max((len(name) for name, _, _ in all_params), default=25)
+    col_w = max(max_id_len + 2, 25)
+
+    if not p_keys:
+        for name, _, st in all_params:
+            click.echo(f"  {name:<{col_w}} {st}")
+        return
+
+    # Header
+    p_header = "".join(f"{k:>8}" for k in p_keys)
+    click.echo(f"  {'factor_id':<{col_w}}{p_header}   {'status'}")
+    for name, params, st in all_params:
+        p_vals = "".join(f"{params.get(k, ''):>8}" for k in p_keys)
+        click.echo(f"  {name:<{col_w}}{p_vals}   {st}")
+
+
+def p_keys_of(params: dict) -> list[str]:
+    """Extract sorted p0, p1, ... keys from a params dict."""
+    return sorted(
+        (k for k in params if k.startswith("p") and k[1:].isdigit()),
+        key=lambda k: int(k[1:]),
+    )
+
+
+def _inspect_factor(repo, db, factor_id: str) -> None:
+    """Show single factor details + metrics + backtests."""
+    f = repo.get_factor(factor_id)
+    if f is None:
+        click.echo(f"Error: factor not found: {factor_id}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Factor: {f.factor_id}")
+    click.echo(f"Expression: {f.expression}")
+    click.echo(f"Prototype: {f.prototype or '(none)'}")
+    click.echo(f"Source: {f.source or '(none)'}")
+    click.echo(f"Status: {f.status}")
+    click.echo(f"Tags: {', '.join(f.tags) if f.tags else '(none)'}")
+    click.echo(f"Parameters: {f.parameters}")
+    click.echo(f"Variables: {f.variables}")
+
+    metrics = repo.get_metrics(factor_id)
+    if metrics:
+        click.echo(f"\nAnalysis metrics ({len(metrics)} records):")
+        for m in metrics[:12]:
+            icir_str = f"{m.icir:.4f}" if m.icir is not None else "-"
+            ic_str = f"{m.ic_mean:.4f}" if m.ic_mean is not None else "-"
+            click.echo(
+                f"  run={m.run_id} period={m.period} "
+                f"IC={ic_str} ICIR={icir_str} timeframe={m.timeframe}"
+            )
+
+    from nautilus_quants.alpha.registry.backtest_repository import (
+        BacktestRepository,
+    )
+
+    bt_repo = BacktestRepository(db)
+    runs = bt_repo.list_backtests(factor_id=factor_id)
+    if runs:
+        click.echo(f"\nBacktests ({len(runs)} records):")
+        for r in runs:
+            def _v(v: float | None, fmt: str = ".4f") -> str:
+                return f"{v:{fmt}}" if v is not None else "-"
+            dd = f"{r.max_drawdown:.2%}" if r.max_drawdown else "-"
+            factors = bt_repo.get_backtest_factors(r.backtest_id)
+            fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
+            click.echo(
+                f"  {r.backtest_id}  sharpe={_v(r.sharpe_ratio)} "
+                f"pnl%={_v(r.total_pnl_pct, '.2f')} "
+                f"max_dd={dd} timeframe={r.timeframe} "
+                f"instr={r.instrument_count} "
+                f"factors=[{fids}]"
+            )
 
 
 @cli.command()
@@ -757,6 +927,418 @@ def export_factors(
             composite_transform=transform,
         )
         click.echo(f"Exported to {output_path}")
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option(
+    "--source-env", default="test",
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Source registry environment.",
+)
+@click.option(
+    "--target-env", default="dev",
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Target registry environment.",
+)
+@click.option(
+    "--config", "config_path",
+    default="config/examples/scoring.yaml",
+    type=click.Path(exists=True, path_type=Path),
+    help="Scoring configuration file.",
+)
+@click.option("--dry-run", is_flag=True, help="Score and rank without migrating.")
+@click.option("--skip-corr", is_flag=True, help="Skip correlation computation (fingerprint dedup only).")
+@click.option("--max-factors", default=None, type=int, help="Override max factors to promote.")
+@_DB_DIR_OPTION
+def promote(
+    source_env: str,
+    target_env: str,
+    config_path: Path,
+    dry_run: bool,
+    skip_corr: bool,
+    max_factors: int | None,
+    db_dir: str,
+) -> None:
+    """Score, deduplicate, decorrelate, and promote factors to target env.
+
+    Full pipeline:
+      1. Load metrics from source env
+      2. Apply hard filters (per-period)
+      3. Score factors (5-dimension)
+      4. Fingerprint deduplication
+      5. Spearman correlation dedup + greedy selection (unless --skip-corr)
+      6. Migrate to target env (unless --dry-run)
+
+    \b
+    Examples:
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --dry-run
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --skip-corr
+      python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --max-factors 50
+    """
+    from datetime import datetime, timezone
+
+    from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.scoring import (
+        apply_hard_filters,
+        compute_factor_correlation,
+        dedup_by_fingerprint,
+        greedy_select,
+        load_scoring_config,
+        load_scoring_data,
+        migrate_factors,
+        score_factors,
+    )
+
+    start_time = time.time()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    try:
+        # 0. Load scoring config
+        scoring_cfg = load_scoring_config(config_path)
+        if max_factors is not None:
+            # Override from CLI
+            scoring_cfg = scoring_cfg.__class__(
+                periods=scoring_cfg.periods,
+                hard_filters=scoring_cfg.hard_filters,
+                weights=scoring_cfg.weights,
+                sub_weights=scoring_cfg.sub_weights,
+                dedup=scoring_cfg.dedup,
+                promote=scoring_cfg.promote.__class__(
+                    max_factors=max_factors,
+                    target_status=scoring_cfg.promote.target_status,
+                ),
+                data=scoring_cfg.data,
+            )
+
+        click.echo("=" * 80)
+        click.echo("Nautilus Quants - Factor Promotion Pipeline")
+        click.echo("=" * 80)
+        click.echo(f"  Source: {source_env}.duckdb")
+        click.echo(f"  Target: {target_env}.duckdb")
+        click.echo(f"  Config: {config_path}")
+        click.echo(f"  Periods: {scoring_cfg.periods}")
+        click.echo(f"  Dry run: {dry_run}")
+        click.echo(f"  Skip corr: {skip_corr}")
+        click.echo(f"  Max factors: {scoring_cfg.promote.max_factors}")
+        click.echo("=" * 80)
+        click.echo()
+
+        # 1. Load data from source
+        click.echo("Phase 1: Loading scoring data...")
+        source_db = RegistryDatabase.for_environment(source_env, db_dir)
+        df = load_scoring_data(source_db, scoring_cfg.periods)
+
+        if df.empty:
+            click.echo("Error: No metrics found in source database.", err=True)
+            source_db.close()
+            sys.exit(1)
+
+        click.echo(f"  Loaded {len(df)} factors with metrics across {scoring_cfg.periods}")
+
+        # 2. Hard filters
+        click.echo()
+        click.echo("Phase 1.1: Applying hard filters...")
+        n_before = len(df)
+        df = apply_hard_filters(df, scoring_cfg.hard_filters, scoring_cfg.periods)
+        n_after = len(df)
+        click.echo(f"  {n_before} → {n_after} factors ({n_before - n_after} eliminated)")
+
+        if df.empty:
+            click.echo("Error: No factors passed hard filters.", err=True)
+            source_db.close()
+            sys.exit(1)
+
+        # Show valid period distribution
+        period_counts = df["n_valid_periods"].value_counts().sort_index()
+        for n_periods, count in period_counts.items():
+            click.echo(f"    {n_periods} valid periods: {count} factors")
+
+        # 3. Fingerprint dedup
+        click.echo()
+        click.echo("Phase 2.1: Fingerprint deduplication...")
+        n_before_dedup = len(df)
+        df = dedup_by_fingerprint(
+            df, scoring_cfg.periods,
+            threshold=scoring_cfg.dedup.fingerprint_threshold,
+        )
+        n_removed = n_before_dedup - len(df)
+        click.echo(f"  {n_before_dedup} → {len(df)} factors ({n_removed} duplicates removed)")
+
+        # 4. Scoring
+        click.echo()
+        click.echo("Phase 1.2: Computing 5-dimension scores...")
+        df = score_factors(df, scoring_cfg)
+
+        # Print top factors table
+        display_cols = ["final_score", "avg_period_score", "consistency",
+                        "turnover_friendliness", "n_valid_periods"]
+        available = [c for c in display_cols if c in df.columns]
+
+        click.echo()
+        click.echo(f"  Top {min(30, len(df))} factors by final_score:")
+        click.echo(f"  {'factor_id':<40} {'score':>7} {'avg_pp':>7} {'cons':>6} "
+                   f"{'turn':>6} {'#pd':>4}")
+        click.echo("  " + "-" * 72)
+        for i, (fid, row) in enumerate(df.head(30).iterrows()):
+            click.echo(
+                f"  {fid:<40} {row.get('final_score', 0):>7.4f} "
+                f"{row.get('avg_period_score', 0):>7.4f} "
+                f"{row.get('consistency', 0):>6.3f} "
+                f"{row.get('turnover_friendliness', 0):>6.3f} "
+                f"{int(row.get('n_valid_periods', 0)):>4}"
+            )
+
+        # 5. Correlation-based greedy selection
+        if not skip_corr:
+            click.echo()
+            click.echo("Phase 2.2: Computing factor correlations...")
+            candidate_ids = df.index.tolist()
+            try:
+                corr_matrix = compute_factor_correlation(candidate_ids, scoring_cfg)
+
+                if not corr_matrix.empty:
+                    click.echo(
+                        f"  Correlation matrix: {corr_matrix.shape[0]} × {corr_matrix.shape[1]}"
+                    )
+
+                    # Save correlation matrix CSV
+                    corr_dir = Path("logs/scoring")
+                    corr_dir.mkdir(parents=True, exist_ok=True)
+                    corr_csv = corr_dir / f"correlation_matrix_{timestamp}.csv"
+                    corr_matrix.to_csv(corr_csv)
+                    click.echo(f"  Saved: {corr_csv}")
+
+                    # Save heatmap
+                    try:
+                        import matplotlib
+                        matplotlib.use("Agg")
+                        import matplotlib.pyplot as plt
+                        import seaborn as sns
+
+                        fig, ax = plt.subplots(figsize=(20, 16))
+                        sns.heatmap(
+                            corr_matrix, vmin=-1, vmax=1, center=0,
+                            cmap="RdBu_r", ax=ax,
+                            xticklabels=True, yticklabels=True,
+                        )
+                        ax.set_title("Factor Spearman Correlation (cross-sectional avg)")
+                        plt.tight_layout()
+                        heatmap_path = corr_dir / f"correlation_heatmap_{timestamp}.png"
+                        fig.savefig(heatmap_path, dpi=100)
+                        plt.close(fig)
+                        click.echo(f"  Saved: {heatmap_path}")
+                    except Exception as e:
+                        click.echo(f"  Warning: Heatmap generation failed: {e}", err=True)
+
+                    # Greedy selection
+                    click.echo()
+                    click.echo("Phase 2.3: Greedy selection (max corr "
+                               f"≤ {scoring_cfg.dedup.max_corr})...")
+                    selected_ids = greedy_select(
+                        df, corr_matrix,
+                        max_corr=scoring_cfg.dedup.max_corr,
+                        max_factors=scoring_cfg.promote.max_factors,
+                    )
+                    click.echo(f"  Selected {len(selected_ids)} factors")
+                else:
+                    click.echo("  Warning: Empty correlation matrix, skipping greedy selection")
+                    selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+            except Exception as e:
+                click.echo(f"  Warning: Correlation computation failed: {e}", err=True)
+                click.echo("  Falling back to score-only selection")
+                selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+        else:
+            click.echo()
+            click.echo("Phase 2.2: Skipping correlation (--skip-corr)")
+            selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+
+        # Save scores CSV
+        scores_dir = Path("logs/scoring")
+        scores_dir.mkdir(parents=True, exist_ok=True)
+        scores_csv = scores_dir / f"factor_scores_{timestamp}.csv"
+        score_cols = [
+            "final_score", "avg_period_score",
+            "pred_score", "stab_score", "mono_score",
+            "consistency", "turnover_friendliness",
+            "avg_icir", "avg_t_stat_nw", "avg_win_rate",
+            "avg_ic_linearity", "avg_monotonicity",
+            "n_valid_periods",
+        ]
+        save_cols = [c for c in score_cols if c in df.columns]
+        df[save_cols].to_csv(scores_csv)
+        click.echo(f"\n  Scores saved: {scores_csv}")
+
+        # Summary
+        click.echo()
+        click.echo("=" * 80)
+        click.echo("PROMOTION SUMMARY")
+        click.echo("=" * 80)
+        click.echo(f"  Candidates after hard filter: {n_after}")
+        click.echo(f"  After fingerprint dedup: {n_after - n_removed}")
+        click.echo(f"  Final selected: {len(selected_ids)}")
+        click.echo()
+
+        # Print selected factors
+        click.echo(f"  Selected factors ({len(selected_ids)}):")
+        for i, fid in enumerate(selected_ids, 1):
+            score = df.loc[fid, "final_score"] if fid in df.index else 0
+            click.echo(f"    {i:3d}. {fid:<40} score={score:.4f}")
+
+        # 6. Migrate (unless dry run)
+        if dry_run:
+            click.echo()
+            click.echo("  [DRY RUN] No migration performed.")
+        else:
+            click.echo()
+            click.echo(f"Phase 3: Migrating {len(selected_ids)} factors "
+                       f"to {target_env}.duckdb...")
+            target_db = RegistryDatabase.for_environment(target_env, db_dir)
+            try:
+                counts = migrate_factors(
+                    source_db, target_db, selected_ids,
+                    target_status=scoring_cfg.promote.target_status,
+                    scores=df,
+                )
+                click.echo(f"  Migrated: {counts['factors']} factors, "
+                           f"{counts['metrics']} metrics, "
+                           f"{counts['configs']} config snapshots")
+            finally:
+                target_db.close()
+
+        source_db.close()
+        duration = time.time() - start_time
+        click.echo()
+        click.echo(f"  Duration: {duration:.2f}s")
+        click.echo("=" * 80)
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def audit(env_name: str | None, db_dir: str) -> None:
+    """Audit the factor registry for duplicates and prototype issues."""
+    from nautilus_quants.alpha.registry.audit import (
+        find_expression_duplicates,
+        suggest_prototype_groups,
+    )
+
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        factors = repo.list_factors()
+        click.echo(f"Total factors: {len(factors)}")
+        click.echo()
+
+        # Expression duplicates
+        dup_groups = find_expression_duplicates(repo)
+        if dup_groups:
+            click.echo(f"Expression duplicates ({len(dup_groups)} groups):")
+            click.echo("-" * 60)
+            for group in dup_groups:
+                ids = [f.factor_id for f in group]
+                click.echo(f"  {' ≡ '.join(ids)}")
+                click.echo(f"    expr: {group[0].expression[:80]}")
+            click.echo()
+        else:
+            click.echo("No expression duplicates found.")
+            click.echo()
+
+        # Prototype group suggestions
+        groups = suggest_prototype_groups(repo)
+        if groups:
+            click.echo(
+                f"Template groups ({len(groups)} groups with ≥2 members):"
+            )
+            click.echo("-" * 60)
+            for tmpl, members in sorted(
+                groups.items(), key=lambda x: -len(x[1]),
+            ):
+                fids = [m[0] for m in members]
+                click.echo(f"  [{len(members)}] {tmpl[:70]}")
+                for fid, params in members[:5]:
+                    click.echo(f"       {fid}  {params}")
+                if len(members) > 5:
+                    click.echo(f"       ... and {len(members) - 5} more")
+            click.echo()
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option("--execute", is_flag=True, default=False, help="Actually apply.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def backfill(execute: bool, env_name: str | None, db_dir: str) -> None:
+    """Backfill expression_hash, prototype, and parameters for all factors.
+
+    For each factor:
+    1. Compute expression_hash (for dedup).
+    2. Fix prototype from builtin libraries (ta_factors.py).
+    3. Extract numbers via expression_template → {p0, p1, ...} parameters.
+    """
+    from nautilus_quants.alpha.registry.audit import backfill_factors
+
+    dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        counts = backfill_factors(repo, dry_run=dry_run)
+        mode = "DRY RUN" if dry_run else "EXECUTED"
+        click.echo(f"[{mode}] Backfill results:")
+        click.echo(f"  expression_hash updated: {counts['hash']}")
+        click.echo(f"  prototype fixed:         {counts['prototype']}")
+        click.echo(f"  parameters extracted:    {counts['parameters']}")
+        if dry_run:
+            click.echo()
+            click.echo("Use --execute to apply changes.")
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option(
+    "--keep-source", default=None,
+    help="Preferred source to keep (e.g. alpha101).",
+)
+@click.option("--dry-run", is_flag=True, default=True, help="Preview only.")
+@click.option("--execute", is_flag=True, default=False, help="Actually delete.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def dedup(
+    keep_source: str | None,
+    dry_run: bool,
+    execute: bool,
+    env_name: str | None,
+    db_dir: str,
+) -> None:
+    """Remove duplicate factors by expression hash."""
+    from nautilus_quants.alpha.registry.audit import dedup_factors
+
+    actual_dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        removed = dedup_factors(
+            repo, keep_source=keep_source, dry_run=actual_dry_run,
+        )
+        if not removed:
+            click.echo("No duplicates found.")
+            return
+
+        mode = "DRY RUN" if actual_dry_run else "EXECUTED"
+        click.echo(f"[{mode}] {len(removed)} duplicate(s):")
+        for rm_id, keep_id in removed:
+            click.echo(f"  DELETE {rm_id}  (keep {keep_id})")
+
+        if actual_dry_run:
+            click.echo()
+            click.echo("Use --execute to actually delete.")
     finally:
         db.close()
 

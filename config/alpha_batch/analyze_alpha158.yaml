@@ -1,0 +1,70 @@
+# Alpha101 Full Batch — 157 Alpha158 factors
+# Usage: python -m nautilus_quants.alpha analyze config/alpha_batch/analyze_alpha101.yaml --env dev
+
+catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+factor_config_path: "config/alpha_batch/factors_alpha158.yaml"
+
+# 40-coin universe
+instrument_ids:
+    - "BTCUSDT.BINANCE"
+    - "ETHUSDT.BINANCE"
+    - "BNBUSDT.BINANCE"
+    - "SOLUSDT.BINANCE"
+    - "XRPUSDT.BINANCE"
+    - "ADAUSDT.BINANCE"
+    - "DOGEUSDT.BINANCE"
+    - "LINKUSDT.BINANCE"
+    - "DOTUSDT.BINANCE"
+    - "AVAXUSDT.BINANCE"
+    - "LTCUSDT.BINANCE"
+    - "ETCUSDT.BINANCE"
+    - "UNIUSDT.BINANCE"
+    - "ATOMUSDT.BINANCE"
+    - "NEARUSDT.BINANCE"
+    - "FILUSDT.BINANCE"
+    - "AAVEUSDT.BINANCE"
+    - "INJUSDT.BINANCE"
+    - "MKRUSDT.BINANCE"
+    - "GRTUSDT.BINANCE"
+    - "TRXUSDT.BINANCE"
+    - "MATICUSDT.BINANCE"
+    - "FTMUSDT.BINANCE"
+    - "SANDUSDT.BINANCE"
+    - "AXSUSDT.BINANCE"
+    - "CRVUSDT.BINANCE"
+    - "COMPUSDT.BINANCE"
+    - "SNXUSDT.BINANCE"
+    - "ALGOUSDT.BINANCE"
+    - "VETUSDT.BINANCE"
+    - "CHZUSDT.BINANCE"
+    - "XLMUSDT.BINANCE"
+    - "BCHUSDT.BINANCE"
+    - "DASHUSDT.BINANCE"
+    - "ZECUSDT.BINANCE"
+    - "HBARUSDT.BINANCE"
+    - "RUNEUSDT.BINANCE"
+    - "ICPUSDT.BINANCE"
+    - "EGLDUSDT.BINANCE"
+    - "THETAUSDT.BINANCE"
+
+periods: [1, 2, 3, 6]
+quantiles: 5
+max_loss: 0.50
+filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
+
+registry:
+  enabled: true
+  env: "test"
+
+charts:
+  - quantile_returns_bar
+  - ic_time_series
+
+output_dir: "logs/alpha_batch/alpha158"
+output_format:
+  - png

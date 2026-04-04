@@ -622,6 +622,215 @@ class TsSkew(TimeSeriesOperator):
 
 
 # ---------------------------------------------------------------------------
+# Regression & Quantile operators — Alpha158 coverage
+# ---------------------------------------------------------------------------
+
+
+@register_operator
+class TsSlope(TimeSeriesOperator):
+    """Rolling linear regression slope.
+
+    Equivalent to qlib Slope($x, d): OLS slope of x regressed on [0..d-1].
+    """
+
+    name = "ts_slope"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < window:
+            return float("nan")
+        y = data[-window:]
+        if np.any(np.isnan(y)):
+            return float("nan")
+        x = np.arange(window, dtype=float)
+        x_mean = x.mean()
+        y_mean = y.mean()
+        ss_xy = np.sum((x - x_mean) * (y - y_mean))
+        ss_xx = np.sum((x - x_mean) ** 2)
+        if ss_xx == 0:
+            return float("nan")
+        return float(ss_xy / ss_xx)
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        w = int(window)
+        values = data.values
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        x = np.arange(w, dtype=float)
+        x_mean = x.mean()
+        ss_xx = np.sum((x - x_mean) ** 2)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]
+            has_nan = np.any(np.isnan(win), axis=0)
+            y_mean = np.nanmean(win, axis=0)
+            ss_xy = np.sum((x[:, None] - x_mean) * (win - y_mean), axis=0)
+            r = ss_xy / ss_xx
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
+
+
+@register_operator
+class TsRsquare(TimeSeriesOperator):
+    """Rolling R-squared of linear regression.
+
+    Equivalent to qlib Rsquare($x, d): coefficient of determination.
+    """
+
+    name = "ts_rsquare"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < window:
+            return float("nan")
+        y = data[-window:]
+        if np.any(np.isnan(y)):
+            return float("nan")
+        x = np.arange(window, dtype=float)
+        x_mean, y_mean = x.mean(), y.mean()
+        ss_xy = np.sum((x - x_mean) * (y - y_mean))
+        ss_xx = np.sum((x - x_mean) ** 2)
+        ss_yy = np.sum((y - y_mean) ** 2)
+        if ss_xx == 0 or ss_yy == 0:
+            return float("nan")
+        return float((ss_xy ** 2) / (ss_xx * ss_yy))
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        w = int(window)
+        values = data.values
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        x = np.arange(w, dtype=float)
+        x_mean = x.mean()
+        ss_xx = np.sum((x - x_mean) ** 2)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]
+            has_nan = np.any(np.isnan(win), axis=0)
+            y_mean = np.nanmean(win, axis=0)
+            x_dev = (x[:, None] - x_mean)
+            y_dev = win - y_mean
+            ss_xy = np.sum(x_dev * y_dev, axis=0)
+            ss_yy = np.sum(y_dev ** 2, axis=0)
+            denom = ss_xx * ss_yy
+            r = np.where(denom > 0, (ss_xy ** 2) / denom, np.nan)
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
+
+
+@register_operator
+class TsResidual(TimeSeriesOperator):
+    """Rolling linear regression residual of the last value.
+
+    Equivalent to qlib Resi($x, d): y[-1] - y_hat[-1].
+    """
+
+    name = "ts_residual"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < window:
+            return float("nan")
+        y = data[-window:]
+        if np.any(np.isnan(y)):
+            return float("nan")
+        x = np.arange(window, dtype=float)
+        x_mean, y_mean = x.mean(), y.mean()
+        ss_xy = np.sum((x - x_mean) * (y - y_mean))
+        ss_xx = np.sum((x - x_mean) ** 2)
+        if ss_xx == 0:
+            return float("nan")
+        slope = ss_xy / ss_xx
+        intercept = y_mean - slope * x_mean
+        y_hat = intercept + slope * (window - 1)
+        return float(y[-1] - y_hat)
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        w = int(window)
+        values = data.values
+        T, N = values.shape
+        result = np.full((T, N), np.nan)
+
+        x = np.arange(w, dtype=float)
+        x_mean = x.mean()
+        ss_xx = np.sum((x - x_mean) ** 2)
+
+        for t in range(w - 1, T):
+            win = values[t - w + 1:t + 1]
+            has_nan = np.any(np.isnan(win), axis=0)
+            y_mean = np.nanmean(win, axis=0)
+            ss_xy = np.sum((x[:, None] - x_mean) * (win - y_mean), axis=0)
+            slope = ss_xy / ss_xx
+            intercept = y_mean - slope * x_mean
+            y_hat = intercept + slope * (w - 1)
+            r = win[-1] - y_hat
+            r[has_nan] = np.nan
+            result[t] = r
+
+        return pd.DataFrame(result, index=data.index, columns=data.columns)
+
+
+@register_operator
+class TsPercentile(TimeSeriesOperator):
+    """Rolling percentile/quantile.
+
+    ts_percentile(x, d, q) — q-th quantile over rolling window d.
+    Equivalent to qlib Quantile($x, d, q).
+    """
+
+    name = "ts_percentile"
+    min_args = 3
+    max_args = 3
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        q = float(kwargs.get("extra_0", 0.5))
+        if len(data) < window:
+            return float("nan")
+        arr = data[-window:]
+        if np.any(np.isnan(arr)):
+            return float("nan")
+        return float(np.percentile(arr, q * 100))
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        q = float(kwargs.get("extra_0", 0.5))
+        return data.rolling(int(window)).quantile(q)
+
+
+@register_operator
+class Ema(TimeSeriesOperator):
+    """Exponential moving average.
+
+    ema(x, span) — EWM with span parameter.
+    """
+
+    name = "ema"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, data: np.ndarray, window: int, **kwargs: Any) -> float | np.ndarray:
+        if len(data) < 1:
+            return float("nan")
+        series = pd.Series(data)
+        result = series.ewm(span=int(window), adjust=False).mean()
+        return float(result.iloc[-1])
+
+    def compute_vectorized(self, data: pd.Series, window: int, **kwargs: Any) -> pd.Series:
+        return data.ewm(span=int(window), adjust=False).mean()
+
+    def compute_panel(self, data: pd.DataFrame, window: int, **kwargs: Any) -> pd.DataFrame:
+        return data.ewm(span=int(window), adjust=False).mean()
+
+
+# ---------------------------------------------------------------------------
 # WorldQuant BRAIN operators (wq_ prefix) — BRAIN platform semantics
 # ---------------------------------------------------------------------------
 
@@ -1011,6 +1220,31 @@ def ts_skew(data: np.ndarray, window: int) -> float:
     return TsSkew().compute(data, int(window))  # type: ignore
 
 
+def ts_slope(data: np.ndarray, window: int) -> float:
+    """Wrapper for TsSlope operator."""
+    return TsSlope().compute(data, int(window))  # type: ignore
+
+
+def ts_rsquare(data: np.ndarray, window: int) -> float:
+    """Wrapper for TsRsquare operator."""
+    return TsRsquare().compute(data, int(window))  # type: ignore
+
+
+def ts_residual(data: np.ndarray, window: int) -> float:
+    """Wrapper for TsResidual operator."""
+    return TsResidual().compute(data, int(window))  # type: ignore
+
+
+def ts_percentile(data: np.ndarray, window: int, quantile: float = 0.5) -> float:
+    """Wrapper for TsPercentile operator."""
+    return TsPercentile().compute(data, int(window), extra_0=quantile)  # type: ignore
+
+
+def ema(data: np.ndarray, window: int) -> float:
+    """Wrapper for Ema operator."""
+    return Ema().compute(data, int(window))  # type: ignore
+
+
 def wq_ts_rank(data: np.ndarray, window: int) -> float:
     """Wrapper for WqTsRank operator (BRAIN semantics)."""
     return WqTsRank().compute(data, int(window))  # type: ignore
@@ -1056,6 +1290,12 @@ TIME_SERIES_OPERATORS = {
     "ts_arg_max": ts_argmax,
     "ts_arg_min": ts_argmin,
     "skewness": ts_skew,
+    # Regression & quantile operators (Alpha158)
+    "ts_slope": ts_slope,
+    "ts_rsquare": ts_rsquare,
+    "ts_residual": ts_residual,
+    "ts_percentile": ts_percentile,
+    "ema": ema,
     # WorldQuant BRAIN operators (wq_ prefix)
     "wq_ts_rank": wq_ts_rank,
     "wq_ts_argmax": wq_ts_argmax,
@@ -1092,6 +1332,12 @@ TS_OPERATOR_INSTANCES: dict[str, TimeSeriesOperator] = {
     "ts_arg_max": TsArgmax(),
     "ts_arg_min": TsArgmin(),
     "skewness": TsSkew(),
+    # Regression & quantile operators (Alpha158)
+    "ts_slope": TsSlope(),
+    "ts_rsquare": TsRsquare(),
+    "ts_residual": TsResidual(),
+    "ts_percentile": TsPercentile(),
+    "ema": Ema(),
     # WorldQuant BRAIN operators (wq_ prefix)
     "wq_ts_rank": WqTsRank(),
     "wq_ts_argmax": WqTsArgmax(),
