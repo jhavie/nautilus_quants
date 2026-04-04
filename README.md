@@ -80,6 +80,7 @@ registry:
 | Command | Description | Example |
 |---------|-------------|---------|
 | `analyze` | Run factor analysis + auto-persist to DB | `analyze config/cs/alpha_101.yaml` |
+| `mine` | LLM-driven alpha factor mining via Claude CLI | `mine config/cs/alpha_mining.yaml --rounds 3` |
 | `metrics` | Show all metrics for a factor (IC, ICIR, t(NW), skew, kurtosis, AR1...) | `metrics alpha101_alpha044_8h` |
 | `list` | List registered factors | `list --prototype alpha044 --source alpha101` |
 | `inspect` | Factor details + analysis metrics + backtests | `inspect alpha101_alpha044_8h` |
@@ -87,9 +88,11 @@ registry:
 | `status` | Change factor status (candidate/active/archived) | `status alpha101_alpha044_8h active` |
 | `register` | Register factors from YAML without analysis | `register config/cs/factors.yaml` |
 | `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
-| `promote` | Score, dedup, decorrelate & promote factors across envs | `promote --source-env test --target-env dev --dry-run` |
-| `promote` | Promote with scoring config file | `promote --config config/examples/scoring.yaml` |
-| `mine` | LLM-driven alpha factor mining via Claude Code CLI | `mine config/cs/alpha_101.yaml --rounds 5` |
+| `promote` | Score, dedup, decorrelate & promote factors across envs | `promote --config config/examples/scoring.yaml` |
+| `mine` | LLM-driven alpha factor mining via Claude Code CLI | `mine config/cs/alpha_mining.yaml --rounds 3` |
+| `audit` | Audit registry for expression duplicates & prototype issues | `audit --env test` |
+| `backfill` | Backfill expression_hash, prototype, parameters | `backfill --execute --env test` |
+| `dedup` | Remove duplicate factors by expression hash | `dedup --execute --env test` |
 
 **Backtest CLI (`python -m nautilus_quants.backtest`):**
 

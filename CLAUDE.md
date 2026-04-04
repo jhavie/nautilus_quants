@@ -85,6 +85,24 @@ gh run watch <id>
 
 - **core（部署需要）**：`live/`, `strategies/`, `actors/`, `execution/`, `factors/`, `utils/`, `common/`, `controllers/`
 - **可选（部署不需要）**：`data/`, `backtest/`, `alpha/`
+
+### Alpha CLI (`python -m nautilus_quants.alpha`)
+
+| 命令 | 功能 | 示例 |
+|------|------|------|
+| `analyze` | 因子分析 + 自动入库 | `analyze config/cs/alpha_101.yaml` |
+| `mine` | LLM 驱动因子挖掘（Claude CLI） | `mine config/cs/alpha_mining.yaml --rounds 3` |
+| `metrics` | 查看因子指标（IC, ICIR, t(NW)...） | `metrics alpha101_alpha044_8h` |
+| `list` | 列出已注册因子 | `list --prototype alpha044 --source alpha101` |
+| `inspect` | 因子/prototype 详情 + 指标 + 回测 | `inspect alpha101_alpha044_8h` |
+| `backtests` | 列出回测记录 | `backtests --factor-id alpha101_alpha044_8h` |
+| `status` | 修改因子状态 | `status alpha101_alpha044_8h active` |
+| `register` | 从 YAML 注册因子（不跑分析） | `register config/cs/factors.yaml` |
+| `export-factors` | 导出 active 因子到 YAML | `export-factors -o output.yaml --method icir_weight` |
+| `promote` | 跨环境晋升（评分+去重+去相关） | `promote --config config/examples/scoring.yaml` |
+| `audit` | 审计重复和 prototype 问题 | `audit --env test` |
+| `backfill` | 回填 hash/prototype/参数 | `backfill --execute --env test` |
+| `dedup` | 删除重复因子 | `dedup --execute --env test` |
 - 共享工具在 `utils/`（cache_keys, protocols, equity, registry, bar_spec）
 - live 核心代码零 backtest 依赖
 
