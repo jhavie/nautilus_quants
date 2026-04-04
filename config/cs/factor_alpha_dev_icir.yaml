@@ -1,0 +1,78 @@
+# Factor Alpha Dev — IC-based weight (|avg ICIR|)
+# Generated: 2026-04-03T08:22:50
+# Factors: 8, method: icir, transform: normalize
+# All expressions sign-corrected to positive IC direction
+
+metadata:
+  name: alpha_dev_icir
+  source: dev_registry
+  version: '1.0'
+  description: Dev registry 8-factor composite — IC-based weight (|avg ICIR|) (max
+    |corr| <= 0.3)
+variables:
+  returns: delta(close, 1) / delay(close, 1)
+factors:
+  alpha158_MIN60:
+    expression: ts_min(low, 60) / close
+    description: Rolling min of low / current close (window=60)
+    prototype: MIN60
+    tags:
+    - volatility
+  alpha158_CORD10:
+    expression: -1 * (correlation(close / delay(close, 1), log(volume / delay(volume,
+      1) + 1), 10))
+    description: Correlation between close return and log(volume return+1) (window=10)
+    prototype: CORD10
+    tags:
+    - correlation
+  alpha158_KLOW:
+    expression: -1 * ((min(open, close) - low) / open)
+    description: 'Kbar lower shadow: (lesser(open, close) - low) / open'
+    prototype: KLOW
+    tags:
+    - kbar
+  alpha158_CORR60:
+    expression: -1 * (correlation(close, log(volume + 1), 60))
+    description: Correlation between close and log(volume+1) (window=60)
+    prototype: CORR60
+    tags:
+    - correlation
+  alpha158_KUP:
+    expression: -1 * ((high - max(open, close)) / open)
+    description: 'Kbar upper shadow: (high - greater(open, close)) / open'
+    prototype: KUP
+    tags:
+    - kbar
+  alpha158_MA5:
+    expression: ts_mean(close, 5) / close
+    description: Moving average of close / current close (window=5)
+    prototype: MA5
+    tags:
+    - momentum
+  alpha191_alpha191_185:
+    expression: rank(-1 * power(1 - open / close, 2))
+    description: 'Alpha191#185: Ranked squared intraday return'
+    prototype: alpha191_185
+    tags:
+    - momentum
+  alpha191_alpha191_062:
+    expression: -1 * correlation(high, rank(volume), 5)
+    description: 'Alpha191#62: High-volume rank correlation (negated)'
+    prototype: alpha191_062
+    tags:
+    - volume
+composite:
+  name: composite
+  transform: normalize
+  weights:
+    alpha158_MIN60: 0.1933
+    alpha158_CORD10: 0.118
+    alpha158_KLOW: 0.1275
+    alpha158_CORR60: 0.1245
+    alpha158_KUP: 0.096
+    alpha158_MA5: 0.1415
+    alpha191_alpha191_185: 0.0952
+    alpha191_alpha191_062: 0.1039
+performance:
+  enable_timing: true
+  warning_threshold_ms: 5.0
