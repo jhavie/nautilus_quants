@@ -683,23 +683,39 @@ def compute_factor_correlation(
                     (fid, key, record.expression),
                 )
 
-            loaded_count = 0
+            # Merge groups with same source into larger batches to
+            # avoid redundant bars→panel conversion per group.
+            merged: dict[str, tuple[dict[str, str], dict[str, Any], list[tuple[str, str, str]]]] = {}
             for (source, vars_tup, params_tup), group_records in groups.items():
-                # Map: YAML key → original factor_id
-                key_to_fid = {key: orig_fid for orig_fid, key, _ in group_records}
-                group_config = FactorConfig(
+                if source not in merged:
+                    merged[source] = (dict(vars_tup), dict(params_tup), list(group_records))
+                else:
+                    existing_vars, existing_params, existing_records = merged[source]
+                    # Merge variables (union; later values win on conflict)
+                    existing_vars.update(dict(vars_tup))
+                    existing_params.update(dict(params_tup))
+                    existing_records.extend(group_records)
+
+            loaded_count = 0
+            for source, (variables, parameters, all_records) in merged.items():
+                key_to_fid = {key: orig_fid for orig_fid, key, _ in all_records}
+                batch_config = FactorConfig(
                     name=f"registry_{source}" if source else "registry",
                     source=source,
-                    variables=dict(vars_tup),
-                    parameters=dict(params_tup),
+                    variables=variables,
+                    parameters=parameters,
                     factors=[
                         FactorDefinition(name=key, expression=expr)
-                        for _, key, expr in group_records
+                        for _, key, expr in all_records
                     ],
                 )
                 try:
-                    evaluator = FactorEvaluator(group_config)
-                    factor_series, _ = evaluator.evaluate(bars_by_instrument)
+                    logger.info(
+                        "Registry: evaluating %d factors for source=%s",
+                        len(all_records), source,
+                    )
+                    eval_instance = FactorEvaluator(batch_config)
+                    factor_series, _ = eval_instance.evaluate(bars_by_instrument)
                     for fname, series in factor_series.items():
                         orig_fid = key_to_fid.get(fname)
                         if orig_fid is not None and orig_fid in factor_ids:
