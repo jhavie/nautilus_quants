@@ -27,6 +27,10 @@ from nautilus_quants.data.download.binance import (
     check_disk_space,
     estimate_download_size,
 )
+from nautilus_quants.data.download.bybit_futures_data import (
+    BybitFundingRateDownloader,
+    BybitOpenInterestDownloader,
+)
 from nautilus_quants.data.process.processors import ProcessConfig, process_data
 from nautilus_quants.data.reporting import ReportWriter, create_log_dir, generate_run_id
 from nautilus_quants.data.transform.parquet import transform_to_parquet
@@ -81,6 +85,17 @@ def cli(ctx: click.Context, config_path: str, verbose: bool, dry_run: bool) -> N
 )
 @click.option("--resume/--no-resume", default=True, help="Resume from checkpoint")
 @click.option("--force", is_flag=True, help="Re-download even if data exists")
+@click.option(
+    "--funding-rate/--no-funding-rate",
+    default=None,
+    help="Download funding rate data",
+)
+@click.option(
+    "--open-interest/--no-open-interest",
+    default=None,
+    help="Download open interest data",
+)
+@click.option("--oi-period", default=None, help="OI period (5m/15m/30m/1h/2h/4h/6h/12h/1d)")
 @click.pass_context
 def download(
     ctx: click.Context,
@@ -91,8 +106,11 @@ def download(
     market_type: Optional[str],
     resume: bool,
     force: bool,
+    funding_rate: Optional[bool],
+    open_interest: Optional[bool],
+    oi_period: Optional[str],
 ) -> None:
-    """Download historical K-line data from Binance."""
+    """Download historical K-line, funding rate, and open interest data from Binance."""
     try:
         config = _load_config_with_overrides(
             ctx,
@@ -101,6 +119,9 @@ def download(
             start_date=start_date,
             end_date=end_date,
             market_type=market_type,
+            funding_rate=funding_rate,
+            open_interest=open_interest,
+            oi_period=oi_period,
         )
     except ConfigurationError as e:
         click.echo(f"Configuration error: {e}", err=True)
@@ -126,6 +147,11 @@ def download(
         )
         click.echo(f"  Market type: {config.download.market_type}")
         click.echo(f"  Estimated size: ~{total_estimated_bytes / (1024 * 1024):.1f} MB")
+        if config.download.funding_rate:
+            click.echo("  Funding rate: enabled")
+        if config.download.open_interest:
+            oi_p = config.download.oi_period or "4h"
+            click.echo(f"  Open interest: enabled (period={oi_p})")
 
         # Check disk space even in dry run
         output_dir = Path(config.paths.raw_data) / "binance"
@@ -176,13 +202,15 @@ async def _run_download(
     output_dir = Path(config.paths.raw_data) / "binance"
     checkpoint_dir = output_dir / ".checkpoints"
 
+    results = []
+
+    # K-line download
     downloader = BinanceDownloader(
         output_dir=output_dir,
         checkpoint_dir=checkpoint_dir,
         batch_size=config.download.checkpoint.batch_size,
     )
 
-    results = []
     for symbol in config.download.symbols:
         for timeframe in config.download.timeframes:
             click.echo(f"Downloading {symbol} {timeframe}...")
@@ -194,6 +222,64 @@ async def _run_download(
                 end_date=config.download.end_date,
                 market_type=config.download.market_type,
                 resume=resume,
+            )
+
+            if result.success:
+                click.echo(f"  ✓ {result.rows_downloaded} rows downloaded")
+                if result.resumed_from_checkpoint:
+                    click.echo("    (resumed from checkpoint)")
+            else:
+                click.echo(f"  ✗ Failed: {result.errors}", err=True)
+
+            results.append(result)
+
+    # Funding rate download (Bybit, sync)
+    if config.download.funding_rate:
+        bybit_output_dir = Path(config.paths.raw_data) / "bybit"
+        bybit_checkpoint_dir = bybit_output_dir / ".checkpoints"
+        fr_downloader = BybitFundingRateDownloader(
+            output_dir=bybit_output_dir,
+            checkpoint_dir=bybit_checkpoint_dir,
+            batch_size=config.download.checkpoint.batch_size,
+        )
+        for symbol in config.download.symbols:
+            click.echo(f"Downloading {symbol} funding_rate (bybit)...")
+
+            result = await asyncio.to_thread(
+                fr_downloader.download,
+                symbol=symbol,
+                start_date=config.download.start_date,
+                end_date=config.download.end_date,
+            )
+
+            if result.success:
+                click.echo(f"  ✓ {result.rows_downloaded} rows downloaded")
+                if result.resumed_from_checkpoint:
+                    click.echo("    (resumed from checkpoint)")
+            else:
+                click.echo(f"  ✗ Failed: {result.errors}", err=True)
+
+            results.append(result)
+
+    # Open interest download (Bybit, sync)
+    if config.download.open_interest:
+        oi_period = config.download.oi_period or "4h"
+        bybit_output_dir = Path(config.paths.raw_data) / "bybit"
+        bybit_checkpoint_dir = bybit_output_dir / ".checkpoints"
+        oi_downloader = BybitOpenInterestDownloader(
+            output_dir=bybit_output_dir,
+            checkpoint_dir=bybit_checkpoint_dir,
+            batch_size=config.download.checkpoint.batch_size,
+        )
+        for symbol in config.download.symbols:
+            click.echo(f"Downloading {symbol} oi_{oi_period} (bybit)...")
+
+            result = await asyncio.to_thread(
+                oi_downloader.download,
+                symbol=symbol,
+                period=oi_period,
+                start_date=config.download.start_date,
+                end_date=config.download.end_date,
             )
 
             if result.success:
@@ -428,6 +514,11 @@ def transform(
         click.echo("DRY RUN: Would transform data with config:")
         click.echo(f"  Symbols: {config.download.symbols}")
         click.echo(f"  Timeframes: {config.download.timeframes}")
+        if config.download.funding_rate:
+            click.echo("  Funding rate: enabled")
+        if config.download.open_interest:
+            oi_p = config.download.oi_period or "4h"
+            click.echo(f"  Open interest: enabled (period={oi_p})")
         return
 
     proc_dir = (
@@ -438,6 +529,7 @@ def transform(
     results = []
     has_errors = False
 
+    # K-line transform
     for sym in config.download.symbols:
         for tf in config.download.timeframes:
             # Find processed data files
@@ -481,6 +573,48 @@ def transform(
                 except Exception as e:
                     click.echo(f"  ✗ Failed: {e}", err=True)
                     has_errors = True
+
+    # Funding rate transform (Bybit CSV → NT FundingRateUpdate → catalog)
+    if config.download.funding_rate:
+        from nautilus_quants.data.transform.funding_rate import (
+            transform_funding_rates,
+        )
+
+        bybit_raw_dir = Path(config.paths.raw_data) / "bybit"
+        click.echo("Transforming funding rates...")
+        fr_results = transform_funding_rates(
+            raw_dir=bybit_raw_dir,
+            catalog_path=cat_path,
+            symbols=config.download.symbols,
+        )
+        for r in fr_results:
+            if r["success"]:
+                click.echo(f"  ✓ {r['symbol']}: {r['count']} FundingRateUpdate records")
+            else:
+                click.echo(f"  ✗ {r['symbol']}: {r.get('error', 'unknown')}", err=True)
+                has_errors = True
+
+    # Open interest transform (Bybit CSV → standalone Parquet)
+    if config.download.open_interest:
+        from nautilus_quants.data.transform.open_interest import (
+            transform_open_interest,
+        )
+
+        bybit_raw_dir = Path(config.paths.raw_data) / "bybit"
+        oi_period = config.download.oi_period or "4h"
+        click.echo(f"Transforming open interest ({oi_period})...")
+        oi_results = transform_open_interest(
+            raw_dir=bybit_raw_dir,
+            catalog_path=cat_path,
+            symbols=config.download.symbols,
+            timeframe=oi_period,
+        )
+        for r in oi_results:
+            if r["success"]:
+                click.echo(f"  ✓ {r['symbol']}: {r['count']} OI records → parquet")
+            else:
+                click.echo(f"  ✗ {r['symbol']}: {r.get('error', 'unknown')}", err=True)
+                has_errors = True
 
     if has_errors:
         ctx.exit(EXIT_TRANSFORM_ERROR)
@@ -1253,6 +1387,9 @@ def _load_config_with_overrides(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     market_type: Optional[str] = None,
+    funding_rate: Optional[bool] = None,
+    open_interest: Optional[bool] = None,
+    oi_period: Optional[str] = None,
 ) -> PipelineConfig:
     """Load configuration with CLI overrides applied."""
     overrides = {}
@@ -1266,6 +1403,12 @@ def _load_config_with_overrides(
         overrides["download.end_date"] = end_date
     if market_type:
         overrides["download.market_type"] = market_type
+    if funding_rate is not None:
+        overrides["download.funding_rate"] = funding_rate
+    if open_interest is not None:
+        overrides["download.open_interest"] = open_interest
+    if oi_period:
+        overrides["download.oi_period"] = oi_period
 
     return load_config(ctx.obj["config_path"], overrides if overrides else None)
 

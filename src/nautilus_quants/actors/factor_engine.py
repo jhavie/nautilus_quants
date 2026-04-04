@@ -157,7 +157,7 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     oi_data_path : str, default ""
         Path to open interest Parquet directory. If set, OI data is
         loaded at startup and injected into bar_data as ``open_interest``
-        and ``open_interest_value`` fields on each bar.
+        field on each bar.
     """
 
     factor_config_path: str
@@ -331,7 +331,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             except Exception as e:
                 self.log.warning(f"Failed to load OI data: {e}")
                 self._oi_lookup = {}
-            oi_extra = ["open_interest", "open_interest_value"]
+            oi_extra = ["open_interest"]
         else:
             oi_extra = []
 

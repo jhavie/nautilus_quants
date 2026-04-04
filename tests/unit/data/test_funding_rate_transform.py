@@ -21,9 +21,9 @@ class TestCsvToFundingRateUpdatesBasic:
         """
         csv_file = tmp_path / "funding_rate.csv"
         csv_file.write_text(
-            "timestamp,funding_rate,mark_price\n"
-            "1700000000000,0.0001,35000.5\n"
-            "1700028800000,-0.00005,35100.0\n"
+            "timestamp,funding_rate\n"
+            "1700000000000,0.0001\n"
+            "1700028800000,-0.00005\n"
         )
 
         updates = csv_to_funding_rate_updates(csv_file, "BTCUSDT", "BINANCE")
@@ -49,7 +49,7 @@ class TestCsvToFundingRateUpdatesEmptyCsv:
     def test_csv_to_funding_rate_updates_empty_csv(self, tmp_path: Path) -> None:
         """Empty CSV (header only) returns empty list."""
         csv_file = tmp_path / "empty_fr.csv"
-        csv_file.write_text("timestamp,funding_rate,mark_price\n")
+        csv_file.write_text("timestamp,funding_rate\n")
 
         updates = csv_to_funding_rate_updates(csv_file, "ETHUSDT", "BINANCE")
 
@@ -68,8 +68,8 @@ class TestCsvToFundingRateUpdatesTimestamp:
 
         csv_file = tmp_path / "ts_test.csv"
         csv_file.write_text(
-            "timestamp,funding_rate,mark_price\n"
-            f"{ts_ms},0.0003,29000.0\n"
+            "timestamp,funding_rate\n"
+            f"{ts_ms},0.0003\n"
         )
 
         updates = csv_to_funding_rate_updates(csv_file, "BTCUSDT")
@@ -82,8 +82,8 @@ class TestCsvToFundingRateUpdatesTimestamp:
         """Default venue parameter should be BINANCE."""
         csv_file = tmp_path / "venue_test.csv"
         csv_file.write_text(
-            "timestamp,funding_rate,mark_price\n"
-            "1700000000000,0.0001,35000.0\n"
+            "timestamp,funding_rate\n"
+            "1700000000000,0.0001\n"
         )
 
         updates = csv_to_funding_rate_updates(csv_file, "BTCUSDT")

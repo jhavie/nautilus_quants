@@ -1,0 +1,37 @@
+# Data Pipeline Configuration — Factor Research (FR + OI)
+# 用于下载 Binance Futures funding rate 和 open interest 数据
+#
+# 运行方式:
+#   python -m nautilus_quants.data.cli -c config/factor/data.yaml download
+#   python -m nautilus_quants.data.cli -c config/factor/data.yaml download --dry-run
+version: "1.0"
+
+download:
+  exchange: binance
+  market_type: futures
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+  timeframes:
+    - 4h
+  start_date: "2026-01-01"
+  end_date: "2026-04-04"
+  funding_rate: true
+  open_interest: true
+  oi_period: "4h"
+
+  rate_limit:
+    max_retries: 5
+    initial_delay_seconds: 1
+    max_delay_seconds: 60
+    backoff_multiplier: 2
+
+  checkpoint:
+    enabled: true
+    batch_size: 500
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  catalog: "data/catalog"
+  logs: "logs/data_pipeline"

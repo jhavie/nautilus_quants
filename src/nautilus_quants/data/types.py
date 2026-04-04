@@ -237,40 +237,36 @@ class DownloadCheckpoint:
 
 @dataclass(frozen=True)
 class RawFundingRate:
-    """Raw funding rate data from Binance API.
+    """Raw funding rate data.
 
     Attributes:
         timestamp: Unix timestamp in milliseconds (fundingTime)
         symbol: Trading pair symbol (e.g., "BTCUSDT")
         funding_rate: Funding rate value
-        mark_price: Mark price at funding time
         exchange: Source exchange
     """
 
     timestamp: int       # Unix ms (fundingTime)
     symbol: str
     funding_rate: Decimal
-    mark_price: Decimal
-    exchange: str = "binance"
+    exchange: str = "bybit"
 
 
 @dataclass(frozen=True)
 class RawOpenInterest:
-    """Raw open interest data from Binance API.
+    """Raw open interest data.
 
     Attributes:
         timestamp: Unix timestamp in milliseconds
         symbol: Trading pair symbol (e.g., "BTCUSDT")
         open_interest: Open interest in base asset units
-        open_interest_value: Open interest value in USDT
         exchange: Source exchange
     """
 
     timestamp: int       # Unix ms
     symbol: str
     open_interest: Decimal       # In base asset units
-    open_interest_value: Decimal  # In USDT
-    exchange: str = "binance"
+    exchange: str = "bybit"
 
 
 @dataclass

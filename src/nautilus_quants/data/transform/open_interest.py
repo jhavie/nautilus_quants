@@ -27,13 +27,12 @@ def write_oi_parquet(
 ) -> int:
     """Convert OI CSV to Parquet file.
 
-    CSV format: timestamp (ms), open_interest, open_interest_value
+    CSV format: timestamp (ms), open_interest
 
     Output Parquet columns:
         - timestamp_ns: int64 (ms * 1_000_000)
         - instrument_id: string (e.g., "BTCUSDT.BINANCE")
         - open_interest: float64
-        - open_interest_value: float64
 
     Args:
         csv_path: Path to the open interest CSV file.
@@ -59,7 +58,6 @@ def write_oi_parquet(
             "timestamp_ns": (df["timestamp"].astype("int64") * 1_000_000),
             "instrument_id": instrument_id,
             "open_interest": df["open_interest"].astype("float64"),
-            "open_interest_value": df["open_interest_value"].astype("float64"),
         }
     )
 
@@ -68,7 +66,6 @@ def write_oi_parquet(
             pa.field("timestamp_ns", pa.int64()),
             pa.field("instrument_id", pa.string()),
             pa.field("open_interest", pa.float64()),
-            pa.field("open_interest_value", pa.float64()),
         ]
     )
 
@@ -177,9 +174,6 @@ def transform_open_interest(
                     ),
                     "instrument_id": instrument_id,
                     "open_interest": merged_df["open_interest"].astype("float64"),
-                    "open_interest_value": merged_df[
-                        "open_interest_value"
-                    ].astype("float64"),
                 }
             )
 
@@ -188,7 +182,6 @@ def transform_open_interest(
                     pa.field("timestamp_ns", pa.int64()),
                     pa.field("instrument_id", pa.string()),
                     pa.field("open_interest", pa.float64()),
-                    pa.field("open_interest_value", pa.float64()),
                 ]
             )
 
@@ -242,8 +235,7 @@ def load_oi_lookup(
         timeframe: Timeframe label used in the filename (default "4h").
 
     Returns:
-        Nested dict: {instrument_id: {timestamp_ns: {"open_interest": float,
-        "open_interest_value": float}}}
+        Nested dict: {instrument_id: {timestamp_ns: {"open_interest": float}}}
 
     For backtesting, the FactorEngineActor calls this at startup and uses
     the lookup to inject OI values into bar_data on each bar.
@@ -270,7 +262,6 @@ def load_oi_lookup(
         for _, row in df.iterrows():
             ts_lookup[int(row["timestamp_ns"])] = {
                 "open_interest": float(row["open_interest"]),
-                "open_interest_value": float(row["open_interest_value"]),
             }
 
         lookup[iid] = ts_lookup

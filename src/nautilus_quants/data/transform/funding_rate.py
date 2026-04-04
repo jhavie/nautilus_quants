@@ -24,8 +24,7 @@ def csv_to_funding_rate_updates(
 ) -> list[FundingRateUpdate]:
     """Convert funding rate CSV to NautilusTrader FundingRateUpdate objects.
 
-    CSV format (from binance_futures_data.py):
-        timestamp (ms), funding_rate, mark_price
+    CSV format: timestamp (ms), funding_rate
 
     Each row becomes a FundingRateUpdate with:
         - instrument_id from symbol.venue

@@ -223,7 +223,7 @@ class TestOiInjection:
 
     def test_oi_injected_when_matching_ts(self) -> None:
         """When _oi_lookup has data for the instrument and matching ts,
-        bar_data should contain open_interest and open_interest_value.
+        bar_data should contain open_interest.
         """
         bar_data = _extract_bar_data(_make_mock_bar())
 
@@ -232,7 +232,6 @@ class TestOiInjection:
             "BTCUSDT.BINANCE": {
                 ts: {
                     "open_interest": 5000.0,
-                    "open_interest_value": 175000000.0,
                 },
             },
         }
@@ -245,7 +244,6 @@ class TestOiInjection:
                 bar_data.update(oi_data)
 
         assert bar_data["open_interest"] == pytest.approx(5000.0)
-        assert bar_data["open_interest_value"] == pytest.approx(175000000.0)
 
     def test_oi_not_injected_when_no_matching_ts(self) -> None:
         """When the bar ts does not exist in the OI lookup, no OI fields
@@ -259,7 +257,6 @@ class TestOiInjection:
             "BTCUSDT.BINANCE": {
                 ts_oi: {
                     "open_interest": 5000.0,
-                    "open_interest_value": 175000000.0,
                 },
             },
         }
@@ -271,7 +268,6 @@ class TestOiInjection:
                 bar_data.update(oi_data)
 
         assert "open_interest" not in bar_data
-        assert "open_interest_value" not in bar_data
 
     def test_oi_not_injected_when_instrument_missing(self) -> None:
         """When the instrument has no OI data at all, bar_data is unaffected."""
@@ -305,7 +301,6 @@ class TestOiInjection:
             instrument_id: {
                 ts: {
                     "open_interest": 5000.0,
-                    "open_interest_value": 175000000.0,
                 },
             },
         }
@@ -314,8 +309,7 @@ class TestOiInjection:
             if oi_data:
                 bar_data.update(oi_data)
 
-        # All 8 fields present: OHLCV(5) + FR(1) + OI(2)
-        assert len(bar_data) == 8
+        # All 7 fields present: OHLCV(5) + FR(1) + OI(1)
+        assert len(bar_data) == 7
         assert bar_data["funding_rate"] == pytest.approx(0.0001)
         assert bar_data["open_interest"] == pytest.approx(5000.0)
-        assert bar_data["open_interest_value"] == pytest.approx(175000000.0)
