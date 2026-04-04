@@ -581,24 +581,40 @@ def dedup_by_fingerprint(
 def compute_factor_correlation(
     factor_ids: list[str],
     config: ScoringConfig,
+    registry_db: RegistryDatabase | None = None,
+    registry_dbs: list[RegistryDatabase] | None = None,
 ) -> pd.DataFrame:
     """Compute cross-sectional Spearman rank correlation matrix.
 
     1. Load OHLCV data (40 coins × 4 years × 4h bars)
     2. Compute factor values for each source config
-    3. Per cross-section: Spearman rank correlation
-    4. Time-average → correlation matrix
+    3. Fallback: load missing factors from registry DB(s)
+    4. Per cross-section: Spearman rank correlation
+    5. Time-average → correlation matrix
+
+    Args:
+        registry_db: Single registry DB for fallback (convenience).
+        registry_dbs: Multiple registry DBs to search (tried in order).
 
     Returns correlation matrix DataFrame (factor_id × factor_id).
     """
     from nautilus_quants.alpha.analysis.evaluator import FactorEvaluator
     from nautilus_quants.alpha.data_loader import CatalogDataLoader
-    from nautilus_quants.factors.config import generate_factor_id, load_factor_config
+    from nautilus_quants.factors.config import (
+        FactorConfig,
+        FactorDefinition,
+        generate_factor_id,
+        load_factor_config,
+    )
 
     data_cfg = config.data
-    if not data_cfg.catalog_path or not data_cfg.factor_configs:
+    if not data_cfg.catalog_path:
         raise ValueError(
-            "data.catalog_path and data.factor_configs are required "
+            "data.catalog_path is required for correlation computation.",
+        )
+    if not data_cfg.factor_configs and registry_db is None and not registry_dbs:
+        raise ValueError(
+            "data.factor_configs or registry_db/registry_dbs is required "
             "for correlation computation.",
         )
 
@@ -624,6 +640,84 @@ def compute_factor_correlation(
         except Exception as e:
             logger.warning("Failed to compute factors from %s: %s", config_path, e)
 
+    # ── Registry fallback for factors not covered by YAML configs ──
+    all_dbs: list[RegistryDatabase] = []
+    if registry_dbs:
+        all_dbs.extend(registry_dbs)
+    elif registry_db is not None:
+        all_dbs.append(registry_db)
+
+    if all_dbs:
+        missing_ids = set(factor_ids) - set(all_factor_panels.keys())
+        if missing_ids:
+            logger.info(
+                "Registry lookup: %d of %d factors missing from YAML configs",
+                len(missing_ids), len(factor_ids),
+            )
+            from nautilus_quants.alpha.registry.repository import FactorRepository
+
+            # Search across all registry DBs (first match wins)
+            repos = [FactorRepository(db) for db in all_dbs]
+            # (source, vars_key, params_key) → [(fid, key, expression), ...]
+            groups: dict[tuple, list[tuple[str, str, str]]] = {}
+            for fid in missing_ids:
+                record = None
+                for repo in repos:
+                    record = repo.get_factor(fid)
+                    if record is not None:
+                        break
+                if record is None:
+                    logger.warning("Registry: factor %s not found", fid)
+                    continue
+                source = record.source or ""
+                key = fid[len(source) + 1:] if source and fid.startswith(f"{source}_") else fid
+                if not key:
+                    key = fid
+                vars_key = tuple(sorted((record.variables or {}).items()))
+                params_key = tuple(sorted(
+                    (k, v) for k, v in (record.parameters or {}).items()
+                    if k != "promote_score"
+                ))
+                group_key = (source, vars_key, params_key)
+                groups.setdefault(group_key, []).append(
+                    (fid, key, record.expression),
+                )
+
+            loaded_count = 0
+            for (source, vars_tup, params_tup), group_records in groups.items():
+                # Map: YAML key → original factor_id
+                key_to_fid = {key: orig_fid for orig_fid, key, _ in group_records}
+                group_config = FactorConfig(
+                    name=f"registry_{source}" if source else "registry",
+                    source=source,
+                    variables=dict(vars_tup),
+                    parameters=dict(params_tup),
+                    factors=[
+                        FactorDefinition(name=key, expression=expr)
+                        for _, key, expr in group_records
+                    ],
+                )
+                try:
+                    evaluator = FactorEvaluator(group_config)
+                    factor_series, _ = evaluator.evaluate(bars_by_instrument)
+                    for fname, series in factor_series.items():
+                        orig_fid = key_to_fid.get(fname)
+                        if orig_fid is not None and orig_fid in factor_ids:
+                            all_factor_panels[orig_fid] = series.unstack(
+                                level="asset",
+                            )
+                            loaded_count += 1
+                except Exception as e:
+                    logger.warning(
+                        "Failed to compute registry factors for source=%s: %s",
+                        source, e,
+                    )
+
+            logger.info(
+                "Registry: loaded %d factors in %d groups",
+                loaded_count, len(groups),
+            )
+
     if len(all_factor_panels) < 2:
         logger.warning(
             "Only %d factors computed for correlation (need ≥ 2)",
@@ -646,6 +740,8 @@ def compute_factor_correlation(
     n_factors = len(matched_ids)
 
     # Cross-sectional Spearman correlation, averaged over time
+    from scipy.stats import spearmanr
+
     corr_sum = np.zeros((n_factors, n_factors))
     n_valid = np.zeros((n_factors, n_factors))
 
@@ -676,8 +772,6 @@ def compute_factor_correlation(
         ])
 
         # Spearman rank correlation for this cross-section
-        from scipy.stats import spearmanr
-
         rho, _ = spearmanr(cs_matrix)
         if rho.ndim == 0:
             # Only 2 factors
@@ -700,21 +794,42 @@ def greedy_select(
     corr_matrix: pd.DataFrame,
     max_corr: float = 0.30,
     max_factors: int = 50,
+    existing_ids: list[str] | None = None,
 ) -> list[str]:
     """Greedy factor selection: pick top-scored, reject if corr > max_corr.
 
+    If ``existing_ids`` is provided, those factors are pre-seeded into the
+    selected set (they act as gatekeepers but are not themselves returned).
+
     ```python
-    selected = []
+    selected = [*existing_ids_in_corr_matrix]   # pre-seeded
     for factor_id in sorted_by_score_descending:
         if all(|corr(factor_id, s)| <= max_corr for s in selected):
             selected.append(factor_id)
+    return [s for s in selected if s not in existing_ids]
     ```
     """
     sorted_ids = scores.sort_values("final_score", ascending=False).index.tolist()
-    selected: list[str] = []
 
+    # Pre-seed with existing factors from target DB
+    existing_set: set[str] = set()
+    selected: list[str] = []
+    if existing_ids:
+        for eid in existing_ids:
+            if eid in corr_matrix.index:
+                selected.append(eid)
+                existing_set.add(eid)
+        if existing_set:
+            logger.info(
+                "Greedy: %d existing factors pre-seeded as gatekeepers",
+                len(existing_set),
+            )
+
+    n_new = 0
     for factor_id in sorted_ids:
-        if len(selected) >= max_factors:
+        if factor_id in existing_set:
+            continue
+        if n_new >= max_factors:
             break
         if factor_id not in corr_matrix.index:
             logger.warning(
@@ -728,15 +843,17 @@ def greedy_select(
                 c = abs(corr_matrix.loc[factor_id, s])
                 if c > max_corr:
                     correlated = True
+                    source = "existing" if s in existing_set else "selected"
                     logger.info(
-                        "Greedy reject: %s corr with %s = %.3f > %.3f",
-                        factor_id, s, c, max_corr,
+                        "Greedy reject: %s corr with %s (%s) = %.3f > %.3f",
+                        factor_id, s, source, c, max_corr,
                     )
                     break
         if not correlated:
             selected.append(factor_id)
+            n_new += 1
 
-    return selected
+    return [s for s in selected if s not in existing_set]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
