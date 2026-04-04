@@ -683,51 +683,61 @@ def compute_factor_correlation(
                     (fid, key, record.expression),
                 )
 
-            # Merge groups with same source into larger batches to
-            # avoid redundant bars→panel conversion per group.
+            # Merge groups with same source, then evaluate in chunks
+            # to avoid OOM from caching all panels simultaneously.
+            _CHUNK_SIZE = 30
+
             merged: dict[str, tuple[dict[str, str], dict[str, Any], list[tuple[str, str, str]]]] = {}
             for (source, vars_tup, params_tup), group_records in groups.items():
                 if source not in merged:
                     merged[source] = (dict(vars_tup), dict(params_tup), list(group_records))
                 else:
                     existing_vars, existing_params, existing_records = merged[source]
-                    # Merge variables (union; later values win on conflict)
                     existing_vars.update(dict(vars_tup))
                     existing_params.update(dict(params_tup))
                     existing_records.extend(group_records)
 
             loaded_count = 0
             for source, (variables, parameters, all_records) in merged.items():
-                key_to_fid = {key: orig_fid for orig_fid, key, _ in all_records}
-                batch_config = FactorConfig(
-                    name=f"registry_{source}" if source else "registry",
-                    source=source,
-                    variables=variables,
-                    parameters=parameters,
-                    factors=[
-                        FactorDefinition(name=key, expression=expr)
-                        for _, key, expr in all_records
-                    ],
-                )
-                try:
-                    logger.info(
-                        "Registry: evaluating %d factors for source=%s",
-                        len(all_records), source,
+                # Split into chunks to limit memory
+                for chunk_idx in range(0, len(all_records), _CHUNK_SIZE):
+                    chunk = all_records[chunk_idx:chunk_idx + _CHUNK_SIZE]
+                    key_to_fid = {key: orig_fid for orig_fid, key, _ in chunk}
+                    chunk_config = FactorConfig(
+                        name=f"registry_{source}" if source else "registry",
+                        source=source,
+                        variables=variables,
+                        parameters=parameters,
+                        factors=[
+                            FactorDefinition(name=key, expression=expr)
+                            for _, key, expr in chunk
+                        ],
                     )
-                    eval_instance = FactorEvaluator(batch_config)
-                    factor_series, _ = eval_instance.evaluate(bars_by_instrument)
-                    for fname, series in factor_series.items():
-                        orig_fid = key_to_fid.get(fname)
-                        if orig_fid is not None and orig_fid in factor_ids:
-                            all_factor_panels[orig_fid] = series.unstack(
-                                level="asset",
-                            )
-                            loaded_count += 1
-                except Exception as e:
-                    logger.warning(
-                        "Failed to compute registry factors for source=%s: %s",
-                        source, e,
-                    )
+                    try:
+                        chunk_num = chunk_idx // _CHUNK_SIZE + 1
+                        total_chunks = (len(all_records) + _CHUNK_SIZE - 1) // _CHUNK_SIZE
+                        logger.info(
+                            "Registry: evaluating chunk %d/%d "
+                            "(%d factors) for source=%s",
+                            chunk_num, total_chunks, len(chunk), source,
+                        )
+                        eval_instance = FactorEvaluator(chunk_config)
+                        factor_series, _ = eval_instance.evaluate(
+                            bars_by_instrument,
+                        )
+                        for fname, series in factor_series.items():
+                            orig_fid = key_to_fid.get(fname)
+                            if orig_fid is not None and orig_fid in factor_ids:
+                                all_factor_panels[orig_fid] = series.unstack(
+                                    level="asset",
+                                )
+                                loaded_count += 1
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to compute registry factors chunk "
+                            "for source=%s: %s",
+                            source, e,
+                        )
 
             logger.info(
                 "Registry: loaded %d factors in %d groups",
