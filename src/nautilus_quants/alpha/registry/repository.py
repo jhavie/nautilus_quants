@@ -126,6 +126,7 @@ class FactorRepository:
         status: str | None = None,
         source: str | None = None,
         prototype: str | None = None,
+        tag: str | None = None,
         sort_by: str = "factor_id",
         descending: bool = False,
         limit: int | None = None,
@@ -142,6 +143,9 @@ class FactorRepository:
         if prototype is not None:
             clauses.append("prototype = ?")
             params.append(prototype)
+        if tag is not None:
+            clauses.append("list_contains(tags::VARCHAR[], ?)")
+            params.append(tag)
 
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         allowed = {"factor_id", "source", "status", "prototype", "created_at"}
