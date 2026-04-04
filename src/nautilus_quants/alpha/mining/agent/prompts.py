@@ -140,9 +140,15 @@ _CONSTRUCTION_RULES = """\
    - 24/7 market — no overnight gaps, no weekend effects
    - High volatility — use shorter windows (6-42 bars) for responsiveness
    - OHLCV + funding_rate + open_interest available
-   - funding_rate: sentiment indicator (positive=longs pay shorts, negative=shorts pay longs)
-   - open_interest: market participation / leverage indicator
+   - funding_rate: settlement every 8h (00:00/08:00/16:00 UTC), positive=longs pay shorts
+   - open_interest: total open positions in base asset, 4h granularity
    - {window_guide}
+   - **CRITICAL: funding_rate updates every 8h, NOT every bar.**
+     With 4h bars, funding_rate only changes every 2 bars (same value repeats in between).
+     Window descriptions MUST use 8h-based counting for funding_rate:
+     window=3 over funding_rate = 3 settlements = 1 day (NOT 12h).
+     window=21 over funding_rate = 21 settlements = 1 week.
+     Do NOT confuse bar-count windows with funding settlement windows in descriptions.
 
 6. **Avoid strict equalities.** Use ranges instead of `==`:
    - BAD:  `ts_min(low, 10) == delay(ts_min(low, 10), 1)`
