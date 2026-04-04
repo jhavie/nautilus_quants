@@ -251,7 +251,7 @@ def load_oi_lookup(
         parquet_file = oi_dir / f"{symbol}_{timeframe}_oi.parquet"
 
         if not parquet_file.exists():
-            logger.warning("OI parquet not found for %s at %s", iid, parquet_file)
+            logger.info("OI parquet not found for %s (skipped)", iid)
             lookup[iid] = {}
             continue
 

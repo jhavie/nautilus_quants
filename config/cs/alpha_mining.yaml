@@ -8,7 +8,7 @@
 
 registry:
   env: test
-  db_dir: /Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/logs/registry
+  db_dir: /Users/joe/Sync/nautilus_quants/logs/registry
   enabled: true
 
 # ── Mining settings (only used by `alpha mine`) ──
@@ -17,7 +17,7 @@ mining:
   factors_per_round: 8
   model: "sonnet"                        # sonnet / opus
   proxy: "http://127.0.0.1:8888"        # SSH tunnel proxy for claude CLI
-  parallel: 20                         # concurrent claude requests per batch
+  parallel: 3                         # concurrent claude requests per batch
   output_dir: "logs/alpha_mining"
 
 # Charts (only these 6; empty list = no charts)
@@ -41,7 +41,8 @@ oi_timeframe: "4h"
 # factor_config_path: auto-generated per round by miner
 # factors: auto-generated per round (empty = analyze all)
 
-# 77 symbols with confirmed Bybit OI/FR data from 2022-01-01
+# 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+# (10 delisted/renamed on Bybit excluded: ANT, AUDIO, CELR, FTM, GTC, KLAY, MATIC, OMG, REN, XEM)
 instrument_ids:
   - "1INCHUSDT.BINANCE"
   - "AAVEUSDT.BINANCE"
@@ -49,10 +50,10 @@ instrument_ids:
   - "ALGOUSDT.BINANCE"
   - "ALICEUSDT.BINANCE"
   - "ANKRUSDT.BINANCE"
-  - "ANTUSDT.BINANCE"
+  # - "ANTUSDT.BINANCE"      # delisted on Bybit
   - "ARUSDT.BINANCE"
   - "ATOMUSDT.BINANCE"
-  - "AUDIOUSDT.BINANCE"
+  # - "AUDIOUSDT.BINANCE"    # delisted on Bybit
   - "AVAXUSDT.BINANCE"
   - "AXSUSDT.BINANCE"
   - "BATUSDT.BINANCE"
@@ -60,7 +61,7 @@ instrument_ids:
   - "BNBUSDT.BINANCE"
   - "BTCUSDT.BINANCE"
   - "C98USDT.BINANCE"
-  - "CELRUSDT.BINANCE"
+  # - "CELRUSDT.BINANCE"     # delisted on Bybit
   - "CHRUSDT.BINANCE"
   - "CHZUSDT.BINANCE"
   - "COMPUSDT.BINANCE"
@@ -77,15 +78,15 @@ instrument_ids:
   - "ETCUSDT.BINANCE"
   - "ETHUSDT.BINANCE"
   - "FILUSDT.BINANCE"
-  - "FTMUSDT.BINANCE"
+  # - "FTMUSDT.BINANCE"      # renamed to SONICUSDT on Bybit
   - "GALAUSDT.BINANCE"
   - "GRTUSDT.BINANCE"
-  - "GTCUSDT.BINANCE"
+  # - "GTCUSDT.BINANCE"      # delisted on Bybit
   - "HBARUSDT.BINANCE"
   - "IOSTUSDT.BINANCE"
   - "IOTAUSDT.BINANCE"
   - "IOTXUSDT.BINANCE"
-  - "KLAYUSDT.BINANCE"
+  # - "KLAYUSDT.BINANCE"     # delisted on Bybit
   - "KSMUSDT.BINANCE"
   - "LINKUSDT.BINANCE"
   - "LPTUSDT.BINANCE"
@@ -93,13 +94,13 @@ instrument_ids:
   - "LTCUSDT.BINANCE"
   - "MANAUSDT.BINANCE"
   - "MASKUSDT.BINANCE"
-  - "MATICUSDT.BINANCE"
+  # - "MATICUSDT.BINANCE"    # renamed to POLUSDT on Bybit
   - "NEARUSDT.BINANCE"
-  - "OMGUSDT.BINANCE"
+  # - "OMGUSDT.BINANCE"      # delisted on Bybit
   - "ONEUSDT.BINANCE"
   - "PEOPLEUSDT.BINANCE"
   - "QTUMUSDT.BINANCE"
-  - "RENUSDT.BINANCE"
+  # - "RENUSDT.BINANCE"      # delisted on Bybit
   - "RSRUSDT.BINANCE"
   - "RUNEUSDT.BINANCE"
   - "SANDUSDT.BINANCE"
@@ -113,7 +114,7 @@ instrument_ids:
   - "TRXUSDT.BINANCE"
   - "UNIUSDT.BINANCE"
   - "VETUSDT.BINANCE"
-  - "XEMUSDT.BINANCE"
+  # - "XEMUSDT.BINANCE"      # delisted on Bybit
   - "XLMUSDT.BINANCE"
   - "XRPUSDT.BINANCE"
   - "XTZUSDT.BINANCE"
