@@ -235,6 +235,40 @@ class DownloadCheckpoint:
     end_date: str
 
 
+@dataclass(frozen=True)
+class RawFundingRate:
+    """Raw funding rate data.
+
+    Attributes:
+        timestamp: Unix timestamp in milliseconds (fundingTime)
+        symbol: Trading pair symbol (e.g., "BTCUSDT")
+        funding_rate: Funding rate value
+        exchange: Source exchange
+    """
+
+    timestamp: int       # Unix ms (fundingTime)
+    symbol: str
+    funding_rate: Decimal
+    exchange: str = "bybit"
+
+
+@dataclass(frozen=True)
+class RawOpenInterest:
+    """Raw open interest data.
+
+    Attributes:
+        timestamp: Unix timestamp in milliseconds
+        symbol: Trading pair symbol (e.g., "BTCUSDT")
+        open_interest: Open interest in base asset units
+        exchange: Source exchange
+    """
+
+    timestamp: int       # Unix ms
+    symbol: str
+    open_interest: Decimal       # In base asset units
+    exchange: str = "bybit"
+
+
 @dataclass
 class PipelineRunContext:
     """Context for a complete pipeline run.

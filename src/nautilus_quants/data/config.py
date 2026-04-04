@@ -39,6 +39,9 @@ class DownloadConfig:
     timeframes: list[str] = field(default_factory=lambda: ["1h", "4h"])
     start_date: str = "2024-01-01"
     end_date: str = "2024-12-31"
+    funding_rate: bool = False
+    open_interest: bool = False
+    oi_period: str = ""
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
 
@@ -177,6 +180,13 @@ def _parse_download(data: dict) -> DownloadConfig:
         timeframes=data.get("timeframes", ["1h", "4h"]),
         start_date=data.get("start_date", "2024-01-01"),
         end_date=data.get("end_date", "2024-12-31"),
+        funding_rate=data.get(
+            "funding_rate", False
+        ),
+        open_interest=data.get(
+            "open_interest", False
+        ),
+        oi_period=data.get("oi_period", ""),
         rate_limit=_parse_rate_limit(data.get("rate_limit", {})),
         checkpoint=_parse_checkpoint(data.get("checkpoint", {})),
     )
@@ -387,6 +397,9 @@ def config_to_dict(config: PipelineConfig) -> dict:
             "timeframes": config.download.timeframes,
             "start_date": config.download.start_date,
             "end_date": config.download.end_date,
+            "funding_rate": config.download.funding_rate,
+            "open_interest": config.download.open_interest,
+            "oi_period": config.download.oi_period,
             "rate_limit": {
                 "max_retries": config.download.rate_limit.max_retries,
                 "initial_delay_seconds": config.download.rate_limit.initial_delay_seconds,
