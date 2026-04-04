@@ -620,28 +620,28 @@ def list_factors(
             )
             click.echo(
                 f"{'#':<4} {'factor_id':<30} {'score':>7} {'status':<10} "
-                f"{'source':<10} {'tags'}"
+                f"{'source':<10} {'tags':<20} {'expression'}"
             )
-            click.echo("-" * 90)
+            click.echo("-" * 140)
             for i, f in enumerate(factors, 1):
-                tags_str = ", ".join(f.tags) if f.tags else "-"
                 score = f.parameters.get("promote_score")
                 score_str = f"{score:>7.4f}" if score is not None else f"{'-':>7}"
+                tags_str = ", ".join(f.tags) if f.tags else "-"
                 click.echo(
                     f"{i:<4} {f.factor_id:<30} {score_str} {f.status:<10} "
-                    f"{f.source:<10} {tags_str}"
+                    f"{f.source:<10} {tags_str:<20} {f.expression}"
                 )
         else:
             click.echo(
                 f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
-                f"{'source':<10} {'tags'}"
+                f"{'source':<10} {'tags':<20} {'expression'}"
             )
-            click.echo("-" * 80)
+            click.echo("-" * 140)
             for f in factors:
                 tags_str = ", ".join(f.tags) if f.tags else "-"
                 click.echo(
                     f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
-                    f"{f.source:<10} {tags_str}"
+                    f"{f.source:<10} {tags_str:<20} {f.expression}"
                 )
         click.echo(f"({len(factors)} factors)")
     finally:
@@ -944,7 +944,7 @@ def export_factors(
 )
 @click.option(
     "--config", "config_path",
-    default="config/scoring.yaml",
+    default="config/examples/scoring.yaml",
     type=click.Path(exists=True, path_type=Path),
     help="Scoring configuration file.",
 )
@@ -976,7 +976,7 @@ def promote(
       python -m nautilus_quants.alpha promote --source-env test --target-env dev
       python -m nautilus_quants.alpha promote --source-env test --target-env dev --dry-run
       python -m nautilus_quants.alpha promote --source-env test --target-env dev --skip-corr
-      python -m nautilus_quants.alpha promote --config config/scoring.yaml --max-factors 50
+      python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --max-factors 50
     """
     from datetime import datetime, timezone
 
@@ -1219,6 +1219,128 @@ def promote(
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+@cli.command()
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def audit(env_name: str | None, db_dir: str) -> None:
+    """Audit the factor registry for duplicates and prototype issues."""
+    from nautilus_quants.alpha.registry.audit import (
+        find_expression_duplicates,
+        suggest_prototype_groups,
+    )
+
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        factors = repo.list_factors()
+        click.echo(f"Total factors: {len(factors)}")
+        click.echo()
+
+        # Expression duplicates
+        dup_groups = find_expression_duplicates(repo)
+        if dup_groups:
+            click.echo(f"Expression duplicates ({len(dup_groups)} groups):")
+            click.echo("-" * 60)
+            for group in dup_groups:
+                ids = [f.factor_id for f in group]
+                click.echo(f"  {' ≡ '.join(ids)}")
+                click.echo(f"    expr: {group[0].expression[:80]}")
+            click.echo()
+        else:
+            click.echo("No expression duplicates found.")
+            click.echo()
+
+        # Prototype group suggestions
+        groups = suggest_prototype_groups(repo)
+        if groups:
+            click.echo(
+                f"Template groups ({len(groups)} groups with ≥2 members):"
+            )
+            click.echo("-" * 60)
+            for tmpl, members in sorted(
+                groups.items(), key=lambda x: -len(x[1]),
+            ):
+                fids = [m[0] for m in members]
+                click.echo(f"  [{len(members)}] {tmpl[:70]}")
+                for fid, params in members[:5]:
+                    click.echo(f"       {fid}  {params}")
+                if len(members) > 5:
+                    click.echo(f"       ... and {len(members) - 5} more")
+            click.echo()
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option("--execute", is_flag=True, default=False, help="Actually apply.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def backfill(execute: bool, env_name: str | None, db_dir: str) -> None:
+    """Backfill expression_hash, prototype, and parameters for all factors.
+
+    For each factor:
+    1. Compute expression_hash (for dedup).
+    2. Fix prototype from builtin libraries (ta_factors.py).
+    3. Extract numbers via expression_template → {p0, p1, ...} parameters.
+    """
+    from nautilus_quants.alpha.registry.audit import backfill_factors
+
+    dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        counts = backfill_factors(repo, dry_run=dry_run)
+        mode = "DRY RUN" if dry_run else "EXECUTED"
+        click.echo(f"[{mode}] Backfill results:")
+        click.echo(f"  expression_hash updated: {counts['hash']}")
+        click.echo(f"  prototype fixed:         {counts['prototype']}")
+        click.echo(f"  parameters extracted:    {counts['parameters']}")
+        if dry_run:
+            click.echo()
+            click.echo("Use --execute to apply changes.")
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option(
+    "--keep-source", default=None,
+    help="Preferred source to keep (e.g. alpha101).",
+)
+@click.option("--dry-run", is_flag=True, default=True, help="Preview only.")
+@click.option("--execute", is_flag=True, default=False, help="Actually delete.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def dedup(
+    keep_source: str | None,
+    dry_run: bool,
+    execute: bool,
+    env_name: str | None,
+    db_dir: str,
+) -> None:
+    """Remove duplicate factors by expression hash."""
+    from nautilus_quants.alpha.registry.audit import dedup_factors
+
+    actual_dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        removed = dedup_factors(
+            repo, keep_source=keep_source, dry_run=actual_dry_run,
+        )
+        if not removed:
+            click.echo("No duplicates found.")
+            return
+
+        mode = "DRY RUN" if actual_dry_run else "EXECUTED"
+        click.echo(f"[{mode}] {len(removed)} duplicate(s):")
+        for rm_id, keep_id in removed:
+            click.echo(f"  DELETE {rm_id}  (keep {keep_id})")
+
+        if actual_dry_run:
+            click.echo()
+            click.echo("Use --execute to actually delete.")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
