@@ -872,6 +872,48 @@ def run(
                     click.echo(f"  ✗ {sym} {tf}: {e}")
                     has_errors = True
 
+    # Funding rate transform (Bybit CSV → NT FundingRateUpdate → catalog)
+    if config.download.funding_rate:
+        from nautilus_quants.data.transform.funding_rate import (
+            transform_funding_rates,
+        )
+
+        bybit_raw_dir = Path(config.paths.raw_data) / "bybit"
+        click.echo("Transforming funding rates...")
+        fr_results = transform_funding_rates(
+            raw_dir=bybit_raw_dir,
+            catalog_path=cat_path,
+            symbols=config.download.symbols,
+        )
+        for r in fr_results:
+            if r["success"]:
+                click.echo(f"  ✓ {r['symbol']}: {r['count']} FundingRateUpdate records")
+            else:
+                click.echo(f"  ✗ {r['symbol']}: {r.get('error', 'unknown')}", err=True)
+                has_errors = True
+
+    # Open interest transform (Bybit CSV → standalone Parquet)
+    if config.download.open_interest:
+        from nautilus_quants.data.transform.open_interest import (
+            transform_open_interest,
+        )
+
+        bybit_raw_dir = Path(config.paths.raw_data) / "bybit"
+        oi_period = config.download.oi_period or "4h"
+        click.echo(f"Transforming open interest ({oi_period})...")
+        oi_results = transform_open_interest(
+            raw_dir=bybit_raw_dir,
+            catalog_path=cat_path,
+            symbols=config.download.symbols,
+            timeframe=oi_period,
+        )
+        for r in oi_results:
+            if r["success"]:
+                click.echo(f"  ✓ {r['symbol']}: {r['count']} OI records → parquet")
+            else:
+                click.echo(f"  ✗ {r['symbol']}: {r.get('error', 'unknown')}", err=True)
+                has_errors = True
+
     step_results.append(
         {
             "step_name": "transform",
