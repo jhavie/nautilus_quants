@@ -555,6 +555,7 @@ def _open_repo(env_name: str | None, db_dir: str):
 @_DB_DIR_OPTION
 def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
     """Register factors from a YAML config file into the registry."""
+    from nautilus_quants.alpha.formatters import print_register_result
     from nautilus_quants.factors.config import load_factor_config
 
     try:
@@ -568,15 +569,7 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
         new, updated, unchanged, duplicate = repo.register_factors_from_config(
             config,
         )
-        total = new + updated + unchanged + duplicate
-        msg = (
-            f"Registered {total} factors "
-            f"({new} new, {updated} updated, {unchanged} unchanged"
-        )
-        if duplicate:
-            msg += f", {duplicate} duplicate skipped"
-        msg += ")"
-        click.echo(msg)
+        print_register_result(new, updated, unchanged, duplicate)
     finally:
         db.close()
 
@@ -597,6 +590,8 @@ def list_factors(
     db_dir: str,
 ) -> None:
     """List factors in the registry."""
+    from nautilus_quants.alpha.formatters import print_factor_list
+
     repo, db = _open_repo(env_name, db_dir)
     try:
         factors = repo.list_factors(
@@ -606,44 +601,10 @@ def list_factors(
             click.echo("(no factors found)")
             return
 
-        # Check if any factor has promote_score
         has_scores = any(
             f.parameters.get("promote_score") is not None for f in factors
         )
-
-        if has_scores:
-            # Sort by score descending
-            factors = sorted(
-                factors,
-                key=lambda f: f.parameters.get("promote_score", 0) or 0,
-                reverse=True,
-            )
-            click.echo(
-                f"{'#':<4} {'factor_id':<30} {'score':>7} {'status':<10} "
-                f"{'source':<10} {'tags':<20} {'expression'}"
-            )
-            click.echo("-" * 140)
-            for i, f in enumerate(factors, 1):
-                score = f.parameters.get("promote_score")
-                score_str = f"{score:>7.4f}" if score is not None else f"{'-':>7}"
-                tags_str = ", ".join(f.tags) if f.tags else "-"
-                click.echo(
-                    f"{i:<4} {f.factor_id:<30} {score_str} {f.status:<10} "
-                    f"{f.source:<10} {tags_str:<20} {f.expression}"
-                )
-        else:
-            click.echo(
-                f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
-                f"{'source':<10} {'tags':<20} {'expression'}"
-            )
-            click.echo("-" * 140)
-            for f in factors:
-                tags_str = ", ".join(f.tags) if f.tags else "-"
-                click.echo(
-                    f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
-                    f"{f.source:<10} {tags_str:<20} {f.expression}"
-                )
-        click.echo(f"({len(factors)} factors)")
+        print_factor_list(factors, has_scores)
     finally:
         db.close()
 
@@ -679,6 +640,7 @@ def inspect(
 
 def _inspect_prototype(repo, proto_name: str) -> None:
     """Show prototype template + parameter variants."""
+    from nautilus_quants.alpha.formatters import print_prototype_group
     from nautilus_quants.factors.expression.normalize import expression_template
 
     factors = repo.list_factors(prototype=proto_name)
@@ -687,18 +649,14 @@ def _inspect_prototype(repo, proto_name: str) -> None:
         return
 
     sources = {f.source for f in factors if f.source}
-    source_str = ", ".join(sorted(sources)) if sources else "(none)"
-    click.echo(f"Prototype: {proto_name}  ({len(factors)} factors, "
-               f"source: {source_str})")
 
     # Compute template from first factor
+    template = None
     try:
         tmpl, _ = expression_template(factors[0].expression)
-        click.echo(f"Template:  {tmpl}")
+        template = tmpl
     except Exception:
-        click.echo(f"Template:  (parse error)")
-
-    click.echo("-" * 70)
+        pass
 
     # Collect parameter names from all factors
     all_params: list[tuple[str, dict[str, float], str]] = []
@@ -710,26 +668,8 @@ def _inspect_prototype(repo, proto_name: str) -> None:
             params = {}
         all_params.append((f.factor_id, params, f.status))
 
-    if not all_params:
-        return
-
-    # Determine which p* keys actually vary across the group
     p_keys = sorted({k for _, p, _ in all_params for k in p_keys_of(p)})
-    # Compute column width from longest factor_id
-    max_id_len = max((len(name) for name, _, _ in all_params), default=25)
-    col_w = max(max_id_len + 2, 25)
-
-    if not p_keys:
-        for name, _, st in all_params:
-            click.echo(f"  {name:<{col_w}} {st}")
-        return
-
-    # Header
-    p_header = "".join(f"{k:>8}" for k in p_keys)
-    click.echo(f"  {'factor_id':<{col_w}}{p_header}   {'status'}")
-    for name, params, st in all_params:
-        p_vals = "".join(f"{params.get(k, ''):>8}" for k in p_keys)
-        click.echo(f"  {name:<{col_w}}{p_vals}   {st}")
+    print_prototype_group(proto_name, sources, template, all_params, p_keys)
 
 
 def p_keys_of(params: dict) -> list[str]:
@@ -742,52 +682,28 @@ def p_keys_of(params: dict) -> list[str]:
 
 def _inspect_factor(repo, db, factor_id: str) -> None:
     """Show single factor details + metrics + backtests."""
+    from nautilus_quants.alpha.formatters import print_factor_detail
+    from nautilus_quants.alpha.registry.backtest_repository import (
+        BacktestRepository,
+    )
+
     f = repo.get_factor(factor_id)
     if f is None:
         click.echo(f"Error: factor not found: {factor_id}", err=True)
         sys.exit(1)
 
-    click.echo(f"Factor: {f.factor_id}")
-    click.echo(f"Expression: {f.expression}")
-    click.echo(f"Prototype: {f.prototype or '(none)'}")
-    click.echo(f"Source: {f.source or '(none)'}")
-    click.echo(f"Status: {f.status}")
-    click.echo(f"Tags: {', '.join(f.tags) if f.tags else '(none)'}")
-    click.echo(f"Parameters: {f.parameters}")
-    click.echo(f"Variables: {f.variables}")
-
     metrics = repo.get_metrics(factor_id)
-    if metrics:
-        click.echo(f"\nAnalysis metrics ({len(metrics)} records):")
-        for m in metrics[:12]:
-            icir_str = f"{m.icir:.4f}" if m.icir is not None else "-"
-            ic_str = f"{m.ic_mean:.4f}" if m.ic_mean is not None else "-"
-            click.echo(
-                f"  run={m.run_id} period={m.period} "
-                f"IC={ic_str} ICIR={icir_str} timeframe={m.timeframe}"
-            )
-
-    from nautilus_quants.alpha.registry.backtest_repository import (
-        BacktestRepository,
-    )
 
     bt_repo = BacktestRepository(db)
     runs = bt_repo.list_backtests(factor_id=factor_id)
+    backtests = None
     if runs:
-        click.echo(f"\nBacktests ({len(runs)} records):")
-        for r in runs:
-            def _v(v: float | None, fmt: str = ".4f") -> str:
-                return f"{v:{fmt}}" if v is not None else "-"
-            dd = f"{r.max_drawdown:.2%}" if r.max_drawdown else "-"
-            factors = bt_repo.get_backtest_factors(r.backtest_id)
-            fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
-            click.echo(
-                f"  {r.backtest_id}  sharpe={_v(r.sharpe_ratio)} "
-                f"pnl%={_v(r.total_pnl_pct, '.2f')} "
-                f"max_dd={dd} timeframe={r.timeframe} "
-                f"instr={r.instrument_count} "
-                f"factors=[{fids}]"
-            )
+        backtests = [
+            (r, bt_repo.get_backtest_factors(r.backtest_id))
+            for r in runs
+        ]
+
+    print_factor_detail(f, metrics=metrics or None, backtests=backtests)
 
 
 @cli.command()
@@ -823,6 +739,8 @@ def metrics(
     env_name: str | None, db_dir: str,
 ) -> None:
     """Show analysis metrics for a factor."""
+    from nautilus_quants.alpha.formatters import print_metrics_table
+
     repo, db = _open_repo(env_name, db_dir)
     try:
         results = repo.get_metrics(factor_id, timeframe=timeframe)
@@ -830,26 +748,7 @@ def metrics(
             click.echo(f"No metrics found for {factor_id}")
             return
 
-        def _f(v: float | None, w: int = 8, d: int = 4) -> str:
-            return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
-
-        click.echo(
-            f"{'run_id':<18} {'period':<6} "
-            f"{'IC':>8} {'ICIR':>8} {'t(NW)':>8} {'p(NW)':>10} "
-            f"{'mono':>6} {'win%':>7} {'IC_lin':>7} "
-            f"{'IC_skew':>8} {'IC_kur':>8} {'AR1':>7} {'N':>6}"
-        )
-        click.echo("-" * 112)
-        for m in results:
-            wr = f"{m.win_rate * 100:>6.1f}%" if m.win_rate is not None else f"{'-':>7}"
-            p_nw = f"{m.p_value_nw:>10.2e}" if m.p_value_nw is not None else f"{'-':>10}"
-            n = f"{m.n_samples:>6}" if m.n_samples is not None else f"{'-':>6}"
-            click.echo(
-                f"{m.run_id:<18} {m.period:<6} "
-                f"{_f(m.ic_mean)} {_f(m.icir)} {_f(m.t_stat_nw, 8, 2)} {p_nw} "
-                f"{_f(m.monotonicity, 6, 2)} {wr} {_f(m.ic_linearity, 7, 3)} "
-                f"{_f(m.ic_skew)} {_f(m.ic_kurtosis)} {_f(m.ic_ar1, 7, 3)} {n}"
-            )
+        print_metrics_table(factor_id, results)
     finally:
         db.close()
 
@@ -864,6 +763,7 @@ def backtests(
     env_name: str | None, db_dir: str,
 ) -> None:
     """List backtest runs from the registry."""
+    from nautilus_quants.alpha.formatters import print_backtests_table
     from nautilus_quants.alpha.registry.backtest_repository import BacktestRepository
     from nautilus_quants.alpha.registry.database import RegistryDatabase
     from nautilus_quants.alpha.registry.environment import resolve_env
@@ -877,27 +777,11 @@ def backtests(
             click.echo("(no backtests found)")
             return
 
-        def _f(v: float | None, w: int = 8, d: int = 4) -> str:
-            return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
-
-        click.echo(
-            f"{'backtest_id':<18} {'strategy':<20} {'timeframe':<10} "
-            f"{'instr':>5} {'sharpe':>8} {'pnl%':>8} {'max_dd':>9} "
-            f"{'win_rate':>8} {'dur(s)':>7}  {'factors'}"
-        )
-        click.echo("-" * 125)
-        for r in runs:
-            wr = f"{r.win_rate * 100:>7.1f}%" if r.win_rate else f"{'-':>8}"
-            dd = f"{r.max_drawdown * 100:>8.2f}%" if r.max_drawdown else f"{'-':>9}"
-            factors = bt_repo.get_backtest_factors(r.backtest_id)
-            fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
-            click.echo(
-                f"{r.backtest_id:<18} {r.strategy_name:<20} {r.timeframe:<10} "
-                f"{r.instrument_count:>5} {_f(r.sharpe_ratio)} "
-                f"{_f(r.total_pnl_pct)} {dd} "
-                f"{wr} {r.duration_seconds:>7.1f}  {fids}"
-            )
-        click.echo(f"({len(runs)} backtests)")
+        bt_with_factors = [
+            (r, bt_repo.get_backtest_factors(r.backtest_id))
+            for r in runs
+        ]
+        print_backtests_table(bt_with_factors)
     finally:
         db.close()
 
@@ -1013,18 +897,19 @@ def promote(
                 data=scoring_cfg.data,
             )
 
-        click.echo("=" * 80)
-        click.echo("Nautilus Quants - Factor Promotion Pipeline")
-        click.echo("=" * 80)
-        click.echo(f"  Source: {source_env}.duckdb")
-        click.echo(f"  Target: {target_env}.duckdb")
-        click.echo(f"  Config: {config_path}")
-        click.echo(f"  Periods: {scoring_cfg.periods}")
-        click.echo(f"  Dry run: {dry_run}")
-        click.echo(f"  Skip corr: {skip_corr}")
-        click.echo(f"  Max factors: {scoring_cfg.promote.max_factors}")
-        click.echo("=" * 80)
-        click.echo()
+        from nautilus_quants.alpha.formatters import (
+            console as _console,
+            print_promote_header,
+            print_promote_summary,
+            print_selected_factors,
+            print_top_scores,
+        )
+
+        print_promote_header(
+            source_env, target_env, str(config_path),
+            scoring_cfg.periods, dry_run, skip_corr,
+            scoring_cfg.promote.max_factors,
+        )
 
         # 1. Load data from source
         click.echo("Phase 1: Loading scoring data...")
@@ -1073,23 +958,7 @@ def promote(
         df = score_factors(df, scoring_cfg)
 
         # Print top factors table
-        display_cols = ["final_score", "avg_period_score", "consistency",
-                        "turnover_friendliness", "n_valid_periods"]
-        available = [c for c in display_cols if c in df.columns]
-
-        click.echo()
-        click.echo(f"  Top {min(30, len(df))} factors by final_score:")
-        click.echo(f"  {'factor_id':<40} {'score':>7} {'avg_pp':>7} {'cons':>6} "
-                   f"{'turn':>6} {'#pd':>4}")
-        click.echo("  " + "-" * 72)
-        for i, (fid, row) in enumerate(df.head(30).iterrows()):
-            click.echo(
-                f"  {fid:<40} {row.get('final_score', 0):>7.4f} "
-                f"{row.get('avg_period_score', 0):>7.4f} "
-                f"{row.get('consistency', 0):>6.3f} "
-                f"{row.get('turnover_friendliness', 0):>6.3f} "
-                f"{int(row.get('n_valid_periods', 0)):>4}"
-            )
+        print_top_scores(df, n=30)
 
         # 5. Correlation-based greedy selection
         if not skip_corr:
@@ -1172,20 +1041,7 @@ def promote(
         click.echo(f"\n  Scores saved: {scores_csv}")
 
         # Summary
-        click.echo()
-        click.echo("=" * 80)
-        click.echo("PROMOTION SUMMARY")
-        click.echo("=" * 80)
-        click.echo(f"  Candidates after hard filter: {n_after}")
-        click.echo(f"  After fingerprint dedup: {n_after - n_removed}")
-        click.echo(f"  Final selected: {len(selected_ids)}")
-        click.echo()
-
-        # Print selected factors
-        click.echo(f"  Selected factors ({len(selected_ids)}):")
-        for i, fid in enumerate(selected_ids, 1):
-            score = df.loc[fid, "final_score"] if fid in df.index else 0
-            click.echo(f"    {i:3d}. {fid:<40} score={score:.4f}")
+        print_selected_factors(selected_ids, df)
 
         # 6. Migrate (unless dry run)
         if dry_run:
@@ -1210,9 +1066,10 @@ def promote(
 
         source_db.close()
         duration = time.time() - start_time
-        click.echo()
-        click.echo(f"  Duration: {duration:.2f}s")
-        click.echo("=" * 80)
+        print_promote_summary(
+            n_after, n_after - n_removed, len(selected_ids),
+            duration, dry_run,
+        )
 
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -1226,6 +1083,11 @@ def promote(
 @_DB_DIR_OPTION
 def audit(env_name: str | None, db_dir: str) -> None:
     """Audit the factor registry for duplicates and prototype issues."""
+    from nautilus_quants.alpha.formatters import (
+        console as _console,
+        print_audit_duplicates,
+        print_audit_template_groups,
+    )
     from nautilus_quants.alpha.registry.audit import (
         find_expression_duplicates,
         suggest_prototype_groups,
@@ -1234,40 +1096,13 @@ def audit(env_name: str | None, db_dir: str) -> None:
     repo, db = _open_repo(env_name, db_dir)
     try:
         factors = repo.list_factors()
-        click.echo(f"Total factors: {len(factors)}")
-        click.echo()
+        _console.print(f"Total factors: [bold]{len(factors)}[/bold]")
 
-        # Expression duplicates
         dup_groups = find_expression_duplicates(repo)
-        if dup_groups:
-            click.echo(f"Expression duplicates ({len(dup_groups)} groups):")
-            click.echo("-" * 60)
-            for group in dup_groups:
-                ids = [f.factor_id for f in group]
-                click.echo(f"  {' ≡ '.join(ids)}")
-                click.echo(f"    expr: {group[0].expression[:80]}")
-            click.echo()
-        else:
-            click.echo("No expression duplicates found.")
-            click.echo()
+        print_audit_duplicates(dup_groups)
 
-        # Prototype group suggestions
         groups = suggest_prototype_groups(repo)
-        if groups:
-            click.echo(
-                f"Template groups ({len(groups)} groups with ≥2 members):"
-            )
-            click.echo("-" * 60)
-            for tmpl, members in sorted(
-                groups.items(), key=lambda x: -len(x[1]),
-            ):
-                fids = [m[0] for m in members]
-                click.echo(f"  [{len(members)}] {tmpl[:70]}")
-                for fid, params in members[:5]:
-                    click.echo(f"       {fid}  {params}")
-                if len(members) > 5:
-                    click.echo(f"       ... and {len(members) - 5} more")
-            click.echo()
+        print_audit_template_groups(groups)
     finally:
         db.close()
 
@@ -1286,18 +1121,13 @@ def backfill(execute: bool, env_name: str | None, db_dir: str) -> None:
     """
     from nautilus_quants.alpha.registry.audit import backfill_factors
 
+    from nautilus_quants.alpha.formatters import print_backfill_result
+
     dry_run = not execute
     repo, db = _open_repo(env_name, db_dir)
     try:
         counts = backfill_factors(repo, dry_run=dry_run)
-        mode = "DRY RUN" if dry_run else "EXECUTED"
-        click.echo(f"[{mode}] Backfill results:")
-        click.echo(f"  expression_hash updated: {counts['hash']}")
-        click.echo(f"  prototype fixed:         {counts['prototype']}")
-        click.echo(f"  parameters extracted:    {counts['parameters']}")
-        if dry_run:
-            click.echo()
-            click.echo("Use --execute to apply changes.")
+        print_backfill_result(counts, dry_run)
     finally:
         db.close()
 
@@ -1321,26 +1151,58 @@ def dedup(
     """Remove duplicate factors by expression hash."""
     from nautilus_quants.alpha.registry.audit import dedup_factors
 
+    from nautilus_quants.alpha.formatters import print_dedup_result
+
     actual_dry_run = not execute
     repo, db = _open_repo(env_name, db_dir)
     try:
         removed = dedup_factors(
             repo, keep_source=keep_source, dry_run=actual_dry_run,
         )
-        if not removed:
-            click.echo("No duplicates found.")
-            return
-
-        mode = "DRY RUN" if actual_dry_run else "EXECUTED"
-        click.echo(f"[{mode}] {len(removed)} duplicate(s):")
-        for rm_id, keep_id in removed:
-            click.echo(f"  DELETE {rm_id}  (keep {keep_id})")
-
-        if actual_dry_run:
-            click.echo()
-            click.echo("Use --execute to actually delete.")
+        print_dedup_result(removed, actual_dry_run)
     finally:
         db.close()
+
+
+@cli.command()
+@click.argument("config_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--rounds", default=5, type=int, help="Number of mining rounds.")
+@click.option("--factors-per-round", default=None, type=int,
+              help="Factors to generate per round (default: from config or 8).")
+@click.option("--model", default=None, help="Claude model (sonnet/opus, default: from config or sonnet).")
+@click.option("--hypothesis", default=None, help="Initial hypothesis direction for factor generation.")
+@click.option("--no-analyze", is_flag=True, help="Generate factors only, skip IC analysis.")
+def mine(
+    config_file: Path,
+    rounds: int,
+    factors_per_round: int | None,
+    model: str | None,
+    hypothesis: str | None,
+    no_analyze: bool,
+) -> None:
+    """LLM-driven alpha factor mining via Claude Code CLI.
+
+    Generates factor expressions using Claude, validates them against
+    the expression parser, and optionally runs alphalens analysis.
+
+    \b
+    Examples:
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --rounds 3
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --hypothesis "volume divergence"
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --no-analyze --rounds 1
+    """
+    from nautilus_quants.alpha.mining.agent.miner import AlphaMiner, MiningConfig
+
+    config = MiningConfig.from_yaml(
+        config_file,
+        factors_per_round=factors_per_round,
+        model=model,
+        hypothesis=hypothesis,
+        auto_analyze=not no_analyze,
+    )
+    miner = AlphaMiner(config)
+    miner.run(rounds=rounds)
 
 
 if __name__ == "__main__":
