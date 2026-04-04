@@ -60,6 +60,10 @@ _OPERATOR_REFERENCE = """\
 - covariance(x, y, window)  — Rolling covariance between x and y
 - decay_linear(x, window)   — Linearly weighted moving average (recent bars weighted more)
 - ema(x, window)            — Exponential moving average (alpha = 2/(window+1))
+- ts_slope(x, window)       — Rolling linear regression slope (trend strength)
+- ts_rsquare(x, window)     — Rolling R-squared (0=noise, 1=perfect linear trend)
+- ts_residual(x, window)    — Deviation of last value from regression line
+- ts_percentile(x, window, q) — Rolling q-th quantile (e.g. q=0.5 for median)
 
 ### Cross-Sectional Operators (row-wise, across all instruments at each timestamp)
 - cs_rank(x)                — Percentile rank across instruments [1/n, 1]

@@ -17,7 +17,7 @@ mining:
   factors_per_round: 8
   model: "sonnet"                        # sonnet / opus
   proxy: "http://127.0.0.1:8888"        # SSH tunnel proxy for claude CLI
-  parallel: 5                            # concurrent claude requests per batch
+  parallel: 20                         # concurrent claude requests per batch
   output_dir: "logs/alpha_mining"
 
 # Charts (only these 6; empty list = no charts)
