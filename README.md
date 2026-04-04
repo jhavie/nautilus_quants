@@ -44,6 +44,17 @@ Factor quality evaluation using alphalens-reloaded:
 - Parallel evaluation via ProcessPoolExecutor
 - Auto-persist to DuckDB registry (configurable via YAML)
 
+### Alpha Mining (`nautilus_quants.alpha.mining`)
+
+LLM-driven alpha factor discovery using Claude Code CLI (`claude -p`):
+
+- **Hypothesis-first generation**: LLM outputs market hypothesis before writing expressions
+- **DSL-native**: Generates expressions directly in the project's Alpha101-style DSL (62 operators)
+- **Anti-duplication**: Injects all previous expressions into prompt to avoid repetition
+- **Iterative feedback**: Top factors' IC/ICIR from previous rounds guide next generation
+- **Auto-validation**: `parse_expression()` + `expression_hash()` for syntax check and dedup
+- **Full logging**: Each round saves prompt, response, validated factors, and analysis results
+
 ### Factor Registry (`nautilus_quants.alpha.registry`)
 
 DuckDB-backed factor lifecycle management with multi-environment support:
@@ -78,6 +89,7 @@ registry:
 | `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
 | `promote` | Score, dedup, decorrelate & promote factors across envs | `promote --source-env test --target-env dev --dry-run` |
 | `promote` | Promote with scoring config file | `promote --config config/examples/scoring.yaml` |
+| `mine` | LLM-driven alpha factor mining via Claude Code CLI | `mine config/cs/alpha_101.yaml --rounds 5` |
 
 **Backtest CLI (`python -m nautilus_quants.backtest`):**
 
@@ -176,6 +188,27 @@ python -m nautilus_quants.backtest list
 python -m nautilus_quants.alpha analyze config/examples/alpha_analysis.yaml -v
 ```
 
+#### Alpha Factor Mining (LLM)
+
+```bash
+# Mine factors (5 rounds × 8 factors = ~40 candidates)
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml
+
+# Mine with hypothesis direction
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml \
+  --hypothesis "volume-price divergence predicts reversal in crypto"
+
+# Generate only (skip IC analysis)
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --no-analyze --rounds 3
+
+# Use opus model for deeper reasoning
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --model opus
+
+# Review mined factors
+python -m nautilus_quants.alpha list --env test --source llm_mining
+python -m nautilus_quants.alpha promote --source-env test --target-env dev
+```
+
 ## Configuration
 
 All parameters are YAML-driven. No hardcoded values in source code.
@@ -209,9 +242,10 @@ src/nautilus_quants/
 │   ├── expression/     # Lark parser + AST
 │   ├── operators/      # TS / CS / Math operators
 │   └── builtin/        # 45 Alpha101 factors
-├── alpha/              # Factor analysis (alphalens)
-│   ├── cli.py          # Analysis CLI
-│   └── analysis/       # Evaluator + report generation
+├── alpha/              # Factor analysis + mining
+│   ├── cli.py          # Analysis & mining CLI
+│   ├── analysis/       # Evaluator + report generation
+│   └── mining/agent/   # LLM-driven factor mining (prompts + orchestrator)
 ├── backtest/           # Backtest framework
 │   ├── cli.py          # Backtest CLI
 │   ├── runner.py       # BacktestNode executor
