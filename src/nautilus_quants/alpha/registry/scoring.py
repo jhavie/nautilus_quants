@@ -887,6 +887,54 @@ def greedy_select(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+def retire_evicted_factors(
+    target_db: RegistryDatabase,
+    selected_ids: list[str],
+    existing_ids: list[str],
+) -> list[str]:
+    """Archive factors in target that were not selected in competitive mode.
+
+    Compares ``existing_ids`` (current active factors in target) against
+    ``selected_ids`` (globally optimal set). Factors present in existing
+    but absent from selected are transitioned active → archived.
+
+    Returns list of evicted factor_ids.
+    """
+    from nautilus_quants.alpha.registry.repository import _now_iso
+
+    selected_set = set(selected_ids)
+    to_evict = [fid for fid in existing_ids if fid not in selected_set]
+    if not to_evict:
+        return []
+
+    evicted: list[str] = []
+    now = _now_iso()
+    for fid in to_evict:
+        # Verify the factor is actually active before archiving
+        row = target_db.fetch_one(
+            "SELECT factor_id FROM factors "
+            "WHERE factor_id = ? AND status = 'active'",
+            [fid],
+        )
+        if row is None:
+            continue
+        try:
+            target_db.execute(
+                "UPDATE factors SET status = 'archived', updated_at = ? "
+                "WHERE factor_id = ? AND status = 'active'",
+                [now, fid],
+            )
+            evicted.append(fid)
+        except Exception as exc:
+            logger.warning("Failed to archive evicted factor %s: %s", fid, exc)
+
+    if evicted:
+        logger.info(
+            "Competitive mode: archived %d evicted factors", len(evicted),
+        )
+    return evicted
+
+
 def migrate_factors(
     source_db: RegistryDatabase,
     target_db: RegistryDatabase,

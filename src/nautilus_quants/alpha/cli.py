@@ -838,6 +838,11 @@ def export_factors(
 @click.option("--dry-run", is_flag=True, help="Score and rank without migrating.")
 @click.option("--skip-corr", is_flag=True, help="Skip correlation computation (fingerprint dedup only).")
 @click.option("--max-factors", default=None, type=int, help="Override max factors to promote.")
+@click.option(
+    "--competitive", is_flag=True,
+    help="Full re-selection: existing target factors compete with candidates. "
+         "Factors that lose are archived.",
+)
 @_DB_DIR_OPTION
 def promote(
     source_env: str,
@@ -846,6 +851,7 @@ def promote(
     dry_run: bool,
     skip_corr: bool,
     max_factors: int | None,
+    competitive: bool,
     db_dir: str,
 ) -> None:
     """Score, deduplicate, decorrelate, and promote factors to target env.
@@ -859,9 +865,17 @@ def promote(
       6. Migrate to target env (unless --dry-run)
 
     \b
+    Modes:
+      Default (additive): existing target factors are gatekeepers; new factors
+        are added without evicting incumbents.
+      --competitive: full re-selection from source. Existing target factors
+        that are not re-selected are archived. The target env always reflects
+        the globally optimal set under the current scoring config.
+
+    \b
     Examples:
       python -m nautilus_quants.alpha promote --source-env test --target-env dev
-      python -m nautilus_quants.alpha promote --source-env test --target-env dev --dry-run
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --competitive --dry-run
       python -m nautilus_quants.alpha promote --source-env test --target-env dev --skip-corr
       python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --max-factors 50
     """
@@ -879,6 +893,7 @@ def promote(
         load_scoring_config,
         load_scoring_data,
         migrate_factors,
+        retire_evicted_factors,
         score_factors,
     )
 
@@ -967,11 +982,12 @@ def promote(
         print_top_scores(df, n=30)
 
         # 5. Correlation-based greedy selection
-        if not skip_corr:
-            # Load existing factors from target DB for cross-env decorrelation
-            from nautilus_quants.alpha.registry.repository import FactorRepository
+        # Load existing target factors (needed for both additive gatekeeper
+        # and competitive eviction modes)
+        from nautilus_quants.alpha.registry.repository import FactorRepository
 
-            target_existing_ids: list[str] = []
+        target_existing_ids: list[str] = []
+        if not skip_corr or competitive:
             target_db_query = RegistryDatabase.for_environment(target_env, db_dir)
             try:
                 tgt_repo = FactorRepository(target_db_query)
@@ -980,11 +996,13 @@ def promote(
             finally:
                 target_db_query.close()
 
+        if not skip_corr:
             if target_existing_ids:
                 click.echo()
+                mode_label = "competitive (will evict)" if competitive else "gatekeeper"
                 click.echo(
                     f"  Target DB ({target_env}): {len(target_existing_ids)} "
-                    f"existing factors will participate in decorrelation"
+                    f"existing factors [{mode_label}]"
                 )
 
             click.echo()
@@ -1037,17 +1055,55 @@ def promote(
                     except Exception as e:
                         click.echo(f"  Warning: Heatmap generation failed: {e}", err=True)
 
-                    # Greedy selection with existing factors as gatekeepers
+                    # Greedy selection
                     click.echo()
-                    click.echo("Phase 2.3: Greedy selection (max corr "
-                               f"≤ {scoring_cfg.dedup.max_corr})...")
-                    selected_ids = greedy_select(
-                        df, corr_matrix,
-                        max_corr=scoring_cfg.dedup.max_corr,
-                        max_factors=scoring_cfg.promote.max_factors,
-                        existing_ids=target_existing_ids,
-                    )
+                    if competitive:
+                        click.echo(
+                            "Phase 2.3: Competitive greedy selection "
+                            f"(max corr ≤ {scoring_cfg.dedup.max_corr}, "
+                            "no gatekeepers)..."
+                        )
+                        selected_ids = greedy_select(
+                            df, corr_matrix,
+                            max_corr=scoring_cfg.dedup.max_corr,
+                            max_factors=scoring_cfg.promote.max_factors,
+                        )
+                    else:
+                        click.echo(
+                            "Phase 2.3: Greedy selection (max corr "
+                            f"≤ {scoring_cfg.dedup.max_corr})..."
+                        )
+                        selected_ids = greedy_select(
+                            df, corr_matrix,
+                            max_corr=scoring_cfg.dedup.max_corr,
+                            max_factors=scoring_cfg.promote.max_factors,
+                            existing_ids=target_existing_ids,
+                        )
                     click.echo(f"  Selected {len(selected_ids)} factors")
+
+                    # Competitive: report eviction plan
+                    if competitive and target_existing_ids:
+                        selected_set = set(selected_ids)
+                        existing_set = set(target_existing_ids)
+                        retained = selected_set & existing_set
+                        newly_added = selected_set - existing_set
+                        will_evict = existing_set - selected_set
+                        no_source = will_evict - set(df.index.tolist())
+                        if no_source:
+                            click.echo(
+                                f"  Warning: {len(no_source)} factors have "
+                                f"no source metrics in {source_env}: "
+                                f"{sorted(no_source)}"
+                            )
+                        click.echo(
+                            f"  Competitive diff: "
+                            f"{len(retained)} retained, "
+                            f"{len(newly_added)} new, "
+                            f"{len(will_evict)} to evict"
+                        )
+                        if will_evict:
+                            for fid in sorted(will_evict):
+                                click.echo(f"    - evict: {fid}")
                 else:
                     click.echo("  Warning: Empty correlation matrix, skipping greedy selection")
                     selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
@@ -1085,18 +1141,48 @@ def promote(
             click.echo("  [DRY RUN] No migration performed.")
         else:
             click.echo()
-            click.echo(f"Phase 3: Migrating {len(selected_ids)} factors "
-                       f"to {target_env}.duckdb...")
             target_db = RegistryDatabase.for_environment(target_env, db_dir)
             try:
-                counts = migrate_factors(
-                    source_db, target_db, selected_ids,
-                    target_status=scoring_cfg.promote.target_status,
-                    scores=df,
-                )
-                click.echo(f"  Migrated: {counts['factors']} factors, "
-                           f"{counts['metrics']} metrics, "
-                           f"{counts['configs']} config snapshots")
+                # Wrap evict + migrate in a transaction for atomicity
+                if competitive and target_existing_ids:
+                    target_db.connection.begin()
+                try:
+                    if competitive and target_existing_ids:
+                        evicted_ids = retire_evicted_factors(
+                            target_db, selected_ids, target_existing_ids,
+                        )
+                        if evicted_ids:
+                            click.echo(
+                                f"Phase 3a: Archived {len(evicted_ids)} "
+                                f"evicted factors from {target_env}.duckdb"
+                            )
+
+                    phase = "Phase 3b: Syncing" if competitive else "Phase 3: Migrating"
+                    click.echo(
+                        f"{phase} {len(selected_ids)} factors "
+                        f"to {target_env}.duckdb..."
+                    )
+                    counts = migrate_factors(
+                        source_db, target_db, selected_ids,
+                        target_status=scoring_cfg.promote.target_status,
+                        scores=df,
+                    )
+                    click.echo(
+                        f"  Migrated: {counts['factors']} factors, "
+                        f"{counts['metrics']} metrics, "
+                        f"{counts['configs']} config snapshots"
+                    )
+
+                    if competitive and target_existing_ids:
+                        target_db.connection.commit()
+                except Exception:
+                    if competitive and target_existing_ids:
+                        target_db.connection.rollback()
+                        click.echo(
+                            "  Error during competitive sync — "
+                            "rolled back all changes.", err=True,
+                        )
+                    raise
             finally:
                 target_db.close()
 
