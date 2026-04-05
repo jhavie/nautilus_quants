@@ -280,8 +280,15 @@ class FactorEvaluator:
         """
         try:
             catalog = ParquetDataCatalog(catalog_path)
-            fr_data = catalog.funding_rates(instrument_ids=instruments)
-            if fr_data is None or len(fr_data) == 0:
+            # Workaround: NautilusTrader batch query loses per-file
+            # instrument_id metadata when PyArrow merges parquet files.
+            # Query per-instrument to preserve correct instrument_id.
+            fr_data: list = []
+            for inst in instruments:
+                result = catalog.funding_rates(instrument_ids=[inst])
+                if result:
+                    fr_data.extend(result)
+            if not fr_data:
                 logger.warning("No FundingRateUpdate data in catalog")
                 return None
 
