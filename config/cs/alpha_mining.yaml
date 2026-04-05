@@ -17,7 +17,7 @@ mining:
   factors_per_round: 8
   model: "sonnet"                        # sonnet / opus
   proxy: "http://127.0.0.1:8888"        # SSH tunnel proxy for claude CLI
-  parallel: 20                         # concurrent claude requests per batch
+  parallel: 3                         # concurrent claude requests per batch
   output_dir: "logs/alpha_mining"
 
 # Charts (only these 6; empty list = no charts)
@@ -30,61 +30,44 @@ charts:
   - ic_histogram
 
 # ── Data source (shared with analysis) ──
-catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+catalog_path: "/Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/data/data_4years_4h/catalog"
 bar_spec: "4h"
+
+# FR/OI data injection
+funding_rate: true
+oi_data_path: "/Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/data/data_4years_4h/catalog"
+oi_timeframe: "4h"
 
 # factor_config_path: auto-generated per round by miner
 # factors: auto-generated per round (empty = analyze all)
 
-# Instrument universe (116 coins, 4-year 4h data)
+# 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+# (10 delisted/renamed on Bybit excluded: ANT, AUDIO, CELR, FTM, GTC, KLAY, MATIC, OMG, REN, XEM)
 instrument_ids:
-  - "1000LUNCUSDT.BINANCE"
-  - "1000SHIBUSDT.BINANCE"
-  - "1000XECUSDT.BINANCE"
   - "1INCHUSDT.BINANCE"
   - "AAVEUSDT.BINANCE"
   - "ADAUSDT.BINANCE"
   - "ALGOUSDT.BINANCE"
   - "ALICEUSDT.BINANCE"
-  - "ALPHAUSDT.BINANCE"
   - "ANKRUSDT.BINANCE"
-  - "ANTUSDT.BINANCE"
-  - "APEUSDT.BINANCE"
-  - "API3USDT.BINANCE"
-  - "ARPAUSDT.BINANCE"
+  # - "ANTUSDT.BINANCE"      # delisted on Bybit
   - "ARUSDT.BINANCE"
-  - "ATAUSDT.BINANCE"
   - "ATOMUSDT.BINANCE"
-  - "AUDIOUSDT.BINANCE"
+  # - "AUDIOUSDT.BINANCE"    # delisted on Bybit
   - "AVAXUSDT.BINANCE"
   - "AXSUSDT.BINANCE"
-  - "BAKEUSDT.BINANCE"
-  - "BALUSDT.BINANCE"
-  - "BANDUSDT.BINANCE"
   - "BATUSDT.BINANCE"
   - "BCHUSDT.BINANCE"
-  - "BELUSDT.BINANCE"
-  - "BLZUSDT.BINANCE"
   - "BNBUSDT.BINANCE"
-  - "BTCDOMUSDT.BINANCE"
   - "BTCUSDT.BINANCE"
   - "C98USDT.BINANCE"
-  - "CELOUSDT.BINANCE"
-  - "CELRUSDT.BINANCE"
+  # - "CELRUSDT.BINANCE"     # delisted on Bybit
   - "CHRUSDT.BINANCE"
   - "CHZUSDT.BINANCE"
   - "COMPUSDT.BINANCE"
   - "COTIUSDT.BINANCE"
   - "CRVUSDT.BINANCE"
-  - "CTKUSDT.BINANCE"
-  - "CTSIUSDT.BINANCE"
-  - "CVCUSDT.BINANCE"
-  - "CVXUSDT.BINANCE"
-  - "DARUSDT.BINANCE"
   - "DASHUSDT.BINANCE"
-  - "DEFIUSDT.BINANCE"
-  - "DENTUSDT.BINANCE"
-  - "DGBUSDT.BINANCE"
   - "DOGEUSDT.BINANCE"
   - "DOTUSDT.BINANCE"
   - "DUSKUSDT.BINANCE"
@@ -95,89 +78,49 @@ instrument_ids:
   - "ETCUSDT.BINANCE"
   - "ETHUSDT.BINANCE"
   - "FILUSDT.BINANCE"
-  - "FLMUSDT.BINANCE"
-  - "FLOWUSDT.BINANCE"
-  - "FTMUSDT.BINANCE"
+  # - "FTMUSDT.BINANCE"      # renamed to SONICUSDT on Bybit
   - "GALAUSDT.BINANCE"
-  - "GALUSDT.BINANCE"
-  - "GMTUSDT.BINANCE"
   - "GRTUSDT.BINANCE"
-  - "GTCUSDT.BINANCE"
+  # - "GTCUSDT.BINANCE"      # delisted on Bybit
   - "HBARUSDT.BINANCE"
-  - "HOTUSDT.BINANCE"
-  - "ICPUSDT.BINANCE"
-  - "ICXUSDT.BINANCE"
-  - "IMXUSDT.BINANCE"
-  - "INJUSDT.BINANCE"
   - "IOSTUSDT.BINANCE"
   - "IOTAUSDT.BINANCE"
   - "IOTXUSDT.BINANCE"
-  - "JASMYUSDT.BINANCE"
-  - "KAVAUSDT.BINANCE"
-  - "KLAYUSDT.BINANCE"
+  # - "KLAYUSDT.BINANCE"     # delisted on Bybit
   - "KSMUSDT.BINANCE"
-  - "LDOUSDT.BINANCE"
-  - "LINAUSDT.BINANCE"
   - "LINKUSDT.BINANCE"
-  - "LITUSDT.BINANCE"
   - "LPTUSDT.BINANCE"
   - "LRCUSDT.BINANCE"
   - "LTCUSDT.BINANCE"
-  - "LUNA2USDT.BINANCE"
   - "MANAUSDT.BINANCE"
   - "MASKUSDT.BINANCE"
-  - "MATICUSDT.BINANCE"
-  - "MKRUSDT.BINANCE"
-  - "MTLUSDT.BINANCE"
+  # - "MATICUSDT.BINANCE"    # renamed to POLUSDT on Bybit
   - "NEARUSDT.BINANCE"
-  - "NEOUSDT.BINANCE"
-  - "NKNUSDT.BINANCE"
-  - "OCEANUSDT.BINANCE"
-  - "OGNUSDT.BINANCE"
-  - "OMGUSDT.BINANCE"
+  # - "OMGUSDT.BINANCE"      # delisted on Bybit
   - "ONEUSDT.BINANCE"
-  - "ONTUSDT.BINANCE"
-  - "OPUSDT.BINANCE"
   - "PEOPLEUSDT.BINANCE"
   - "QTUMUSDT.BINANCE"
-  - "REEFUSDT.BINANCE"
-  - "RENUSDT.BINANCE"
-  - "RLCUSDT.BINANCE"
-  - "ROSEUSDT.BINANCE"
+  # - "RENUSDT.BINANCE"      # delisted on Bybit
   - "RSRUSDT.BINANCE"
   - "RUNEUSDT.BINANCE"
-  - "RVNUSDT.BINANCE"
   - "SANDUSDT.BINANCE"
-  - "SCUSDT.BINANCE"
   - "SFPUSDT.BINANCE"
-  - "SKLUSDT.BINANCE"
   - "SNXUSDT.BINANCE"
   - "SOLUSDT.BINANCE"
-  - "SPELLUSDT.BINANCE"
-  - "STGUSDT.BINANCE"
-  - "STMXUSDT.BINANCE"
   - "STORJUSDT.BINANCE"
   - "SUSHIUSDT.BINANCE"
   - "SXPUSDT.BINANCE"
   - "THETAUSDT.BINANCE"
-  - "TLMUSDT.BINANCE"
-  - "TRBUSDT.BINANCE"
   - "TRXUSDT.BINANCE"
-  - "UNFIUSDT.BINANCE"
   - "UNIUSDT.BINANCE"
   - "VETUSDT.BINANCE"
-  - "WAVESUSDT.BINANCE"
-  - "WOOUSDT.BINANCE"
-  - "XEMUSDT.BINANCE"
+  # - "XEMUSDT.BINANCE"      # delisted on Bybit
   - "XLMUSDT.BINANCE"
-  - "XMRUSDT.BINANCE"
   - "XRPUSDT.BINANCE"
   - "XTZUSDT.BINANCE"
   - "YFIUSDT.BINANCE"
   - "ZECUSDT.BINANCE"
   - "ZENUSDT.BINANCE"
-  - "ZILUSDT.BINANCE"
-  - "ZRXUSDT.BINANCE"
 
 # alphalens parameters
 periods: [1, 2, 6, 18]    # forward returns: 4h, 8h, 24h, 72h

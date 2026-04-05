@@ -139,8 +139,16 @@ _CONSTRUCTION_RULES = """\
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects
    - High volatility — use shorter windows (6-42 bars) for responsiveness
-   - Only OHLCV data — no fundamentals, no order book, no funding rate
+   - OHLCV + funding_rate + open_interest available
+   - funding_rate: settlement every 8h (00:00/08:00/16:00 UTC), positive=longs pay shorts
+   - open_interest: total open positions in base asset, 4h granularity
    - {window_guide}
+   - **CRITICAL: funding_rate updates every 8h, NOT every bar.**
+     With 4h bars, funding_rate only changes every 2 bars (same value repeats in between).
+     Window descriptions MUST use 8h-based counting for funding_rate:
+     window=3 over funding_rate = 3 settlements = 1 day (NOT 12h).
+     window=21 over funding_rate = 21 settlements = 1 week.
+     Do NOT confuse bar-count windows with funding settlement windows in descriptions.
 
 6. **Avoid strict equalities.** Use ranges instead of `==`:
    - BAD:  `ts_min(low, 10) == delay(ts_min(low, 10), 1)`
@@ -154,8 +162,12 @@ _CONSTRUCTION_RULES = """\
 
 
 _AVAILABLE_VARIABLES = (
-    "close, open, high, low, volume, returns "
-    "(returns = delta(close,1)/delay(close,1), pre-computed)"
+    "close, open, high, low, volume, returns, funding_rate, open_interest\n"
+    "- returns = delta(close,1)/delay(close,1), pre-computed\n"
+    "- funding_rate = 8-hour perpetual funding rate from Bybit "
+    "(typically ±0.01%, forward-filled across bars)\n"
+    "- open_interest = total open interest in base asset units from Bybit "
+    "(e.g. BTC quantity, 4h granularity)"
 )
 
 

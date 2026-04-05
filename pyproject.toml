@@ -31,6 +31,7 @@ data = [
     "tqdm>=4.66",
     "PySocks>=1.7.1",
     "python-binance>=1.0.19",
+    "pybit>=5.0",
     "tenacity>=8.0.0",
 ]
 backtest = [

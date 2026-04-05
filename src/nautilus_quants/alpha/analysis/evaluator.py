@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from nautilus_trader.persistence.catalog import ParquetDataCatalog
+
+from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
 from nautilus_quants.alpha.data_loader import CatalogDataLoader
 from nautilus_quants.factors.config import FactorConfig
 from nautilus_quants.factors.engine.evaluator import Evaluator
@@ -22,8 +25,6 @@ from nautilus_quants.factors.operators.time_series import TS_OPERATOR_INSTANCES
 
 if TYPE_CHECKING:
     from nautilus_trader.model.data import Bar
-
-    from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,13 @@ class FactorEvaluator:
     recursive AST pass.
     """
 
-    def __init__(self, factor_config: FactorConfig) -> None:
+    def __init__(
+        self,
+        factor_config: FactorConfig,
+        analysis_config: AlphaAnalysisConfig | None = None,
+    ) -> None:
         self._factor_config = factor_config
+        self._analysis_config = analysis_config
 
     def evaluate(
         self,
@@ -99,6 +105,26 @@ class FactorEvaluator:
         # Inject config parameters
         for p_name, p_val in config.parameters.items():
             panel_fields[p_name] = p_val
+
+        # Inject funding rate data
+        acfg = self._analysis_config
+        if acfg and acfg.funding_rate and acfg.catalog_path:
+            fr_panel = self._load_funding_rate_panel(
+                acfg.catalog_path, instruments, panel_fields["close"],
+            )
+            if fr_panel is not None:
+                panel_fields["funding_rate"] = fr_panel
+                logger.info("Injected funding_rate panel: %s", fr_panel.shape)
+
+        # Inject open interest data
+        if acfg and acfg.oi_data_path:
+            oi_panel = self._load_oi_panel(
+                acfg.oi_data_path, instruments, panel_fields["close"],
+                timeframe=acfg.oi_timeframe,
+            )
+            if oi_panel is not None:
+                panel_fields["open_interest"] = oi_panel
+                logger.info("Injected open_interest panel: %s", oi_panel.shape)
 
         # --- Step 3: Evaluate via Evaluator ---
         evaluator = Evaluator(
@@ -240,6 +266,90 @@ class FactorEvaluator:
             rename_map[col] = _format_bar_period(n_bars, bar_td)
 
         return df.rename(columns=rename_map)
+
+    @staticmethod
+    def _load_funding_rate_panel(
+        catalog_path: str,
+        instruments: list[str],
+        close_panel: pd.DataFrame,
+    ) -> pd.DataFrame | None:
+        """Load FundingRateUpdate from catalog and build panel aligned to close.
+
+        Returns DataFrame(index=datetime, columns=instruments) with forward-filled
+        funding rate values, or None if no data found.
+        """
+        try:
+            catalog = ParquetDataCatalog(catalog_path)
+            fr_data = catalog.funding_rates(instrument_ids=instruments)
+            if fr_data is None or len(fr_data) == 0:
+                logger.warning("No FundingRateUpdate data in catalog")
+                return None
+
+            # Build per-instrument Series
+            fr_dict: dict[str, dict] = {}
+            for fru in fr_data:
+                inst_id = str(fru.instrument_id)
+                ts = pd.Timestamp(fru.ts_event, unit="ns")
+                if inst_id not in fr_dict:
+                    fr_dict[inst_id] = {}
+                fr_dict[inst_id][ts] = float(fru.rate)
+
+            if not fr_dict:
+                return None
+
+            fr_panel = pd.DataFrame(
+                {k: pd.Series(v) for k, v in fr_dict.items()}
+            )
+            # Reindex to close_panel timestamps, forward-fill
+            fr_panel = fr_panel.reindex(close_panel.index, method="ffill")
+            # Fill remaining NaN columns for instruments without FR data
+            for col in close_panel.columns:
+                if col not in fr_panel.columns:
+                    fr_panel[col] = 0.0
+            return fr_panel[close_panel.columns]
+        except Exception as e:
+            logger.warning("Failed to load funding rate panel: %s", e)
+            return None
+
+    @staticmethod
+    def _load_oi_panel(
+        oi_data_path: str,
+        instruments: list[str],
+        close_panel: pd.DataFrame,
+        timeframe: str = "4h",
+    ) -> pd.DataFrame | None:
+        """Load OI parquet and build panel aligned to close.
+
+        Returns DataFrame(index=datetime, columns=instruments) with forward-filled
+        open interest values, or None if no data found.
+        """
+        try:
+            from nautilus_quants.data.transform.open_interest import (
+                load_oi_lookup,
+            )
+
+            lookup = load_oi_lookup(oi_data_path, instruments, timeframe)
+
+            oi_series: dict[str, pd.Series] = {}
+            for inst_id, ts_map in lookup.items():
+                if not ts_map:
+                    continue
+                timestamps = [pd.Timestamp(ts, unit="ns") for ts in ts_map]
+                values = [d["open_interest"] for d in ts_map.values()]
+                oi_series[inst_id] = pd.Series(values, index=timestamps)
+
+            if not oi_series:
+                return None
+
+            oi_panel = pd.DataFrame(oi_series)
+            oi_panel = oi_panel.reindex(close_panel.index, method="ffill")
+            for col in close_panel.columns:
+                if col not in oi_panel.columns:
+                    oi_panel[col] = 0.0
+            return oi_panel[close_panel.columns]
+        except Exception as e:
+            logger.warning("Failed to load OI panel: %s", e)
+            return None
 
     def run_alphalens(
         self,
