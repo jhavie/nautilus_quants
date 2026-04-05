@@ -1122,10 +1122,9 @@ def promote(
         scores_csv = scores_dir / f"factor_scores_{timestamp}.csv"
         score_cols = [
             "final_score", "avg_period_score",
-            "pred_score", "stab_score", "mono_score",
+            "pred_score", "mono_score",
             "consistency", "turnover_friendliness",
-            "avg_icir", "avg_t_stat_nw", "avg_win_rate",
-            "avg_ic_linearity", "avg_monotonicity",
+            "avg_icir", "avg_ic_mean", "avg_monotonicity",
             "n_valid_periods",
         ]
         save_cols = [c for c in score_cols if c in df.columns]

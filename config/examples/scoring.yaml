@@ -23,26 +23,25 @@ hard_filters:
   min_valid_periods: 2         # at least 2 periods must pass
 
 # ── Phase 1: Scoring Weights ──
+# 4-dimension scoring: predictiveness, monotonicity, consistency, turnover
+#
+# Eliminated dimensions:
+#   stability (ic_linearity CV=0.024 after filter, win_rate corr 0.984 with ICIR)
+# Eliminated sub-metrics:
+#   t_stat_nw (corr 0.978 with ICIR), win_rate, ic_linearity
 scoring:
   # Dimension weights (must sum to 1.0)
   weights:
-    predictiveness: 0.30
-    stability: 0.25
-    monotonicity: 0.10
-    consistency: 0.15
-    turnover_friendliness: 0.20
+    predictiveness: 0.40       # ICIR + ic_mean
+    monotonicity: 0.25         # quantile return monotonicity (most independent signal)
+    consistency: 0.15          # cross-period min/max ratio
+    turnover_friendliness: 0.20  # IC autocorrelation (ic_ar1)
 
-  # Sub-dimension weights within each dimension
+  # Sub-dimension weights
   sub_weights:
     predictiveness:
-      icir: 0.6
-      t_stat_nw: 0.4
-    stability:
-      ic_linearity: 0.6
-      win_rate: 0.4
-    turnover_friendliness:
-      ic_ar1: 0.4          # IC persistence (indirect proxy)
-      turnover_inv: 0.6    # 1 - quantile turnover (direct measure, lower = better)
+      icir: 0.65              # IC Sharpe ratio (primary)
+      ic_mean: 0.35           # absolute IC strength (complementary)
 
 # ── Phase 2: Deduplication ──
 dedup:
