@@ -66,6 +66,8 @@ class SubWeights:
     pred_t_stat_nw: float = 0.4
     stab_ic_linearity: float = 0.6
     stab_win_rate: float = 0.4
+    turn_ic_ar1: float = 0.4
+    turn_turnover_inv: float = 0.6
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,8 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             pred_t_stat_nw=sw.get("predictiveness", {}).get("t_stat_nw", 0.4),
             stab_ic_linearity=sw.get("stability", {}).get("ic_linearity", 0.6),
             stab_win_rate=sw.get("stability", {}).get("win_rate", 0.4),
+            turn_ic_ar1=sw.get("turnover_friendliness", {}).get("ic_ar1", 0.4),
+            turn_turnover_inv=sw.get("turnover_friendliness", {}).get("turnover_inv", 0.6),
         ),
         dedup=DedupConfig(
             fingerprint_threshold=dd.get("fingerprint_threshold", 1e-4),
@@ -215,7 +219,7 @@ def load_scoring_data(
     metric_cols = [
         "icir", "ic_mean", "ic_std", "t_stat_nw", "p_value_nw",
         "win_rate", "monotonicity", "ic_linearity", "ic_ar1",
-        "coverage", "n_samples",
+        "coverage", "n_samples", "turnover",
     ]
 
     pivot_frames = []
@@ -456,24 +460,59 @@ def score_factors(
             "avg_monotonicity": float(np.mean(raw_mono_vals)),
         }
 
-    # Turnover friendliness: mean(|ic_ar1|) across valid periods
-    ar1_means: dict[str, float] = {}
-    for factor_id in factor_period_data:
+    # Turnover friendliness: combine ic_ar1 (signal persistence) and
+    # quantile turnover (actual portfolio churn)
+    def _extract_period_mean(
+        factor_id: str, col_prefix: str,
+    ) -> float:
         valid_pds = df.loc[factor_id, "valid_periods"]
-        ar1_vals = []
+        vals = []
         for period in valid_pds:
-            sfx = f"_{period}"
-            col = f"ic_ar1{sfx}"
+            col = f"{col_prefix}_{period}"
             if col in df.columns:
                 v = df.loc[factor_id, col]
                 if v is not None and not (isinstance(v, float) and np.isnan(v)):
-                    ar1_vals.append(abs(v))
-        ar1_means[factor_id] = np.mean(ar1_vals) if ar1_vals else 0.0
+                    vals.append(v)
+        return float(np.mean(vals)) if vals else np.nan
 
-    # Percentile rank the ar1 means
+    ar1_means: dict[str, float] = {}
+    turnover_means: dict[str, float] = {}
+    for factor_id in factor_period_data:
+        ar1_means[factor_id] = abs(_extract_period_mean(factor_id, "ic_ar1"))
+        turnover_means[factor_id] = _extract_period_mean(factor_id, "turnover")
+
+    # Percentile rank: ic_ar1 (higher = more persistent = better)
     ar1_arr = np.array([ar1_means.get(fid, 0.0) for fid in factor_scores])
     ar1_ranks = _percentile_rank(ar1_arr)
     ar1_rank_map = dict(zip(factor_scores.keys(), ar1_ranks))
+
+    # Percentile rank: turnover inverted (lower turnover = better)
+    # Use 1 - rank so that low turnover gets high score
+    turnover_arr = np.array([turnover_means.get(fid, np.nan) for fid in factor_scores])
+    has_turnover = not np.all(np.isnan(turnover_arr))
+    if has_turnover:
+        # Replace NaN with worst-case (max turnover) for ranking
+        max_turn = np.nanmax(turnover_arr)
+        turnover_filled = np.where(np.isnan(turnover_arr), max_turn, turnover_arr)
+        turnover_inv_ranks = 1.0 - _percentile_rank(turnover_filled)
+    else:
+        turnover_inv_ranks = np.zeros(len(turnover_arr))
+    turnover_inv_rank_map = dict(zip(factor_scores.keys(), turnover_inv_ranks))
+
+    # Composite turnover friendliness score
+    turn_sub = sub_w
+    turnover_composite: dict[str, float] = {}
+    for fid in factor_scores:
+        ar1_r = ar1_rank_map.get(fid, 0.0)
+        if has_turnover:
+            inv_r = turnover_inv_rank_map.get(fid, 0.0)
+            turnover_composite[fid] = (
+                turn_sub.turn_ic_ar1 * ar1_r
+                + turn_sub.turn_turnover_inv * inv_r
+            )
+        else:
+            # Fallback: ic_ar1 only (backwards compatible when turnover is NULL)
+            turnover_composite[fid] = ar1_r
 
     # Final score: per-period dimensions + cross-period dimensions
     # per_period_weight = sum of pred + stab + mono weights
@@ -484,7 +523,7 @@ def score_factors(
     df = df.copy()
     final_scores = {}
     for factor_id, fs in factor_scores.items():
-        turnover_rank = ar1_rank_map.get(factor_id, 0.0)
+        turnover_rank = turnover_composite.get(factor_id, 0.0)
         final = (
             pp_weight * fs["avg_period_score"]
             + cons_weight * fs["consistency"]

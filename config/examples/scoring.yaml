@@ -40,6 +40,9 @@ scoring:
     stability:
       ic_linearity: 0.6
       win_rate: 0.4
+    turnover_friendliness:
+      ic_ar1: 0.4          # IC persistence (indirect proxy)
+      turnover_inv: 0.6    # 1 - quantile turnover (direct measure, lower = better)
 
 # ── Phase 2: Deduplication ──
 dedup:

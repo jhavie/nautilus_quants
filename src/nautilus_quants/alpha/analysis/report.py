@@ -241,6 +241,43 @@ def compute_ic_linearity(ic_df: pd.DataFrame) -> pd.Series:
     return pd.Series(result)
 
 
+def compute_quantile_turnover(factor_data: pd.DataFrame) -> pd.Series:
+    """Average turnover rate of top and bottom quantile groups.
+
+    Turnover = fraction of assets that enter/exit a quantile group each
+    period.  We average the top and bottom quantiles because those are
+    the ones that drive trading in a long-short portfolio.
+
+    Args:
+        factor_data: alphalens factor_data (MultiIndex[date, asset])
+
+    Returns:
+        Series[period] with turnover rates in [0, 1].
+    """
+    import alphalens.performance as perf
+
+    quantile_factor = factor_data["factor_quantile"]
+    quantiles = quantile_factor.sort_values().unique()
+    if len(quantiles) < 2:
+        return pd.Series(dtype=float)
+
+    q_min, q_max = quantiles.min(), quantiles.max()
+    top_turnover = perf.quantile_turnover(quantile_factor, q_max)
+    bottom_turnover = perf.quantile_turnover(quantile_factor, q_min)
+
+    # Each is a Series indexed by date; average across time, then
+    # return a single scalar per period.  Since quantile_turnover
+    # returns a flat Series (one value per rebalance date, not per
+    # period column), we just take the time-mean.
+    avg = (top_turnover.mean() + bottom_turnover.mean()) / 2
+    # Broadcast to all period columns for consistency with other metrics
+    period_cols = [
+        c for c in factor_data.columns
+        if c not in ("factor", "factor_quantile")
+    ]
+    return pd.Series(avg, index=period_cols)
+
+
 def compute_ic_ar1(ic_df: pd.DataFrame) -> pd.Series:
     """Lag-1 autocorrelation of IC series per period.
 
@@ -360,6 +397,7 @@ class FactorMetricsResult:
     monotonicity: pd.Series    # period → float [-1, 1]
     ic_linearity: pd.Series    # period → float [0, 1] (R² of cumulative IC)
     ic_ar1: pd.Series          # period → float (lag-1 autocorrelation)
+    turnover: pd.Series        # period → float [0, 1] (avg top/bottom quantile turnover)
 
 
 
@@ -384,6 +422,7 @@ def compute_all_factor_metrics(
         monotonicity=compute_monotonicity(factor_data),
         ic_linearity=compute_ic_linearity(ic_df),
         ic_ar1=compute_ic_ar1(ic_df),
+        turnover=compute_quantile_turnover(factor_data),
     )
 
 
@@ -418,6 +457,7 @@ def build_analysis_metrics(
         lin_val = None
         ar1_val = None
         cov_val = None
+        turnover_val = None
         if metrics_result is not None:
             if period_label in metrics_result.win_rate.index:
                 win_rate_val = _safe_float(
@@ -438,6 +478,10 @@ def build_analysis_metrics(
             if period_label in metrics_result.ic_ar1.index:
                 ar1_val = _safe_float(
                     metrics_result.ic_ar1[period_label],
+                )
+            if period_label in metrics_result.turnover.index:
+                turnover_val = _safe_float(
+                    metrics_result.turnover[period_label],
                 )
             cov_val = _safe_float(metrics_result.coverage)
 
@@ -462,6 +506,7 @@ def build_analysis_metrics(
             ic_linearity=lin_val,
             ic_ar1=ar1_val,
             coverage=cov_val,
+            turnover=turnover_val,
             factor_config_id=factor_config_id,
             analysis_config_id=analysis_config_id,
             output_dir=output_dir,
