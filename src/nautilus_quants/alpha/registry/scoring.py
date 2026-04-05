@@ -575,6 +575,9 @@ def compute_factor_correlation(
 
         analysis_config = AlphaAnalysisConfig(
             catalog_path=data_cfg.catalog_path,
+            factor_config_path="",
+            instrument_ids=data_cfg.instrument_ids,
+            bar_spec=data_cfg.bar_spec,
             funding_rate=data_cfg.funding_rate,
             oi_data_path=data_cfg.oi_data_path,
             oi_timeframe=data_cfg.bar_spec,
