@@ -89,6 +89,8 @@ class DataConfig:
     bar_spec: str = "4h"
     factor_configs: list[str] = field(default_factory=list)
     instrument_ids: list[str] = field(default_factory=list)
+    funding_rate: bool = False
+    oi_data_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -156,6 +158,8 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             bar_spec=da.get("bar_spec", "4h"),
             factor_configs=da.get("factor_configs", []),
             instrument_ids=da.get("instrument_ids", []),
+            funding_rate=da.get("funding_rate", False),
+            oi_data_path=da.get("oi_data_path", ""),
         ),
     )
 
@@ -564,6 +568,18 @@ def compute_factor_correlation(
             "for correlation computation.",
         )
 
+    # Build analysis config for FR/OI data injection
+    analysis_config = None
+    if data_cfg.funding_rate or data_cfg.oi_data_path:
+        from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
+
+        analysis_config = AlphaAnalysisConfig(
+            catalog_path=data_cfg.catalog_path,
+            funding_rate=data_cfg.funding_rate,
+            oi_data_path=data_cfg.oi_data_path,
+            oi_timeframe=data_cfg.bar_spec,
+        )
+
     # Load bar data
     loader = CatalogDataLoader(data_cfg.catalog_path, data_cfg.bar_spec)
     bars_by_instrument = loader.load_bars(data_cfg.instrument_ids)
@@ -574,7 +590,7 @@ def compute_factor_correlation(
     for config_path in data_cfg.factor_configs:
         try:
             factor_config = load_factor_config(config_path)
-            evaluator = FactorEvaluator(factor_config)
+            evaluator = FactorEvaluator(factor_config, analysis_config=analysis_config)
             factor_series, _ = evaluator.evaluate(bars_by_instrument)
 
             for fname, series in factor_series.items():
@@ -667,7 +683,9 @@ def compute_factor_correlation(
                             "(%d factors) for source=%s",
                             chunk_num, total_chunks, len(chunk), source,
                         )
-                        eval_instance = FactorEvaluator(chunk_config)
+                        eval_instance = FactorEvaluator(
+                            chunk_config, analysis_config=analysis_config,
+                        )
                         factor_series, _ = eval_instance.evaluate(
                             bars_by_instrument,
                         )
