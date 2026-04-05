@@ -865,7 +865,10 @@ def promote(
       python -m nautilus_quants.alpha promote --source-env test --target-env dev --skip-corr
       python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --max-factors 50
     """
+    import warnings
     from datetime import datetime, timezone
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
 
     from nautilus_quants.alpha.registry.database import RegistryDatabase
     from nautilus_quants.alpha.registry.scoring import (
@@ -965,11 +968,40 @@ def promote(
 
         # 5. Correlation-based greedy selection
         if not skip_corr:
+            # Load existing factors from target DB for cross-env decorrelation
+            from nautilus_quants.alpha.registry.repository import FactorRepository
+
+            target_existing_ids: list[str] = []
+            target_db_query = RegistryDatabase.for_environment(target_env, db_dir)
+            try:
+                tgt_repo = FactorRepository(target_db_query)
+                existing_factors = tgt_repo.list_factors(status="active")
+                target_existing_ids = [f.factor_id for f in existing_factors]
+            finally:
+                target_db_query.close()
+
+            if target_existing_ids:
+                click.echo()
+                click.echo(
+                    f"  Target DB ({target_env}): {len(target_existing_ids)} "
+                    f"existing factors will participate in decorrelation"
+                )
+
             click.echo()
             click.echo("Phase 2.2: Computing factor correlations...")
             candidate_ids = df.index.tolist()
+            # Include target existing factors in correlation computation
+            all_corr_ids = list(dict.fromkeys(candidate_ids + target_existing_ids))
             try:
-                corr_matrix = compute_factor_correlation(candidate_ids, scoring_cfg)
+                # Use both source and target DBs for registry fallback
+                target_db_for_corr = RegistryDatabase.for_environment(target_env, db_dir)
+                try:
+                    corr_matrix = compute_factor_correlation(
+                        all_corr_ids, scoring_cfg,
+                        registry_dbs=[source_db, target_db_for_corr],
+                    )
+                finally:
+                    target_db_for_corr.close()
 
                 if not corr_matrix.empty:
                     click.echo(
@@ -1005,7 +1037,7 @@ def promote(
                     except Exception as e:
                         click.echo(f"  Warning: Heatmap generation failed: {e}", err=True)
 
-                    # Greedy selection
+                    # Greedy selection with existing factors as gatekeepers
                     click.echo()
                     click.echo("Phase 2.3: Greedy selection (max corr "
                                f"≤ {scoring_cfg.dedup.max_corr})...")
@@ -1013,6 +1045,7 @@ def promote(
                         df, corr_matrix,
                         max_corr=scoring_cfg.dedup.max_corr,
                         max_factors=scoring_cfg.promote.max_factors,
+                        existing_ids=target_existing_ids,
                     )
                     click.echo(f"  Selected {len(selected_ids)} factors")
                 else:

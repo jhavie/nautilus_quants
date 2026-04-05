@@ -48,7 +48,7 @@ dedup:
   fingerprint_threshold: 1.0e-3   # Euclidean distance threshold
 
   # Correlation-based dedup
-  max_corr: 0.30                  # Max allowed |Spearman corr| between selected factors
+  max_corr: 0.5                  # Max allowed |Spearman corr| between selected factors
 
 # ── Phase 3: Promotion ──
 promote:
