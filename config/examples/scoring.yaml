@@ -63,7 +63,7 @@ data:
   bar_spec: "4h"
   # FR/OI data injection (for factors using funding_rate / open_interest variables)
   funding_rate: true
-  oi_data_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog/open_interest"
+  oi_data_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
   # Factor config files for correlation computation
   factor_configs:
     - "config/alpha_batch/factors_alpha101.yaml"
