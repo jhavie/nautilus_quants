@@ -136,6 +136,17 @@ class TestUpsertAndGet:
         repo.delete_factor("alpha001")
         assert repo.get_factor("alpha001") is None
 
+    def test_delete_cascades_metrics(self, repo: FactorRepository) -> None:
+        """delete_factor removes associated metrics and backtest links."""
+        repo.upsert_factor(_make_record(factor_id="f1"))
+        repo.save_metrics([_make_metrics(factor_id="f1", period="4h")])
+        repo.save_metrics([_make_metrics(factor_id="f1", period="8h")])
+        assert len(repo.get_metrics("f1")) == 2
+
+        repo.delete_factor("f1")
+        assert repo.get_factor("f1") is None
+        assert repo.get_metrics("f1") == []
+
     def test_delete_nonexistent_no_error(self, repo: FactorRepository) -> None:
         repo.delete_factor("nonexistent")
 

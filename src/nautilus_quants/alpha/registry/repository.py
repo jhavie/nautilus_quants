@@ -117,6 +117,15 @@ class FactorRepository:
         )
 
     def delete_factor(self, factor_id: str) -> None:
+        """Delete a factor and its associated metrics and backtest links."""
+        self._db.execute(
+            "DELETE FROM alpha_analysis_metrics WHERE factor_id = ?",
+            [factor_id],
+        )
+        self._db.execute(
+            "DELETE FROM backtest_factors WHERE factor_id = ?",
+            [factor_id],
+        )
         self._db.execute(
             "DELETE FROM factors WHERE factor_id = ?", [factor_id],
         )
