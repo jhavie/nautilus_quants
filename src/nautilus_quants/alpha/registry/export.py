@@ -102,7 +102,10 @@ def export_factors_yaml(
         doc["composite"] = {
             "name": "composite",
             "transform": composite_transform,
-            "weights": {fid: round(w, 4) for fid, w in weights},
+            "weights": {
+                (fid[len(source) + 1:] if source and fid.startswith(f"{source}_") else fid): round(w, 4)
+                for fid, w in weights
+            },
         }
 
     # 6. Write YAML
