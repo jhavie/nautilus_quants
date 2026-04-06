@@ -129,36 +129,62 @@ def export_factors_yaml(
     return output_path
 
 
+_DEFAULT_SIGN_PERIOD = "4h"
+
+
+def _get_icir_sign(
+    factor_id: str, repo: FactorRepository,
+    period: str = _DEFAULT_SIGN_PERIOD,
+) -> float:
+    """Return +1.0 or -1.0 based on the ICIR sign at *period*."""
+    metrics = repo.get_metrics(factor_id)
+    if not metrics:
+        return 1.0
+    match = next((m for m in metrics if m.period == period and m.icir is not None), None)
+    if match is not None:
+        return -1.0 if match.icir < 0 else 1.0
+    return 1.0
+
+
 def _compute_weights(
     factors: list[FactorRecord],
     method: str,
     repo: FactorRepository | None = None,
 ) -> list[tuple[str, float]]:
-    """Compute factor weights as (factor_id, weight) pairs."""
+    """Compute factor weights as (factor_id, weight) pairs.
+
+    Weights carry the ICIR sign so that all factors contribute in the
+    same direction in the composite (negative-ICIR factors get negative
+    weights).
+    """
     if not factors:
         return []
 
     if method == "icir_weight" and repo is not None:
-        # Get latest ICIR from analysis metrics
         icir_values: list[tuple[str, float]] = []
         for f in factors:
             metrics = repo.get_metrics(f.factor_id)
             if metrics:
-                best = max(
-                    (m for m in metrics if m.icir is not None),
-                    key=lambda m: abs(m.icir or 0),
-                    default=None,
+                match = next(
+                    (m for m in metrics
+                     if m.period == _DEFAULT_SIGN_PERIOD and m.icir is not None),
+                    None,
                 )
-                if best and best.icir is not None:
-                    icir_values.append((f.factor_id, abs(best.icir)))
+                if match is not None:
+                    icir_values.append((f.factor_id, match.icir))
         if icir_values:
-            total = sum(v for _, v in icir_values)
+            total = sum(abs(v) for _, v in icir_values)
             if total > 0:
-                return [(fid, v / total) for fid, v in icir_values]
+                return [
+                    (fid, (abs(v) / total) * (1.0 if v >= 0 else -1.0))
+                    for fid, v in icir_values
+                ]
 
-    # Default: equal weight
+    # Default: equal weight with ICIR sign
     n = len(factors)
     w = 1.0 / n
+    if repo is not None:
+        return [(f.factor_id, w * _get_icir_sign(f.factor_id, repo)) for f in factors]
     return [(f.factor_id, w) for f in factors]
 
 
