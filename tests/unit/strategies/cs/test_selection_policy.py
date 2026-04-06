@@ -121,6 +121,26 @@ class TestFMZSelectionPolicy:
         assert _longs(targets) == {"B", "C"}
         assert _shorts(targets) == set()
 
+    def test_n_short_zero_clears_existing_shorts(self):
+        """n_short=0 with existing shorts: all shorts should be cleared."""
+        policy = FMZSelectionPolicy(n_long=2, n_short=0)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(
+            scores, current_long={"C", "D"}, current_short={"A", "B"},
+        )
+        assert _shorts(targets) == set()
+        assert len(_longs(targets)) >= 2
+
+    def test_n_long_zero_clears_existing_longs(self):
+        """n_long=0 with existing longs: all longs should be cleared."""
+        policy = FMZSelectionPolicy(n_long=0, n_short=2)
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(
+            scores, current_long={"C", "D"}, current_short={"A", "B"},
+        )
+        assert _longs(targets) == set()
+        assert len(_shorts(targets)) >= 2
+
 
 # ---------------------------------------------------------------------------
 # TopKDropoutSelectionPolicy
@@ -189,6 +209,64 @@ class TestTopKDropoutSelectionPolicy:
             scores, current_held={"A", "B"}, topk=2, n_drop=1, ascending=True,
         )
         assert final == {"A", "B"}
+
+    def test_long_only_fresh(self):
+        """topk_short=0, no existing positions: only long targets produced."""
+        policy = TopKDropoutSelectionPolicy(
+            topk_long=3, topk_short=0, n_drop_long=1, n_drop_short=0,
+        )
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert len(_longs(targets)) == 3
+        assert _shorts(targets) == set()
+        assert _longs(targets) == {"C", "D", "E"}
+
+    def test_long_only_clears_existing_shorts(self):
+        """topk_short=0 with existing shorts: short leg returns empty set."""
+        policy = TopKDropoutSelectionPolicy(
+            topk_long=2, topk_short=0, n_drop_long=1, n_drop_short=0,
+        )
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(
+            scores, current_long={"C", "D"}, current_short={"A", "B"},
+        )
+        assert _shorts(targets) == set()
+        assert len(_longs(targets)) == 2
+
+    def test_short_only_fresh(self):
+        """topk_long=0, no existing positions: only short targets produced."""
+        policy = TopKDropoutSelectionPolicy(
+            topk_long=0, topk_short=3, n_drop_long=0, n_drop_short=1,
+        )
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        assert _longs(targets) == set()
+        assert len(_shorts(targets)) == 3
+        assert _shorts(targets) == {"A", "B", "C"}
+
+    def test_short_only_clears_existing_longs(self):
+        """topk_long=0 with existing longs: long leg returns empty set."""
+        policy = TopKDropoutSelectionPolicy(
+            topk_long=0, topk_short=2, n_drop_long=0, n_drop_short=1,
+        )
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0}
+        targets = policy.select(
+            scores, current_long={"C", "D"}, current_short={"A", "B"},
+        )
+        assert _longs(targets) == set()
+        assert len(_shorts(targets)) == 2
+
+    def test_long_only_weight_sums_to_one(self):
+        """topk_short=0: weights should be 1/n_long each, summing to 1."""
+        policy = TopKDropoutSelectionPolicy(
+            topk_long=3, topk_short=0, n_drop_long=1, n_drop_short=0,
+        )
+        scores = {"A": 1.0, "B": 2.0, "C": 3.0, "D": 4.0, "E": 5.0}
+        targets = policy.select(scores, current_long=set(), current_short=set())
+        total = sum(abs(t.weight) for t in targets)
+        assert total == pytest.approx(1.0)
+        for t in targets:
+            assert t.weight == pytest.approx(1.0 / 3.0)
 
 
 # ---------------------------------------------------------------------------
