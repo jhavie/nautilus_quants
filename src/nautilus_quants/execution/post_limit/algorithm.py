@@ -270,14 +270,14 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if state is None:
             return
         if self._is_stale_child(event.client_order_id, state):
-            self.log.warning(
+            self.log.debug(
                 f"PostLimit ignoring stale rejected for {event.client_order_id}: "
                 f"active={state.active_order_id} primary={state.primary_order_id}"
             )
             return
 
         if state.active_order_kind == SpawnKind.SWEEP:
-            self.log.warning(f"PostLimit sweep order rejected: {event.client_order_id}")
+            self.log.debug(f"PostLimit sweep order rejected: {event.client_order_id}")
             sweep_order = self.cache.order(event.client_order_id)
             retry_qty = self._extract_positive_leaves_qty(sweep_order)
             if self._retry_sweep(
@@ -293,8 +293,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             return
 
         self.log.warning(
-            f"PostLimit order rejected: {event.client_order_id} "
-            f"reason={event.reason} primary={state.primary_order_id}"
+            f"PostLimit rejected: {state.instrument_id} "
+            f"reason={event.reason} "
+            f"child={event.client_order_id}"
         )
         self._cancel_timer(state)
         self._restore_primary_from_active(state)
@@ -315,14 +316,14 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if state is None:
             return
         if self._is_stale_child(event.client_order_id, state):
-            self.log.warning(
+            self.log.debug(
                 f"PostLimit ignoring stale denied for {event.client_order_id}: "
                 f"active={state.active_order_id} primary={state.primary_order_id}"
             )
             return
 
         if state.active_order_kind == SpawnKind.SWEEP:
-            self.log.warning(f"PostLimit sweep order denied: {event.client_order_id}")
+            self.log.debug(f"PostLimit sweep order denied: {event.client_order_id}")
             sweep_order = self.cache.order(event.client_order_id)
             retry_qty = self._extract_positive_leaves_qty(sweep_order)
             if self._retry_sweep(state, reason="denied", quantity=retry_qty):
@@ -334,7 +335,8 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             return
 
         self.log.warning(
-            f"PostLimit order denied: {event.client_order_id} primary={state.primary_order_id}"
+            f"PostLimit denied: {state.instrument_id} "
+            f"child={event.client_order_id}"
         )
         self._cancel_timer(state)
         self._restore_primary_from_active(state)
@@ -465,7 +467,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"delta_qty={delta_qty:.8f}"
         )
         if delta_qty > 0:
-            self.log.warning(log_message)
+            self.log.info(log_message)
         else:
             self.log.debug(log_message)
         factory.register_child(
@@ -540,7 +542,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             f"delta_qty={delta_qty:.8f}"
         )
         if delta_qty > 0:
-            self.log.warning(log_message)
+            self.log.info(log_message)
         else:
             self.log.debug(log_message)
         state.activate_order(
@@ -580,10 +582,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             if residual_value is None or residual_value >= min_notional:
                 continue
 
-            self.log.warning(
+            self.log.info(
                 f"PostLimit sweep residual: {state.instrument_id} "
-                f"qty={position.quantity} value={residual_value:.2f} "
-                f"< min_notional={min_notional}"
+                f"qty={position.quantity} value={residual_value:.2f}"
             )
             state.sweep_retry_count = 0
             self._submit_market_child(
@@ -598,7 +599,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         if state is None:
             return
         if self._is_stale_child(child_order_id, state):
-            self.log.warning(
+            self.log.debug(
                 f"PostLimit ignoring stale terminal event for {child_order_id}: "
                 f"active={state.active_order_id} primary={state.primary_order_id}"
             )
@@ -682,6 +683,17 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
         self._cancel_timer(state)
         self._clear_active_child(state)
         state.completed_ns = self.clock.timestamp_ns()
+        elapsed_ms = (state.completed_ns - state.created_ns) / 1_000_000
+        self.log.error(
+            f"PostLimit FAILED: {state.primary_order_id} "
+            f"{state.instrument_id} {state.side.name} "
+            f"filled={state.filled_quantity}/{state.total_quantity} "
+            f"chases={state.chase_count} "
+            f"post_only_retries={state.post_only_retreat_ticks} "
+            f"transient_retries={state.transient_retry_count} "
+            f"market_fallback={state.used_market_fallback} "
+            f"elapsed={elapsed_ms:.0f}ms"
+        )
         PostLimitSession(state).mark_failed()
         self._publish_execution_states()
 
@@ -714,9 +726,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             interval=timedelta(seconds=delay),
             callback=self.on_time_event,
         )
-        self.log.warning(
+        self.log.info(
             f"PostLimit transient retry scheduled: "
-            f"primary={state.primary_order_id} "
+            f"{state.instrument_id} "
             f"attempt={state.transient_retry_count}/{self._config.max_transient_retries} "
             f"delay={delay}s"
         )
@@ -793,9 +805,9 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
             state.filled_quote_quantity += fill_px * float(fill_qty) * state.contract_multiplier
 
         self.log.warning(
-            f"PostLimit stale fill tracked: child={event.client_order_id} "
-            f"active={state.active_order_id} primary={state.primary_order_id} "
-            f"last_qty={fill_qty} filled={state.filled_quantity}/{state.total_quantity}"
+            f"PostLimit stale fill: {state.instrument_id} "
+            f"last_qty={fill_qty} filled={state.filled_quantity}/{state.total_quantity} "
+            f"child={event.client_order_id}"
         )
 
         remaining = compute_remaining_quantity(self.cache, state, self.log)
@@ -894,8 +906,7 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
     ) -> bool:
         if state.sweep_retry_count >= self._config.max_sweep_retries:
             self.log.warning(
-                "PostLimit sweep retries exhausted: "
-                f"primary={state.primary_order_id} "
+                f"PostLimit sweep exhausted: {state.instrument_id} "
                 f"retries={state.sweep_retry_count}/{self._config.max_sweep_retries} "
                 f"reason={reason}"
             )
@@ -903,17 +914,16 @@ class PostLimitExecAlgorithm(ExecAlgorithm):
 
         retry_qty = quantity or self._resolve_sweep_retry_quantity(state)
         if retry_qty is None or retry_qty <= Quantity.zero(retry_qty.precision):
-            self.log.warning(
-                "PostLimit sweep retry skipped due to non-positive remaining quantity: "
-                f"primary={state.primary_order_id} reason={reason}"
+            self.log.debug(
+                f"PostLimit sweep skip (zero qty): {state.instrument_id} "
+                f"reason={reason}"
             )
             return False
 
         state.sweep_retry_count += 1
         self._clear_active_child(state)
-        self.log.warning(
-            "PostLimit sweep retry: "
-            f"primary={state.primary_order_id} "
+        self.log.info(
+            f"PostLimit sweep retry: {state.instrument_id} "
             f"attempt={state.sweep_retry_count}/{self._config.max_sweep_retries} "
             f"qty={retry_qty} reason={reason}"
         )

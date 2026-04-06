@@ -64,13 +64,11 @@ def normalize_qty_or_zero(
         if "rounded to zero" not in str(exc):
             raise
 
-        logger.warning(
+        logger.debug(
             "PostLimit residual below increment, treating as zero: "
             f"instrument_id={instrument_id} "
-            f"primary_order_id={primary_order_id} "
             f"raw_qty={raw_qty} "
-            f"size_increment={instrument.size_increment} "
-            f"size_precision={instrument.size_precision}"
+            f"size_increment={instrument.size_increment}"
         )
         return Quantity.zero(precision)
 
