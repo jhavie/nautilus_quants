@@ -535,8 +535,11 @@ def _read_log_incremental(
         return [], current_path, prev_offset
 
     # Log file rotated — reset offset, bootstrap from tail
+    skip_partial = False
     if current_path != prev_path:
         prev_offset = max(0, file_size - _TAIL_BYTES)
+        if prev_offset > 0:
+            skip_partial = True  # Mid-file seek, skip partial first line
 
     # Nothing new
     if file_size <= prev_offset:
@@ -545,10 +548,11 @@ def _read_log_incremental(
     try:
         with open(log_file, "rb") as f:
             f.seek(prev_offset)
-            if prev_offset > 0:
-                f.readline()  # Skip partial first line
+            if skip_partial:
+                f.readline()
+            read_start = f.tell()
             raw = f.read()
-            new_offset = prev_offset + len(raw)
+            new_offset = read_start + len(raw)
             tail = raw.decode("utf-8", errors="replace")
     except Exception:
         return [], current_path, prev_offset
