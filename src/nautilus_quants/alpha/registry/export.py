@@ -27,8 +27,13 @@ def export_factors_yaml(
 
     The output is directly loadable by ``load_factor_config()``.
     """
-    # 1. Query factors
-    factors = repo.list_factors(status=status, limit=composite_top_n)
+    # 1. Query factors, sorted by promote_score desc (then top_n slice)
+    factors = repo.list_factors(status=status)
+    factors.sort(
+        key=lambda f: f.parameters.get("promote_score", 0) if f.parameters else 0,
+        reverse=True,
+    )
+    factors = factors[:composite_top_n]
 
     # 2. Load config snapshot for variables/parameters if context_id given
     variables: dict[str, str] = {}
@@ -46,7 +51,10 @@ def export_factors_yaml(
     if not variables and factors:
         variables = factors[0].variables
     if not parameters and factors:
-        parameters = factors[0].parameters
+        parameters = {
+            k: v for k, v in (factors[0].parameters or {}).items()
+            if k != "promote_score"
+        }
     if not source and factors:
         source = factors[0].source
 
