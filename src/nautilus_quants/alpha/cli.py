@@ -789,6 +789,63 @@ def backtests(
         db.close()
 
 
+@cli.command("config")
+@click.argument("backtest_id")
+@click.option(
+    "--type",
+    "config_type",
+    default="backtest",
+    type=click.Choice(["backtest", "factors", "all"]),
+    help="Config type to show.",
+)
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def config_cmd(
+    backtest_id: str,
+    config_type: str,
+    env_name: str | None,
+    db_dir: str,
+) -> None:
+    """Show config snapshot linked to a backtest run."""
+    import json as json_mod
+
+    from nautilus_quants.alpha.registry.backtest_repository import BacktestRepository
+    from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.environment import resolve_env
+    from nautilus_quants.alpha.registry.repository import FactorRepository
+
+    env = resolve_env(env_name)
+    db = RegistryDatabase.for_environment(env, db_dir)
+    bt_repo = BacktestRepository(db)
+    repo = FactorRepository(db)
+    try:
+        run = bt_repo.get_backtest(backtest_id)
+        if run is None:
+            click.echo(f"Backtest not found: {backtest_id}", err=True)
+            raise SystemExit(1)
+
+        ids: list[tuple[str, str]] = []
+        if config_type in ("backtest", "all") and run.config_id:
+            ids.append(("backtest", run.config_id))
+        if config_type in ("factors", "all") and run.factor_config_id:
+            ids.append(("factors", run.factor_config_id))
+
+        if not ids:
+            click.echo("(no config snapshots linked)")
+            return
+
+        for label, cid in ids:
+            snap = repo.get_config_snapshot(cid)
+            if snap is None:
+                click.echo(f"[{label}] config_id={cid} — not found")
+                continue
+            click.echo(f"── {label} (config_id={cid}) ──")
+            click.echo(json_mod.dumps(snap.config_json, indent=2, ensure_ascii=False))
+            click.echo()
+    finally:
+        db.close()
+
+
 @cli.command("export-factors")
 @click.option("--context-id", default="", help="Config snapshot ID for variables/parameters.")
 @click.option("--method", default="equal", help="Composite weighting (equal/icir_weight).")

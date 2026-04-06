@@ -321,6 +321,7 @@ def print_backtests_table(
     table.add_column("pnl%", justify="right")
     table.add_column("max_dd", justify="right")
     table.add_column("win_rate", justify="right")
+    table.add_column("started_at", style="dim", no_wrap=True)
     table.add_column("dur(s)", justify="right", style="dim")
     table.add_column("factors", style="cyan", max_width=50, overflow="ellipsis")
 
@@ -330,6 +331,7 @@ def print_backtests_table(
             run.max_drawdown, ".2%", invert=True,
         ) if run.max_drawdown else "[dim]-[/dim]"
         wr = _color_pct(run.win_rate) if run.win_rate else "[dim]-[/dim]"
+        started = run.started_at[:16] if run.started_at else "-"
         table.add_row(
             run.backtest_id,
             run.strategy_name,
@@ -339,6 +341,7 @@ def print_backtests_table(
             _color_float(run.total_pnl_pct, ".2f"),
             dd,
             wr,
+            started,
             f"{run.duration_seconds:.1f}",
             fids,
         )
