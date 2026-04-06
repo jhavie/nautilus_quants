@@ -95,7 +95,8 @@ gh run watch <id>
 | `metrics` | 查看因子指标（IC, ICIR, t(NW)...） | `metrics alpha101_alpha044_8h` |
 | `list` | 列出已注册因子 | `list --prototype alpha044 --source alpha101` |
 | `inspect` | 因子/prototype 详情 + 指标 + 回测 | `inspect alpha101_alpha044_8h` |
-| `backtests` | 列出回测记录 | `backtests --factor-id alpha101_alpha044_8h` |
+| `backtests` | 列出回测记录（含 started_at） | `backtests --factor-id alpha101_alpha044_8h` |
+| `config` | 查看回测关联的配置快照 | `config <backtest_id> --type all` |
 | `status` | 修改因子状态 | `status alpha101_alpha044_8h active` |
 | `register` | 从 YAML 注册因子（不跑分析） | `register config/cs/factors.yaml` |
 | `export-factors` | 导出 active 因子到 YAML | `export-factors -o output.yaml --method icir_weight` |

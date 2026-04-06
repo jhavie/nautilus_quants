@@ -86,7 +86,8 @@ registry:
 | `metrics` | 查看因子全部指标（IC、ICIR、t(NW)、skew、kurtosis、AR1...） | `metrics alpha101_alpha044_8h` |
 | `list` | 列出已注册因子 | `list --prototype alpha044 --source alpha101` |
 | `inspect` | 因子详情 + 分析指标 + 回测记录 | `inspect alpha101_alpha044_8h` |
-| `backtests` | 列出回测记录及关联因子 | `backtests --factor-id alpha101_alpha044_8h` |
+| `backtests` | 列出回测记录及关联因子（含 started_at） | `backtests --factor-id alpha101_alpha044_8h` |
+| `config` | 查看回测关联的配置快照 | `config <backtest_id> --type all` |
 | `status` | 修改因子状态（candidate/active/archived） | `status alpha101_alpha044_8h active` |
 | `register` | 从 YAML 手动注册因子（不运行分析） | `register config/cs/factors.yaml` |
 | `export-factors` | 导出 active 因子为 YAML + composite | `export-factors -o output.yaml --method icir_weight` |

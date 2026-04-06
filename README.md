@@ -84,7 +84,8 @@ registry:
 | `metrics` | Show all metrics for a factor (IC, ICIR, t(NW), skew, kurtosis, AR1...) | `metrics alpha101_alpha044_8h` |
 | `list` | List registered factors | `list --prototype alpha044 --source alpha101` |
 | `inspect` | Factor details + analysis metrics + backtests | `inspect alpha101_alpha044_8h` |
-| `backtests` | List backtest runs with linked factors | `backtests --factor-id alpha101_alpha044_8h` |
+| `backtests` | List backtest runs with linked factors (incl. started_at) | `backtests --factor-id alpha101_alpha044_8h` |
+| `config` | Show config snapshot linked to a backtest run | `config <backtest_id> --type all` |
 | `status` | Change factor status (candidate/active/archived) | `status alpha101_alpha044_8h active` |
 | `register` | Register factors from YAML without analysis | `register config/cs/factors.yaml` |
 | `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
