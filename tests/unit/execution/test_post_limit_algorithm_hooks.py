@@ -515,7 +515,7 @@ class TestStaleChildEventGuard:
             assert state.active_order_id == ClientOrderId("primary001E2")
             assert state.state == OrderState.WORKING_LIMIT
             algo._restore_primary_from_active.assert_not_called()
-            log.warning.assert_called()
+            log.debug.assert_called()
 
     def test_stale_expired_event_ignored(self) -> None:
         algo = PostLimitExecAlgorithm()

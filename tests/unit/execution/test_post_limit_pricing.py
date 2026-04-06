@@ -102,7 +102,7 @@ class TestQuantities:
         )
 
         assert quantity == Quantity.zero(2)
-        logger.warning.assert_called_once()
+        logger.debug.assert_called_once()
 
     def test_compute_remaining_quantity_uses_quote_target(self) -> None:
         state = OrderExecutionState(
