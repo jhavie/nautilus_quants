@@ -57,7 +57,8 @@ _LOG_RE = re.compile(
     r"(.*)$",
 )
 
-_TAIL_BYTES = 256 * 1024  # Read last 256 KB of log file
+_TAIL_BYTES = 256 * 1024  # Read last 256 KB of log file (first-run bootstrap only)
+_ERROR_TTL_SECS = 300  # Keep ERROR entries for 5 minutes
 
 
 class SnapshotAggregatorActorConfig(ActorConfig, frozen=True):
@@ -111,6 +112,11 @@ class SnapshotAggregatorActor(Actor):
         self._last_factors_ts: int = 0
         self._last_rebalance: RebalanceOrders | None = None
         self._last_rebalance_ts: int = 0
+
+        # Log tail state: incremental reading + ERROR retention
+        self._log_file_path: str = ""
+        self._log_file_offset: int = 0
+        self._error_buffer: list[dict[str, str]] = []
 
     def on_start(self) -> None:
         """Subscribe to data and start snapshot timer."""
@@ -429,11 +435,45 @@ class SnapshotAggregatorActor(Actor):
     # -------------------------------------------------------------------------
 
     def _build_health_snapshot(self, ts_wall: int) -> dict[str, Any]:
-        entries = _tail_log_entries(
-            self._log_directory,
-            self._interval_secs,
-            self._max_log_entries,
+        new_entries, self._log_file_path, self._log_file_offset = (
+            _read_log_incremental(
+                self._log_directory,
+                self._log_file_path,
+                self._log_file_offset,
+            )
         )
+
+        # Append new ERRORs to sticky buffer; pass WARNs through
+        now = time.time()
+        for entry in new_entries:
+            if entry["level"] == "ERROR":
+                entry["_expire"] = now + _ERROR_TTL_SECS
+                self._error_buffer.append(entry)
+
+        # Evict expired ERRORs
+        self._error_buffer = [
+            e for e in self._error_buffer if e["_expire"] > now
+        ]
+
+        # Merge: sticky errors + current-cycle warns (dedup by ts+message)
+        seen: set[str] = set()
+        entries: list[dict[str, str]] = []
+        for e in self._error_buffer:
+            key = f"{e['ts']}:{e['message']}"
+            if key not in seen:
+                seen.add(key)
+                entries.append(
+                    {k: v for k, v in e.items() if k != "_expire"}
+                )
+
+        for e in new_entries:
+            if e["level"] == "WARN":
+                key = f"{e['ts']}:{e['message']}"
+                if key not in seen:
+                    seen.add(key)
+                    entries.append(e)
+
+        entries = entries[:self._max_log_entries]
         warn_count = sum(1 for e in entries if e["level"] == "WARN")
         error_count = sum(1 for e in entries if e["level"] == "ERROR")
 
@@ -469,32 +509,53 @@ def _elapsed_ms(created_ns: int, completed_ns: int, now_ns: int) -> float:
     return 0.0
 
 
-def _tail_log_entries(
+def _read_log_incremental(
     log_dir: Path,
-    interval_secs: int,
-    max_entries: int,
-) -> list[dict[str, str]]:
-    """Read recent WARN/ERROR entries from the newest log file."""
+    prev_path: str,
+    prev_offset: int,
+) -> tuple[list[dict[str, str]], str, int]:
+    """Read new WARN/ERROR entries since last offset.
+
+    Returns (entries, current_file_path, new_offset).
+    On first call (prev_offset=0) bootstraps from last 256 KB.
+    """
     try:
         log_files = sorted(log_dir.glob("*.log"), key=lambda f: f.stat().st_mtime)
     except Exception:
-        return []
+        return [], prev_path, prev_offset
     if not log_files:
-        return []
+        return [], prev_path, prev_offset
 
-    log_file = log_files[-1]  # Most recent by name (date-sorted)
-    cutoff = time.time() - interval_secs
+    log_file = log_files[-1]
+    current_path = str(log_file)
 
     try:
         file_size = log_file.stat().st_size
-        with open(log_file, "rb") as f:
-            seek_pos = max(0, file_size - _TAIL_BYTES)
-            f.seek(seek_pos)
-            if seek_pos > 0:
-                f.readline()  # Skip partial first line
-            tail = f.read().decode("utf-8", errors="replace")
     except Exception:
-        return []
+        return [], current_path, prev_offset
+
+    # Log file rotated — reset offset, bootstrap from tail
+    skip_partial = False
+    if current_path != prev_path:
+        prev_offset = max(0, file_size - _TAIL_BYTES)
+        if prev_offset > 0:
+            skip_partial = True  # Mid-file seek, skip partial first line
+
+    # Nothing new
+    if file_size <= prev_offset:
+        return [], current_path, prev_offset
+
+    try:
+        with open(log_file, "rb") as f:
+            f.seek(prev_offset)
+            if skip_partial:
+                f.readline()
+            read_start = f.tell()
+            raw = f.read()
+            new_offset = read_start + len(raw)
+            tail = raw.decode("utf-8", errors="replace")
+    except Exception:
+        return [], current_path, prev_offset
 
     entries: list[dict[str, str]] = []
     for line in tail.splitlines():
@@ -502,22 +563,13 @@ def _tail_log_entries(
         if m is None:
             continue
         ts_str, level, component, message = m.groups()
-        try:
-            ts_dt = datetime.fromisoformat(ts_str)
-            ts_epoch = ts_dt.replace(tzinfo=timezone.utc).timestamp()
-        except Exception:
-            continue
-        if ts_epoch < cutoff:
-            continue
         entries.append(
             {
-                "ts": ts_str[:23] + "Z",  # Truncate to milliseconds
+                "ts": ts_str[:23] + "Z",
                 "level": level,
                 "component": component,
                 "message": message[:200],
             }
         )
-        if len(entries) >= max_entries:
-            break
 
-    return entries
+    return entries, current_path, new_offset
