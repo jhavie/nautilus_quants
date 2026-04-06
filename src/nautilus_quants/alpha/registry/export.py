@@ -50,11 +50,9 @@ def export_factors_yaml(
     # If no snapshot, derive variables/parameters from first factor
     if not variables and factors:
         variables = factors[0].variables
-    if not parameters and factors:
-        parameters = {
-            k: v for k, v in (factors[0].parameters or {}).items()
-            if k != "promote_score"
-        }
+    # Skip fallback parameters from factor records — they contain
+    # normalize placeholders (p0, p1) and promote_score metadata that
+    # are not referenced by the exported expressions.
     if not source and factors:
         source = factors[0].source
 
