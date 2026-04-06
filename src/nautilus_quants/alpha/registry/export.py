@@ -129,20 +129,20 @@ def export_factors_yaml(
     return output_path
 
 
+_DEFAULT_SIGN_PERIOD = "4h"
+
+
 def _get_icir_sign(
     factor_id: str, repo: FactorRepository,
+    period: str = _DEFAULT_SIGN_PERIOD,
 ) -> float:
-    """Return +1.0 or -1.0 based on the best-period ICIR sign."""
+    """Return +1.0 or -1.0 based on the ICIR sign at *period*."""
     metrics = repo.get_metrics(factor_id)
     if not metrics:
         return 1.0
-    best = max(
-        (m for m in metrics if m.icir is not None),
-        key=lambda m: abs(m.icir or 0),
-        default=None,
-    )
-    if best and best.icir is not None:
-        return -1.0 if best.icir < 0 else 1.0
+    match = next((m for m in metrics if m.period == period and m.icir is not None), None)
+    if match is not None:
+        return -1.0 if match.icir < 0 else 1.0
     return 1.0
 
 
@@ -165,13 +165,13 @@ def _compute_weights(
         for f in factors:
             metrics = repo.get_metrics(f.factor_id)
             if metrics:
-                best = max(
-                    (m for m in metrics if m.icir is not None),
-                    key=lambda m: abs(m.icir or 0),
-                    default=None,
+                match = next(
+                    (m for m in metrics
+                     if m.period == _DEFAULT_SIGN_PERIOD and m.icir is not None),
+                    None,
                 )
-                if best and best.icir is not None:
-                    icir_values.append((f.factor_id, best.icir))
+                if match is not None:
+                    icir_values.append((f.factor_id, match.icir))
         if icir_values:
             total = sum(abs(v) for _, v in icir_values)
             if total > 0:
