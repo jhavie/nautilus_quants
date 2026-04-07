@@ -88,7 +88,7 @@ class RegimeCompositeActor(BarSubscriptionMixin, Actor):
     def on_start(self) -> None:
         self._load_regime_config()
         self._subscribe_bar_types(self.config.bar_types)
-        self.subscribe_data(DataType(FactorValues))
+        self.subscribe_data(DataType(FactorValues), client_id=ClientId(self.id.value))
         self.log.info(
             f"RegimeCompositeActor started: "
             f"method={self.config.regime_method}, "

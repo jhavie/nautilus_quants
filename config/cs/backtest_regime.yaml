@@ -168,42 +168,15 @@ engine:
         max_history: 0
         publish_signals: true
 
-    # 2) Regime Composite: BTC regime detection → dynamic factor reweighting
+    # 2) Regime Composite: schedule lookup from regime_config_default.yaml
+    #    For dynamic switching run: python -m nautilus_quants.alpha regime <config>
+    #    then update regime_config_path to the generated file.
     - actor_path: "nautilus_quants.actors.regime_composite:RegimeCompositeActor"
       config_path: "nautilus_quants.actors.regime_composite:RegimeCompositeActorConfig"
       config:
-        regime_instrument: "BTCUSDT.BINANCE"
-        ema_span: 20
-        regime_threshold: 0.0
+        regime_config_path: "config/cs/regime_config_default.yaml"
+        regime_method: "ema"
         composite_name: "composite"
-        factor_names:
-          - "alpha158_MIN60"
-          - "alpha158_CORD10"
-          - "alpha158_KLOW"
-          - "alpha158_CORR60"
-          - "alpha158_KUP"
-          - "alpha158_MA5"
-          - "alpha191_alpha191_185"
-          - "alpha191_alpha191_062"
-        weight_map:
-          bull:
-            alpha158_MA5: 0.1935
-            alpha191_alpha191_062: 0.1799
-            alpha158_CORD10: 0.1753
-            alpha158_MIN60: 0.1616
-            alpha158_CORR60: 0.1562
-            alpha158_KLOW: 0.0838
-            alpha191_alpha191_185: 0.0343
-            alpha158_KUP: 0.0155
-          bear:
-            alpha158_MA5: 0.1737
-            alpha158_MIN60: 0.1528
-            alpha158_CORD10: 0.1525
-            alpha191_alpha191_062: 0.1525
-            alpha158_CORR60: 0.1405
-            alpha158_KLOW: 0.1029
-            alpha191_alpha191_185: 0.0807
-            alpha158_KUP: 0.0444
 
     # 3) Equity Snapshot
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"

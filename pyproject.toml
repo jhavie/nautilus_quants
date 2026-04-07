@@ -15,7 +15,7 @@ authors = [
 
 dependencies = [
     # Core: live trading runtime
-    "nautilus_trader>=1.225.0.dev0",
+    "nautilus_trader==1.225.0",
     "numpy>=1.26.4",
     "pandas>=2.3.3,<3.0.0",
     "pyyaml>=6.0",
@@ -39,6 +39,7 @@ backtest = [
     "alphalens-reloaded>=0.0.12",
     "plotly>=5.18.0",
     "duckdb>=1.0.0",
+    "jumpmodels",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -77,5 +78,3 @@ markers = [
 ]
 
 [tool.uv]
-extra-index-url = ["https://packages.nautechsystems.io/simple"]
-prerelease = "allow"

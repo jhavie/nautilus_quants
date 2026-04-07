@@ -191,7 +191,7 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        composite_factor: "composite"
+        composite_factor: "regime_composite"
         rebalance_interval: 2
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
