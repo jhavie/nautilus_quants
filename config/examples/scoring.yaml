@@ -54,14 +54,7 @@ scoring:
       ic_mean: 0.35           # absolute IC strength (complementary)
 
 # ── Phase 2: Deduplication ──
-dedup:
-  enabled: false                   # false = skip dedup + greedy selection
-  # Fingerprint-based exact dedup
-  # 8-tuple: (icir_4h, ic_mean_4h, icir_8h, ic_mean_8h, icir_12h, ic_mean_12h, icir_1d, ic_mean_1d)
-  fingerprint_threshold: 1.0e-3   # Euclidean distance threshold
-
-  # Correlation-based dedup
-  max_corr: 0.7                  # Max allowed |Spearman corr| between selected factors
+             # Max allowed |Spearman corr| between selected factors
 
 # ── Layer 4: HDBSCAN Clustering + Super Alpha ──
 # Auto-detect factor clusters, compose Super Alphas via PCA/equal/ICIR.
@@ -84,6 +77,15 @@ orthogonalization:
   method: "lowdin"                # "lowdin" | "none"
   min_eigenvalue: 1.0e-6          # Regularization for near-singular matrices
   max_condition_number: 1.0e+6    # Skip and warn if condition number exceeds
+
+dedup:
+  enabled: false                   # false = skip dedup + greedy selection
+  # Fingerprint-based exact dedup
+  # 8-tuple: (icir_4h, ic_mean_4h, icir_8h, ic_mean_8h, icir_12h, ic_mean_12h, icir_1d, ic_mean_1d)
+  fingerprint_threshold: 1.0e-3   # Euclidean distance threshold
+
+  # Correlation-based dedup
+  max_corr: 0.7     
 
 # ── Diagnostics ──
 diagnostics:
