@@ -94,6 +94,7 @@ registry:
 | `audit` | Audit registry for expression duplicates & prototype issues | `audit --env test` |
 | `backfill` | Backfill expression_hash, prototype, parameters | `backfill --execute --env test` |
 | `dedup` | Remove duplicate factors by expression hash | `dedup --execute --env test` |
+| `regime` | Regime-conditional IC analysis (Jump Model vs EMA) | `regime config/cs/regime_llm_claude.yaml -v` |
 
 **Backtest CLI (`python -m nautilus_quants.backtest`):**
 

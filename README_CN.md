@@ -91,9 +91,9 @@ registry:
 | `status` | 修改因子状态（candidate/active/archived） | `status alpha101_alpha044_8h active` |
 | `register` | 从 YAML 手动注册因子（不运行分析） | `register config/cs/factors.yaml` |
 | `export-factors` | 导出 active 因子为 YAML + composite | `export-factors -o output.yaml --method icir_weight` |
-| `promote` | 评分、去重、去相关并跨环境晋升因子 | `promote --source-env test --target-env dev --dry-run` |
-| `promote` | 使用评分配置文件晋升因子 | `promote --config config/examples/scoring.yaml` |
+| `promote` | 评分、去重、去相关并跨环境晋升因子 | `promote --config config/examples/scoring.yaml` |
 | `mine` | 基于 Claude Code CLI 的 LLM 因子挖掘 | `mine config/cs/alpha_101.yaml --rounds 5` |
+| `regime` | Regime 条件 IC 分析（Jump Model vs EMA 对比） | `regime config/cs/regime_llm_claude.yaml -v` |
 
 **回测 CLI 命令 (`python -m nautilus_quants.backtest`)：**
 

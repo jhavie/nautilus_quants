@@ -1,0 +1,38 @@
+# Static regime config for backtest_regime.yaml (EMA method, no dynamic schedule).
+# Generated from inline weight_map in backtest_regime.yaml.
+# For dynamic regime switching, run: python -m nautilus_quants.alpha regime <config>
+# and replace regime_config_path with the generated file.
+
+metadata:
+  regime_instrument: "BTCUSDT.BINANCE"
+  default_weights:
+    alpha158_MA5: 0.1250
+    alpha191_alpha191_062: 0.1250
+    alpha158_CORD10: 0.1250
+    alpha158_MIN60: 0.1250
+    alpha158_CORR60: 0.1250
+    alpha158_KLOW: 0.1250
+    alpha191_alpha191_185: 0.1250
+    alpha158_KUP: 0.1250
+
+ema:
+  weights:
+    bull:
+      alpha158_MA5: 0.1935
+      alpha191_alpha191_062: 0.1799
+      alpha158_CORD10: 0.1753
+      alpha158_MIN60: 0.1616
+      alpha158_CORR60: 0.1562
+      alpha158_KLOW: 0.0838
+      alpha191_alpha191_185: 0.0343
+      alpha158_KUP: 0.0155
+    bear:
+      alpha158_MA5: 0.1737
+      alpha158_MIN60: 0.1528
+      alpha158_CORD10: 0.1525
+      alpha191_alpha191_062: 0.1525
+      alpha158_CORR60: 0.1405
+      alpha158_KLOW: 0.1029
+      alpha191_alpha191_185: 0.0807
+      alpha158_KUP: 0.0444
+  schedule: {}

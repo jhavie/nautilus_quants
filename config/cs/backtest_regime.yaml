@@ -1,16 +1,19 @@
-# CS Strategy Backtest Configuration
-# FMZ 逻辑 via DecisionEngineActor (NETTING mode, one-shot flip)
+# CS Strategy Backtest — Regime-Aware Composite Weights
+# Based on: Yu, Mulvey, Nie (JPM 2026) — JumpModel n=3, λ=0.5
 #
-# 125 Symbols
-# 时间范围: 2022-01-01 ~ 2022-03-31
+# Pipeline:
+#   FactorEngineActor → 8 individual factors
+#     → RegimeCompositeActor → regime-aware composite ← BTC bars
+#       → DecisionEngineActor → RebalanceOrders
+#         → CSStrategy → Orders
+#
+# 115 Symbols, 4h bars
+# 时间范围: 2022-05-01 ~ 2023-07-31 (同 backtest.yaml 基线)
 # 初始资金: 10000 USDT
-# 持仓数量: 多空各40个
-# 单品种仓位: 300 USDT
-# 调仓周期: 每根 bar (4h)
-# 因子: alpha044 (correlation(high, rank(volume), 5))
+# 持仓: 多空各40, TopKDropout n_drop=4
 
 registry:
-  env: test
+  env: dev
   db_dir: logs/registry
   enabled: true
 
@@ -143,8 +146,8 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2024-01-01"
-    end_time: "2024-12-31"
+    start_time: "2022-01-01"
+    end_time: "2025-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -153,36 +156,29 @@ engine:
   risk_engine:
     bypass: true
 
-  # controller:
-    # controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
-    # config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
-    # config:
-    #   interval: "1h"
-    #   venue_name: "BINANCE"
-    #   currency: "USDT"
-    #   min_equity_ratio: 0.5
-    #   guarded_strategy_ids: []
-    #   drawdown_rules:
-    #     - name: "monthly"
-    #       drawdown_window: "30d"
-    #       drawdown_ratio: 0.8
-    #       cooldown_period: "72h"
-    #     - name: "daily"
-    #       drawdown_window: "1d"
-    #       drawdown_ratio: 0.95
-    #       cooldown_period: "24h"
-
   actors:
+    # 1) Factor Engine: computes 8 individual factors (NO static composite needed)
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/cs/factors_alpha101.yaml"
-        factor_cache_path: "data/factor_cache/cache_alpha101"
+        factor_config_path: "config/cs/factor_alpha_dev_equal.yaml"
+        factor_cache_path: "data/factor_cache/cache_alpha101_regime"
         interval: "4h"
         signal_prefix: "factor"
         max_history: 0
         publish_signals: true
 
+    # 2) Regime Composite: schedule lookup from regime_config_default.yaml
+    #    For dynamic switching run: python -m nautilus_quants.alpha regime <config>
+    #    then update regime_config_path to the generated file.
+    - actor_path: "nautilus_quants.actors.regime_composite:RegimeCompositeActor"
+      config_path: "nautilus_quants.actors.regime_composite:RegimeCompositeActorConfig"
+      config:
+        regime_config_path: "config/cs/regime_config_default.yaml"
+        regime_method: "ema"
+        composite_name: "composite"
+
+    # 3) Equity Snapshot
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
       config:
@@ -190,24 +186,12 @@ engine:
         venue_name: "BINANCE"
         currency: "USDT"
 
+    # 4) Decision Engine: consumes regime-aware composite from RegimeCompositeActor
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
         composite_factor: "composite"
         rebalance_interval: 2
-
-        # =============================================================
-        # Selection Policy — uncomment ONE block below
-        # =============================================================
-
-        # --- [1] FMZSelectionPolicy (截面排序, 最小N做多/最大N做空) ---
-        # selection_policy: "FMZSelectionPolicy"
-        # position_mode: "fixed"
-        # position_value: 300
-        # n_long: 40
-        # n_short: 40
-
-        # --- [2] TopKDropoutSelectionPolicy (渐进换仓, 降低换手率) ---
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
         position_value: 250
@@ -216,25 +200,12 @@ engine:
         n_drop_long: 4
         n_drop_short: 4
 
-        # --- [3] WorldQuantSelectionPolicy (BRAIN 7-step, 异质权重) ---
-        # selection_policy: "WorldQuantSelectionPolicy"
-        # position_mode: "weighted"
-        # total_capital: 10000
-        # delay: 0
-        # decay: 4
-        # neutralization: "MARKET"
-        # truncation: 0.0
-
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
       config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
       config:
         instrument_ids: *instrument_ids
         execution_policy: "MarketExecutionPolicy"
-        # bracket:
-        #   take_profit_pct: 0.05
-        #   stop_loss_pct: 0.1
-
 
 report:
   output_dir: "logs/performance"
@@ -243,7 +214,7 @@ report:
     - html
   tearsheet:
     enabled: true
-    title: "CS Strategy Backtest (2022-01 to 2022-03)"
+    title: "CS Strategy Backtest — Regime-Aware (JM n=3 λ=0.5)"
     theme: "nautilus"
     height: 1500
     charts:
@@ -257,13 +228,13 @@ report:
       - yearly_returns
   quantstats:
     enabled: true
-    title: "CS Strategy QuantStats Analysis"
+    title: "CS Regime-Aware QuantStats Analysis"
     output_format:
       - html
       - png
   position_viz:
     enabled: true
-    title: "CS Strategy Position Timeline"
+    title: "CS Regime-Aware Position Timeline"
     output_subdir: "echarts"
     chart_height: 500
     interval: "4h"
