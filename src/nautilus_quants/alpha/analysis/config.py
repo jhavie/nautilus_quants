@@ -128,6 +128,11 @@ class AlphaAnalysisConfig:
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     regime: RegimeConfig | None = None
 
+    # FR/OI data injection
+    funding_rate: bool = False
+    oi_data_path: str = ""
+    oi_timeframe: str = "4h"
+
     # Registry auto-persist configuration
     registry_env: str = "test"
     registry_db_dir: str = "logs/registry"
@@ -170,29 +175,15 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         quantiles=raw.get("quantiles", 5),
         max_loss=raw.get("max_loss", 0.35),
         filter_zscore=raw.get("filter_zscore", 20.0),
-        charts=raw.get("charts", [
-            "quantile_returns_bar",
-            "quantile_returns_violin",
-            "cumulative_returns",
-            "cumulative_returns_long_short",
-            "quantile_spread",
-            "returns_table",
-            "ic_time_series",
-            "ic_histogram",
-            "ic_qq",
-            "monthly_ic_heatmap",
-            "turnover",
-            "turnover_table",
-            "factor_rank_autocorrelation",
-            "event_study",
-            "events_distribution",
-            "quantile_statistics_table",
-        ]),
+        charts=raw.get("charts", []),
         output_dir=raw.get("output_dir", "logs/alpha_analysis"),
         output_format=tuple(output_format),
         factor_cache_path=raw.get("factor_cache_path", ""),
         metrics=_parse_metrics_config(raw.get("metrics", {})),
         regime=_parse_regime_config(raw.get("regime")),
+        funding_rate=raw.get("funding_rate", False),
+        oi_data_path=raw.get("oi_data_path", ""),
+        oi_timeframe=raw.get("oi_timeframe", "4h"),
         registry_env=reg.get("env", "test"),
         registry_db_dir=reg.get("db_dir", "logs/registry"),
         registry_enabled=reg.get("enabled", True),

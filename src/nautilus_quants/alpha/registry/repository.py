@@ -117,6 +117,15 @@ class FactorRepository:
         )
 
     def delete_factor(self, factor_id: str) -> None:
+        """Delete a factor and its associated metrics and backtest links."""
+        self._db.execute(
+            "DELETE FROM alpha_analysis_metrics WHERE factor_id = ?",
+            [factor_id],
+        )
+        self._db.execute(
+            "DELETE FROM backtest_factors WHERE factor_id = ?",
+            [factor_id],
+        )
         self._db.execute(
             "DELETE FROM factors WHERE factor_id = ?", [factor_id],
         )
@@ -126,6 +135,7 @@ class FactorRepository:
         status: str | None = None,
         source: str | None = None,
         prototype: str | None = None,
+        tag: str | None = None,
         sort_by: str = "factor_id",
         descending: bool = False,
         limit: int | None = None,
@@ -142,6 +152,9 @@ class FactorRepository:
         if prototype is not None:
             clauses.append("prototype = ?")
             params.append(prototype)
+        if tag is not None:
+            clauses.append("list_contains(tags::VARCHAR[], ?)")
+            params.append(tag)
 
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         allowed = {"factor_id", "source", "status", "prototype", "created_at"}

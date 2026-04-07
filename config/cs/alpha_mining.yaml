@@ -1,0 +1,135 @@
+# Alpha Factor Mining Configuration
+# LLM-driven factor discovery via Claude Code CLI
+#
+# Usage:
+#   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml
+#   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml --rounds 3
+#   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml --hypothesis "volume divergence"
+
+registry:
+  env: test
+  db_dir: /Users/joe/Sync/nautilus_quants/logs/registry
+  enabled: true
+
+# ── Mining settings (only used by `alpha mine`) ──
+mining:
+  source: "llm_claude"                   # factor source name in registry
+  factors_per_round: 8
+  model: "sonnet"                        # sonnet / opus
+  proxy: "http://127.0.0.1:8888"        # SSH tunnel proxy for claude CLI
+  parallel: 3                         # concurrent claude requests per batch
+  output_dir: "logs/alpha_mining"
+
+# Charts (only these 6; empty list = no charts)
+charts:
+  - quantile_returns_bar
+  - monthly_ic_heatmap
+  - cumulative_returns
+  - turnover
+  - cumulative_returns_long_short
+  - ic_histogram
+
+# ── Data source (shared with analysis) ──
+catalog_path: "/Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+# FR/OI data injection
+funding_rate: true
+oi_data_path: "/Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/data/data_4years_4h/catalog"
+oi_timeframe: "4h"
+
+# factor_config_path: auto-generated per round by miner
+# factors: auto-generated per round (empty = analyze all)
+
+# 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+# (10 delisted/renamed on Bybit excluded: ANT, AUDIO, CELR, FTM, GTC, KLAY, MATIC, OMG, REN, XEM)
+instrument_ids:
+  - "1INCHUSDT.BINANCE"
+  - "AAVEUSDT.BINANCE"
+  - "ADAUSDT.BINANCE"
+  - "ALGOUSDT.BINANCE"
+  - "ALICEUSDT.BINANCE"
+  - "ANKRUSDT.BINANCE"
+  # - "ANTUSDT.BINANCE"      # delisted on Bybit
+  - "ARUSDT.BINANCE"
+  - "ATOMUSDT.BINANCE"
+  # - "AUDIOUSDT.BINANCE"    # delisted on Bybit
+  - "AVAXUSDT.BINANCE"
+  - "AXSUSDT.BINANCE"
+  - "BATUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "BTCUSDT.BINANCE"
+  - "C98USDT.BINANCE"
+  # - "CELRUSDT.BINANCE"     # delisted on Bybit
+  - "CHRUSDT.BINANCE"
+  - "CHZUSDT.BINANCE"
+  - "COMPUSDT.BINANCE"
+  - "COTIUSDT.BINANCE"
+  - "CRVUSDT.BINANCE"
+  - "DASHUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "DUSKUSDT.BINANCE"
+  - "DYDXUSDT.BINANCE"
+  - "EGLDUSDT.BINANCE"
+  - "ENJUSDT.BINANCE"
+  - "ENSUSDT.BINANCE"
+  - "ETCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "FILUSDT.BINANCE"
+  # - "FTMUSDT.BINANCE"      # renamed to SONICUSDT on Bybit
+  - "GALAUSDT.BINANCE"
+  - "GRTUSDT.BINANCE"
+  # - "GTCUSDT.BINANCE"      # delisted on Bybit
+  - "HBARUSDT.BINANCE"
+  - "IOSTUSDT.BINANCE"
+  - "IOTAUSDT.BINANCE"
+  - "IOTXUSDT.BINANCE"
+  # - "KLAYUSDT.BINANCE"     # delisted on Bybit
+  - "KSMUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "LPTUSDT.BINANCE"
+  - "LRCUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "MANAUSDT.BINANCE"
+  - "MASKUSDT.BINANCE"
+  # - "MATICUSDT.BINANCE"    # renamed to POLUSDT on Bybit
+  - "NEARUSDT.BINANCE"
+  # - "OMGUSDT.BINANCE"      # delisted on Bybit
+  - "ONEUSDT.BINANCE"
+  - "PEOPLEUSDT.BINANCE"
+  - "QTUMUSDT.BINANCE"
+  # - "RENUSDT.BINANCE"      # delisted on Bybit
+  - "RSRUSDT.BINANCE"
+  - "RUNEUSDT.BINANCE"
+  - "SANDUSDT.BINANCE"
+  - "SFPUSDT.BINANCE"
+  - "SNXUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "STORJUSDT.BINANCE"
+  - "SUSHIUSDT.BINANCE"
+  - "SXPUSDT.BINANCE"
+  - "THETAUSDT.BINANCE"
+  - "TRXUSDT.BINANCE"
+  - "UNIUSDT.BINANCE"
+  - "VETUSDT.BINANCE"
+  # - "XEMUSDT.BINANCE"      # delisted on Bybit
+  - "XLMUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "XTZUSDT.BINANCE"
+  - "YFIUSDT.BINANCE"
+  - "ZECUSDT.BINANCE"
+  - "ZENUSDT.BINANCE"
+
+# alphalens parameters
+periods: [1, 2, 6, 18]    # forward returns: 4h, 8h, 24h, 72h
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
+
+# Output (per-round analysis dirs auto-created under mining output_dir)
+output_dir: "logs/alpha_mining"

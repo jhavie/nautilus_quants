@@ -47,6 +47,17 @@
 - 基于 ProcessPoolExecutor 的并行评估
 - 自动入库 DuckDB 注册表（通过 YAML 配置）
 
+### Alpha 挖掘 (`nautilus_quants.alpha.mining`)
+
+基于 Claude Code CLI (`claude -p`) 的 LLM 因子自动发现：
+
+- **假说驱动**：LLM 先输出市场假说，再生成因子表达式（借鉴 AlphaAgent 论文）
+- **DSL 原生**：直接生成项目 Alpha101 风格 DSL 表达式（62 个算子）
+- **反重复正则化**：注入历史表达式到 prompt，避免生成重复因子
+- **迭代反馈循环**：上轮 top 因子的 IC/ICIR 指导下一轮生成方向
+- **自动验证**：`parse_expression()` 语法检查 + `expression_hash()` 去重
+- **完整日志**：每轮保存 prompt、response、验证结果和分析输出
+
 ### 因子注册表 (`nautilus_quants.alpha.registry`)
 
 基于 DuckDB 的因子全生命周期管理，支持多环境：
@@ -75,10 +86,13 @@ registry:
 | `metrics` | 查看因子全部指标（IC、ICIR、t(NW)、skew、kurtosis、AR1...） | `metrics alpha101_alpha044_8h` |
 | `list` | 列出已注册因子 | `list --prototype alpha044 --source alpha101` |
 | `inspect` | 因子详情 + 分析指标 + 回测记录 | `inspect alpha101_alpha044_8h` |
-| `backtests` | 列出回测记录及关联因子 | `backtests --factor-id alpha101_alpha044_8h` |
+| `backtests` | 列出回测记录及关联因子（含 started_at） | `backtests --factor-id alpha101_alpha044_8h` |
+| `config` | 查看回测关联的配置快照 | `config <backtest_id> --type all` |
 | `status` | 修改因子状态（candidate/active/archived） | `status alpha101_alpha044_8h active` |
 | `register` | 从 YAML 手动注册因子（不运行分析） | `register config/cs/factors.yaml` |
 | `export-factors` | 导出 active 因子为 YAML + composite | `export-factors -o output.yaml --method icir_weight` |
+| `promote` | 评分、去重、去相关并跨环境晋升因子 | `promote --config config/examples/scoring.yaml` |
+| `mine` | 基于 Claude Code CLI 的 LLM 因子挖掘 | `mine config/cs/alpha_101.yaml --rounds 5` |
 | `regime` | Regime 条件 IC 分析（Jump Model vs EMA 对比） | `regime config/cs/regime_llm_claude.yaml -v` |
 
 **回测 CLI 命令 (`python -m nautilus_quants.backtest`)：**
@@ -189,6 +203,37 @@ python -m nautilus_quants.backtest list
 python -m nautilus_quants.alpha analyze config/examples/alpha_analysis.yaml -v
 ```
 
+#### Alpha 因子挖掘（LLM）
+
+```bash
+# 挖掘因子（5 轮 × 8 因子 = ~40 个候选）
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml
+
+# 指定假说方向
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml \
+  --hypothesis "量价背离在加密货币中预示反转"
+
+# 只生成不分析（跳过 IC 计算）
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --no-analyze --rounds 3
+
+# 使用 opus 模型（更深度推理）
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --model opus
+
+# 查看挖掘结果
+python -m nautilus_quants.alpha list --env test --source llm_mining
+python -m nautilus_quants.alpha promote --source-env test --target-env dev
+```
+
+Mining 配置可在分析 YAML 中添加 `mining` section：
+
+```yaml
+mining:
+  factors_per_round: 8          # 每轮生成因子数
+  model: "sonnet"               # Claude 模型（sonnet/opus）
+  proxy: "http://127.0.0.1:8888"  # claude CLI 代理（可选）
+  output_dir: "logs/alpha_mining"
+```
+
 ## 配置系统
 
 所有可调参数通过 YAML 配置文件管理，源码中不允许硬编码数值。
@@ -265,9 +310,10 @@ src/nautilus_quants/
 │   ├── expression/     # Lark 解析器 + AST
 │   ├── operators/      # 时序 / 截面 / 数学算子
 │   └── builtin/        # 45 个 Alpha101 因子
-├── alpha/              # 因子分析（alphalens）
-│   ├── cli.py          # 分析 CLI
-│   └── analysis/       # 评估器 + 报告生成
+├── alpha/              # 因子分析 + 挖掘
+│   ├── cli.py          # 分析 & 挖掘 CLI
+│   ├── analysis/       # 评估器 + 报告生成
+│   └── mining/agent/   # LLM 因子挖掘（prompt + 编排器）
 ├── backtest/           # 回测框架
 │   ├── cli.py          # 回测 CLI
 │   ├── runner.py       # BacktestNode 执行器

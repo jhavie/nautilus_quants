@@ -110,20 +110,36 @@ class RegistryDatabase:
         Path to the DuckDB database file.  Use ``":memory:"`` for tests.
     """
 
-    def __init__(self, db_path: str | Path = ":memory:") -> None:
+    def __init__(
+        self, db_path: str | Path = ":memory:",
+        max_retries: int = 3,
+        retry_delay: float = 10.0,
+    ) -> None:
+        import time as _time
+
         self._db_path = str(db_path)
         if self._db_path != ":memory:":
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._conn: duckdb.DuckDBPyConnection = duckdb.connect(self._db_path)
-        except duckdb.IOException as e:
-            if "lock" in str(e).lower():
-                logger.error(
-                    "DuckDB lock conflict on %s — close other connections "
-                    "(e.g. VS Code DuckDB plugin) and retry.",
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._conn: duckdb.DuckDBPyConnection = duckdb.connect(
                     self._db_path,
                 )
-            raise
+                break
+            except duckdb.IOException as e:
+                if "lock" in str(e).lower() and attempt < max_retries:
+                    logger.warning(
+                        "DuckDB lock conflict on %s — retry %d/%d in %.0fs",
+                        self._db_path, attempt, max_retries, retry_delay,
+                    )
+                    _time.sleep(retry_delay)
+                    continue
+                if "lock" in str(e).lower():
+                    logger.error(
+                        "DuckDB lock conflict on %s — all %d retries exhausted.",
+                        self._db_path, max_retries,
+                    )
+                raise
         self._init_tables()
 
     @classmethod

@@ -44,6 +44,17 @@ Factor quality evaluation using alphalens-reloaded:
 - Parallel evaluation via ProcessPoolExecutor
 - Auto-persist to DuckDB registry (configurable via YAML)
 
+### Alpha Mining (`nautilus_quants.alpha.mining`)
+
+LLM-driven alpha factor discovery using Claude Code CLI (`claude -p`):
+
+- **Hypothesis-first generation**: LLM outputs market hypothesis before writing expressions
+- **DSL-native**: Generates expressions directly in the project's Alpha101-style DSL (62 operators)
+- **Anti-duplication**: Injects all previous expressions into prompt to avoid repetition
+- **Iterative feedback**: Top factors' IC/ICIR from previous rounds guide next generation
+- **Auto-validation**: `parse_expression()` + `expression_hash()` for syntax check and dedup
+- **Full logging**: Each round saves prompt, response, validated factors, and analysis results
+
 ### Factor Registry (`nautilus_quants.alpha.registry`)
 
 DuckDB-backed factor lifecycle management with multi-environment support:
@@ -69,13 +80,20 @@ registry:
 | Command | Description | Example |
 |---------|-------------|---------|
 | `analyze` | Run factor analysis + auto-persist to DB | `analyze config/cs/alpha_101.yaml` |
+| `mine` | LLM-driven alpha factor mining via Claude CLI | `mine config/cs/alpha_mining.yaml --rounds 3` |
 | `metrics` | Show all metrics for a factor (IC, ICIR, t(NW), skew, kurtosis, AR1...) | `metrics alpha101_alpha044_8h` |
 | `list` | List registered factors | `list --prototype alpha044 --source alpha101` |
 | `inspect` | Factor details + analysis metrics + backtests | `inspect alpha101_alpha044_8h` |
-| `backtests` | List backtest runs with linked factors | `backtests --factor-id alpha101_alpha044_8h` |
+| `backtests` | List backtest runs with linked factors (incl. started_at) | `backtests --factor-id alpha101_alpha044_8h` |
+| `config` | Show config snapshot linked to a backtest run | `config <backtest_id> --type all` |
 | `status` | Change factor status (candidate/active/archived) | `status alpha101_alpha044_8h active` |
 | `register` | Register factors from YAML without analysis | `register config/cs/factors.yaml` |
 | `export-factors` | Export active factors to YAML with composite | `export-factors -o output.yaml --method icir_weight` |
+| `promote` | Score, dedup, decorrelate & promote factors across envs | `promote --config config/examples/scoring.yaml` |
+| `mine` | LLM-driven alpha factor mining via Claude Code CLI | `mine config/cs/alpha_mining.yaml --rounds 3` |
+| `audit` | Audit registry for expression duplicates & prototype issues | `audit --env test` |
+| `backfill` | Backfill expression_hash, prototype, parameters | `backfill --execute --env test` |
+| `dedup` | Remove duplicate factors by expression hash | `dedup --execute --env test` |
 | `regime` | Regime-conditional IC analysis (Jump Model vs EMA) | `regime config/cs/regime_llm_claude.yaml -v` |
 
 **Backtest CLI (`python -m nautilus_quants.backtest`):**
@@ -175,6 +193,27 @@ python -m nautilus_quants.backtest list
 python -m nautilus_quants.alpha analyze config/examples/alpha_analysis.yaml -v
 ```
 
+#### Alpha Factor Mining (LLM)
+
+```bash
+# Mine factors (5 rounds × 8 factors = ~40 candidates)
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml
+
+# Mine with hypothesis direction
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml \
+  --hypothesis "volume-price divergence predicts reversal in crypto"
+
+# Generate only (skip IC analysis)
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --no-analyze --rounds 3
+
+# Use opus model for deeper reasoning
+python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --model opus
+
+# Review mined factors
+python -m nautilus_quants.alpha list --env test --source llm_mining
+python -m nautilus_quants.alpha promote --source-env test --target-env dev
+```
+
 ## Configuration
 
 All parameters are YAML-driven. No hardcoded values in source code.
@@ -208,9 +247,10 @@ src/nautilus_quants/
 │   ├── expression/     # Lark parser + AST
 │   ├── operators/      # TS / CS / Math operators
 │   └── builtin/        # 45 Alpha101 factors
-├── alpha/              # Factor analysis (alphalens)
-│   ├── cli.py          # Analysis CLI
-│   └── analysis/       # Evaluator + report generation
+├── alpha/              # Factor analysis + mining
+│   ├── cli.py          # Analysis & mining CLI
+│   ├── analysis/       # Evaluator + report generation
+│   └── mining/agent/   # LLM-driven factor mining (prompts + orchestrator)
 ├── backtest/           # Backtest framework
 │   ├── cli.py          # Backtest CLI
 │   ├── runner.py       # BacktestNode executor

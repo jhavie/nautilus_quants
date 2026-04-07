@@ -20,6 +20,7 @@ dependencies = [
     "pandas>=2.3.3,<3.0.0",
     "pyyaml>=6.0",
     "click>=8.0.0",
+    "rich>=13.0.0",
     "lark>=1.1.0",
     "scipy>=1.11.0",  # Used by factors/operators/cross_sectional.py
 ]
@@ -30,6 +31,7 @@ data = [
     "tqdm>=4.66",
     "PySocks>=1.7.1",
     "python-binance>=1.0.19",
+    "pybit>=5.0",
     "tenacity>=8.0.0",
 ]
 backtest = [

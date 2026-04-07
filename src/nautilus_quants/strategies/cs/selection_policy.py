@@ -101,8 +101,12 @@ class FMZSelectionPolicy:
             else set()
         )
         # Sticky: keep current positions unless they should flip
-        final_long = (current_long - short_targets) | long_targets
-        final_short = (current_short - long_targets) | short_targets
+        final_long = (
+            ((current_long - short_targets) | long_targets) if self._n_long > 0 else set()
+        )
+        final_short = (
+            ((current_short - long_targets) | short_targets) if self._n_short > 0 else set()
+        )
 
         n_total = max(len(final_long) + len(final_short), 1)
         result: list[TargetPosition] = []
@@ -214,6 +218,9 @@ class TopKDropoutSelectionPolicy:
         set[str]
             Final set of instruments for this leg.
         """
+        if topk == 0:
+            return set()
+
         exclude = exclude or set()
         available = {k: v for k, v in scores.items() if k not in exclude}
 

@@ -105,9 +105,14 @@ def cli() -> None:
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output")
 @click.option("--no-registry", is_flag=True, help="Skip writing to registry database")
 @click.option("--env", "env_name", default=None, help="Registry environment (test/dev/prod)")
+@click.option("--force-reanalyze", is_flag=True,
+              help="Re-analyze even if metrics already exist for the expression")
+@click.option("--workers", type=int, default=None,
+              help="Max parallel workers for alphalens (default: min(factors, 4))")
 def analyze(
     config_file: Path, verbose: bool, quiet: bool,
-    no_registry: bool, env_name: str | None,
+    no_registry: bool, env_name: str | None, force_reanalyze: bool,
+    workers: int | None,
 ) -> None:
     """Execute factor analysis from a YAML configuration file.
 
@@ -166,7 +171,7 @@ def analyze(
 
         # 4. Load factor config and create evaluator
         factor_config = load_factor_config(config.factor_config_path)
-        evaluator = FactorEvaluator(factor_config)
+        evaluator = FactorEvaluator(factor_config, analysis_config=config)
 
         # 5. Compute factors (with lazy cache support)
         from nautilus_quants.factors.cache import (
@@ -246,6 +251,54 @@ def analyze(
             )
             sys.exit(1)
 
+        # 6b. Skip factors with existing metrics (default behavior)
+        registry_enabled = config.registry_enabled and not no_registry
+        if registry_enabled and not force_reanalyze:
+            from nautilus_quants.alpha.registry.database import RegistryDatabase
+            from nautilus_quants.alpha.registry.environment import resolve_env
+            from nautilus_quants.factors.expression.normalize import (
+                expression_hash as _expr_hash,
+            )
+
+            _env = resolve_env(env_name, config.registry_env)
+            _db = RegistryDatabase.for_environment(_env, config.registry_db_dir)
+            already: set[str] = set()
+            for fname in list(factor_series.keys()):
+                fdef = factor_config.get_factor(fname)
+                if fdef is None:
+                    continue
+                try:
+                    h = _expr_hash(fdef.expression)
+                except Exception:
+                    continue
+                row = _db.fetch_one(
+                    "SELECT f.factor_id FROM factors f "
+                    "JOIN alpha_analysis_metrics m "
+                    "ON f.factor_id = m.factor_id "
+                    "WHERE f.expression_hash = ? LIMIT 1",
+                    [h],
+                )
+                if row is not None:
+                    already.add(fname)
+            _db.close()
+
+            if already:
+                factor_series = {
+                    k: v for k, v in factor_series.items()
+                    if k not in already
+                }
+                if not quiet:
+                    click.echo(
+                        f"  Skipped {len(already)} factors "
+                        f"with existing metrics"
+                    )
+            if not factor_series:
+                if not quiet:
+                    click.echo(
+                        "All factors already analyzed. Nothing to do."
+                    )
+                return
+
         if not quiet:
             click.echo(
                 f"Analyzing {len(factor_series)} factors across "
@@ -273,7 +326,7 @@ def analyze(
         al_results: dict[str, dict] = {}
 
         # Phase 1: Parallel alphalens analysis (CPU-bound, no matplotlib)
-        n_workers = min(len(factor_series), 4)
+        n_workers = workers if workers is not None else min(len(factor_series), 4)
         if not quiet:
             click.echo(f"  Running alphalens in parallel ({n_workers} workers)...")
 
@@ -502,6 +555,7 @@ def _open_repo(env_name: str | None, db_dir: str):
 @_DB_DIR_OPTION
 def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
     """Register factors from a YAML config file into the registry."""
+    from nautilus_quants.alpha.formatters import print_register_result
     from nautilus_quants.factors.config import load_factor_config
 
     try:
@@ -512,11 +566,10 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
 
     repo, db = _open_repo(env_name, db_dir)
     try:
-        new, updated, unchanged = repo.register_factors_from_config(config)
-        click.echo(
-            f"Registered {new + updated + unchanged} factors "
-            f"({new} new, {updated} updated, {unchanged} unchanged)"
+        new, updated, unchanged, duplicate = repo.register_factors_from_config(
+            config,
         )
+        print_register_result(new, updated, unchanged, duplicate)
     finally:
         db.close()
 
@@ -525,6 +578,7 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
 @click.option("--status", default=None, help="Filter by status.")
 @click.option("--source", default=None, help="Filter by source.")
 @click.option("--prototype", default=None, help="Filter by prototype.")
+@click.option("--tag", default=None, help="Filter by tag.")
 @click.option("--limit", default=None, type=int, help="Max rows.")
 @_ENV_OPTION
 @_DB_DIR_OPTION
@@ -532,92 +586,127 @@ def list_factors(
     status: str | None,
     source: str | None,
     prototype: str | None,
+    tag: str | None,
     limit: int | None,
     env_name: str | None,
     db_dir: str,
 ) -> None:
     """List factors in the registry."""
+    from nautilus_quants.alpha.formatters import print_factor_list
+
     repo, db = _open_repo(env_name, db_dir)
     try:
         factors = repo.list_factors(
-            status=status, source=source, prototype=prototype, limit=limit,
+            status=status, source=source, prototype=prototype,
+            tag=tag, limit=limit,
         )
         if not factors:
             click.echo("(no factors found)")
             return
 
-        click.echo(
-            f"{'factor_id':<30} {'prototype':<14} {'status':<12} "
-            f"{'source':<10} {'tags'}"
+        has_scores = any(
+            f.parameters.get("promote_score") is not None for f in factors
         )
-        click.echo("-" * 80)
-        for f in factors:
-            tags_str = ", ".join(f.tags) if f.tags else "-"
-            click.echo(
-                f"{f.factor_id:<30} {f.prototype:<14} {f.status:<12} "
-                f"{f.source:<10} {tags_str}"
-            )
-        click.echo(f"({len(factors)} factors)")
+        print_factor_list(factors, has_scores)
     finally:
         db.close()
 
 
 @cli.command()
-@click.argument("factor_id")
+@click.argument("factor_id", required=False, default=None)
+@click.option("--prototype", "proto_name", default=None,
+              help="Inspect all factors sharing this prototype.")
 @_ENV_OPTION
 @_DB_DIR_OPTION
-def inspect(factor_id: str, env_name: str | None, db_dir: str) -> None:
-    """Inspect a factor's details and latest metrics."""
+def inspect(
+    factor_id: str | None, proto_name: str | None,
+    env_name: str | None, db_dir: str,
+) -> None:
+    """Inspect a factor or prototype group.
+
+    With FACTOR_ID: show factor details + metrics + backtests.
+    With --prototype: show template expression + all parameter variants.
+    """
+    if not factor_id and not proto_name:
+        click.echo("Error: provide FACTOR_ID or --prototype NAME", err=True)
+        sys.exit(1)
+
     repo, db = _open_repo(env_name, db_dir)
     try:
-        f = repo.get_factor(factor_id)
-        if f is None:
-            click.echo(f"Error: factor not found: {factor_id}", err=True)
-            sys.exit(1)
-
-        click.echo(f"Factor: {f.factor_id}")
-        click.echo(f"Expression: {f.expression}")
-        click.echo(f"Prototype: {f.prototype or '(none)'}")
-        click.echo(f"Source: {f.source or '(none)'}")
-        click.echo(f"Status: {f.status}")
-        click.echo(f"Tags: {', '.join(f.tags) if f.tags else '(none)'}")
-        click.echo(f"Parameters: {f.parameters}")
-        click.echo(f"Variables: {f.variables}")
-
-        metrics = repo.get_metrics(factor_id)
-        if metrics:
-            click.echo(f"\nAnalysis metrics ({len(metrics)} records):")
-            for m in metrics[:12]:
-                icir_str = f"{m.icir:.4f}" if m.icir is not None else "-"
-                ic_str = f"{m.ic_mean:.4f}" if m.ic_mean is not None else "-"
-                click.echo(
-                    f"  run={m.run_id} period={m.period} "
-                    f"IC={ic_str} ICIR={icir_str} timeframe={m.timeframe}"
-                )
-
-        from nautilus_quants.alpha.registry.backtest_repository import (
-            BacktestRepository,
-        )
-
-        bt_repo = BacktestRepository(db)
-        runs = bt_repo.list_backtests(factor_id=factor_id)
-        if runs:
-            click.echo(f"\nBacktests ({len(runs)} records):")
-            for r in runs:
-                def _v(v: float | None, fmt: str = ".4f") -> str:
-                    return f"{v:{fmt}}" if v is not None else "-"
-                dd = f"{r.max_drawdown:.2%}" if r.max_drawdown else "-"
-                factors = bt_repo.get_backtest_factors(r.backtest_id)
-                fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
-                click.echo(
-                    f"  {r.backtest_id}  sharpe={_v(r.sharpe_ratio)} "
-                    f"pnl%={_v(r.total_pnl_pct, '.2f')} "
-                    f"max_dd={dd} timeframe={r.timeframe} "
-                    f"instr={r.instrument_count} "
-                    f"factors=[{fids}]"
-                )
+        if proto_name:
+            _inspect_prototype(repo, proto_name)
+        else:
+            _inspect_factor(repo, db, factor_id)  # type: ignore[arg-type]
     finally:
         db.close()
+
+
+def _inspect_prototype(repo, proto_name: str) -> None:
+    """Show prototype template + parameter variants."""
+    from nautilus_quants.alpha.formatters import print_prototype_group
+    from nautilus_quants.factors.expression.normalize import expression_template
+
+    factors = repo.list_factors(prototype=proto_name)
+    if not factors:
+        click.echo(f"No factors with prototype '{proto_name}'")
+        return
+
+    sources = {f.source for f in factors if f.source}
+
+    # Compute template from first factor
+    template = None
+    try:
+        tmpl, _ = expression_template(factors[0].expression)
+        template = tmpl
+    except Exception:
+        pass
+
+    # Collect parameter names from all factors
+    all_params: list[tuple[str, dict[str, float], str]] = []
+    for f in factors:
+        try:
+            _, vals = expression_template(f.expression)
+            params = {f"p{i}": v for i, v in enumerate(vals)}
+        except Exception:
+            params = {}
+        all_params.append((f.factor_id, params, f.status))
+
+    p_keys = sorted({k for _, p, _ in all_params for k in p_keys_of(p)})
+    print_prototype_group(proto_name, sources, template, all_params, p_keys)
+
+
+def p_keys_of(params: dict) -> list[str]:
+    """Extract sorted p0, p1, ... keys from a params dict."""
+    return sorted(
+        (k for k in params if k.startswith("p") and k[1:].isdigit()),
+        key=lambda k: int(k[1:]),
+    )
+
+
+def _inspect_factor(repo, db, factor_id: str) -> None:
+    """Show single factor details + metrics + backtests."""
+    from nautilus_quants.alpha.formatters import print_factor_detail
+    from nautilus_quants.alpha.registry.backtest_repository import (
+        BacktestRepository,
+    )
+
+    f = repo.get_factor(factor_id)
+    if f is None:
+        click.echo(f"Error: factor not found: {factor_id}", err=True)
+        sys.exit(1)
+
+    metrics = repo.get_metrics(factor_id)
+
+    bt_repo = BacktestRepository(db)
+    runs = bt_repo.list_backtests(factor_id=factor_id)
+    backtests = None
+    if runs:
+        backtests = [
+            (r, bt_repo.get_backtest_factors(r.backtest_id))
+            for r in runs
+        ]
+
+    print_factor_detail(f, metrics=metrics or None, backtests=backtests)
 
 
 @cli.command()
@@ -653,6 +742,8 @@ def metrics(
     env_name: str | None, db_dir: str,
 ) -> None:
     """Show analysis metrics for a factor."""
+    from nautilus_quants.alpha.formatters import print_metrics_table
+
     repo, db = _open_repo(env_name, db_dir)
     try:
         results = repo.get_metrics(factor_id, timeframe=timeframe)
@@ -660,26 +751,7 @@ def metrics(
             click.echo(f"No metrics found for {factor_id}")
             return
 
-        def _f(v: float | None, w: int = 8, d: int = 4) -> str:
-            return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
-
-        click.echo(
-            f"{'run_id':<18} {'period':<6} "
-            f"{'IC':>8} {'ICIR':>8} {'t(NW)':>8} {'p(NW)':>10} "
-            f"{'mono':>6} {'win%':>7} {'IC_lin':>7} "
-            f"{'IC_skew':>8} {'IC_kur':>8} {'AR1':>7} {'N':>6}"
-        )
-        click.echo("-" * 112)
-        for m in results:
-            wr = f"{m.win_rate * 100:>6.1f}%" if m.win_rate is not None else f"{'-':>7}"
-            p_nw = f"{m.p_value_nw:>10.2e}" if m.p_value_nw is not None else f"{'-':>10}"
-            n = f"{m.n_samples:>6}" if m.n_samples is not None else f"{'-':>6}"
-            click.echo(
-                f"{m.run_id:<18} {m.period:<6} "
-                f"{_f(m.ic_mean)} {_f(m.icir)} {_f(m.t_stat_nw, 8, 2)} {p_nw} "
-                f"{_f(m.monotonicity, 6, 2)} {wr} {_f(m.ic_linearity, 7, 3)} "
-                f"{_f(m.ic_skew)} {_f(m.ic_kurtosis)} {_f(m.ic_ar1, 7, 3)} {n}"
-            )
+        print_metrics_table(factor_id, results)
     finally:
         db.close()
 
@@ -694,6 +766,7 @@ def backtests(
     env_name: str | None, db_dir: str,
 ) -> None:
     """List backtest runs from the registry."""
+    from nautilus_quants.alpha.formatters import print_backtests_table
     from nautilus_quants.alpha.registry.backtest_repository import BacktestRepository
     from nautilus_quants.alpha.registry.database import RegistryDatabase
     from nautilus_quants.alpha.registry.environment import resolve_env
@@ -707,27 +780,68 @@ def backtests(
             click.echo("(no backtests found)")
             return
 
-        def _f(v: float | None, w: int = 8, d: int = 4) -> str:
-            return f"{v:>{w}.{d}f}" if v is not None else f"{'-':>{w}}"
+        bt_with_factors = [
+            (r, bt_repo.get_backtest_factors(r.backtest_id))
+            for r in runs
+        ]
+        print_backtests_table(bt_with_factors)
+    finally:
+        db.close()
 
-        click.echo(
-            f"{'backtest_id':<18} {'strategy':<20} {'timeframe':<10} "
-            f"{'instr':>5} {'sharpe':>8} {'pnl%':>8} {'max_dd':>9} "
-            f"{'win_rate':>8} {'dur(s)':>7}  {'factors'}"
-        )
-        click.echo("-" * 125)
-        for r in runs:
-            wr = f"{r.win_rate * 100:>7.1f}%" if r.win_rate else f"{'-':>8}"
-            dd = f"{r.max_drawdown * 100:>8.2f}%" if r.max_drawdown else f"{'-':>9}"
-            factors = bt_repo.get_backtest_factors(r.backtest_id)
-            fids = ", ".join(bf.factor_id for bf in factors) if factors else "-"
-            click.echo(
-                f"{r.backtest_id:<18} {r.strategy_name:<20} {r.timeframe:<10} "
-                f"{r.instrument_count:>5} {_f(r.sharpe_ratio)} "
-                f"{_f(r.total_pnl_pct)} {dd} "
-                f"{wr} {r.duration_seconds:>7.1f}  {fids}"
-            )
-        click.echo(f"({len(runs)} backtests)")
+
+@cli.command("config")
+@click.argument("backtest_id")
+@click.option(
+    "--type",
+    "config_type",
+    default="backtest",
+    type=click.Choice(["backtest", "factors", "all"]),
+    help="Config type to show.",
+)
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def config_cmd(
+    backtest_id: str,
+    config_type: str,
+    env_name: str | None,
+    db_dir: str,
+) -> None:
+    """Show config snapshot linked to a backtest run."""
+    import json as json_mod
+
+    from nautilus_quants.alpha.registry.backtest_repository import BacktestRepository
+    from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.environment import resolve_env
+    from nautilus_quants.alpha.registry.repository import FactorRepository
+
+    env = resolve_env(env_name)
+    db = RegistryDatabase.for_environment(env, db_dir)
+    bt_repo = BacktestRepository(db)
+    repo = FactorRepository(db)
+    try:
+        run = bt_repo.get_backtest(backtest_id)
+        if run is None:
+            click.echo(f"Backtest not found: {backtest_id}", err=True)
+            raise SystemExit(1)
+
+        ids: list[tuple[str, str]] = []
+        if config_type in ("backtest", "all") and run.config_id:
+            ids.append(("backtest", run.config_id))
+        if config_type in ("factors", "all") and run.factor_config_id:
+            ids.append(("factors", run.factor_config_id))
+
+        if not ids:
+            click.echo("(no config snapshots linked)")
+            return
+
+        for label, cid in ids:
+            snap = repo.get_config_snapshot(cid)
+            if snap is None:
+                click.echo(f"[{label}] config_id={cid} — not found")
+                continue
+            click.echo(f"── {label} (config_id={cid}) ──")
+            click.echo(json_mod.dumps(snap.config_json, indent=2, ensure_ascii=False))
+            click.echo()
     finally:
         db.close()
 
@@ -1181,6 +1295,514 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             import traceback
             traceback.print_exc()
         sys.exit(1)
+
+
+@cli.command()
+@click.option(
+    "--source-env", default="test",
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Source registry environment.",
+)
+@click.option(
+    "--target-env", default="dev",
+    type=click.Choice(["test", "dev", "prod"]),
+    help="Target registry environment.",
+)
+@click.option(
+    "--config", "config_path",
+    default="config/examples/scoring.yaml",
+    type=click.Path(exists=True, path_type=Path),
+    help="Scoring configuration file.",
+)
+@click.option("--dry-run", is_flag=True, help="Score and rank without migrating.")
+@click.option("--skip-corr", is_flag=True, help="Skip correlation computation (fingerprint dedup only).")
+@click.option("--max-factors", default=None, type=int, help="Override max factors to promote.")
+@click.option(
+    "--competitive", is_flag=True,
+    help="Full re-selection: existing target factors compete with candidates. "
+         "Factors that lose are archived.",
+)
+@_DB_DIR_OPTION
+def promote(
+    source_env: str,
+    target_env: str,
+    config_path: Path,
+    dry_run: bool,
+    skip_corr: bool,
+    max_factors: int | None,
+    competitive: bool,
+    db_dir: str,
+) -> None:
+    """Score, deduplicate, decorrelate, and promote factors to target env.
+
+    Full pipeline:
+      1. Load metrics from source env
+      2. Apply hard filters (per-period)
+      3. Score factors (5-dimension)
+      4. Fingerprint deduplication
+      5. Spearman correlation dedup + greedy selection (unless --skip-corr)
+      6. Migrate to target env (unless --dry-run)
+
+    \b
+    Modes:
+      Default (additive): existing target factors are gatekeepers; new factors
+        are added without evicting incumbents.
+      --competitive: full re-selection from source. Existing target factors
+        that are not re-selected are archived. The target env always reflects
+        the globally optimal set under the current scoring config.
+
+    \b
+    Examples:
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --competitive --dry-run
+      python -m nautilus_quants.alpha promote --source-env test --target-env dev --skip-corr
+      python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --max-factors 50
+    """
+    import warnings
+    from datetime import datetime, timezone
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+    from nautilus_quants.alpha.registry.database import RegistryDatabase
+    from nautilus_quants.alpha.registry.scoring import (
+        apply_hard_filters,
+        compute_factor_correlation,
+        dedup_by_fingerprint,
+        greedy_select,
+        load_scoring_config,
+        load_scoring_data,
+        migrate_factors,
+        retire_evicted_factors,
+        score_factors,
+    )
+
+    start_time = time.time()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    try:
+        # 0. Load scoring config
+        scoring_cfg = load_scoring_config(config_path)
+        if max_factors is not None:
+            # Override from CLI
+            scoring_cfg = scoring_cfg.__class__(
+                periods=scoring_cfg.periods,
+                hard_filters=scoring_cfg.hard_filters,
+                weights=scoring_cfg.weights,
+                sub_weights=scoring_cfg.sub_weights,
+                dedup=scoring_cfg.dedup,
+                promote=scoring_cfg.promote.__class__(
+                    max_factors=max_factors,
+                    target_status=scoring_cfg.promote.target_status,
+                ),
+                data=scoring_cfg.data,
+            )
+
+        from nautilus_quants.alpha.formatters import (
+            console as _console,
+            print_promote_header,
+            print_promote_summary,
+            print_selected_factors,
+            print_top_scores,
+        )
+
+        print_promote_header(
+            source_env, target_env, str(config_path),
+            scoring_cfg.periods, dry_run, skip_corr,
+            scoring_cfg.promote.max_factors,
+        )
+
+        # 1. Load data from source
+        click.echo("Phase 1: Loading scoring data...")
+        source_db = RegistryDatabase.for_environment(source_env, db_dir)
+        df = load_scoring_data(source_db, scoring_cfg.periods)
+
+        if df.empty:
+            click.echo("Error: No metrics found in source database.", err=True)
+            source_db.close()
+            sys.exit(1)
+
+        click.echo(f"  Loaded {len(df)} factors with metrics across {scoring_cfg.periods}")
+
+        # 2. Hard filters
+        click.echo()
+        click.echo("Phase 1.1: Applying hard filters...")
+        n_before = len(df)
+        df = apply_hard_filters(df, scoring_cfg.hard_filters, scoring_cfg.periods)
+        n_after = len(df)
+        click.echo(f"  {n_before} → {n_after} factors ({n_before - n_after} eliminated)")
+
+        if df.empty:
+            click.echo("Error: No factors passed hard filters.", err=True)
+            source_db.close()
+            sys.exit(1)
+
+        # Show valid period distribution
+        period_counts = df["n_valid_periods"].value_counts().sort_index()
+        for n_periods, count in period_counts.items():
+            click.echo(f"    {n_periods} valid periods: {count} factors")
+
+        # 3. Fingerprint dedup
+        click.echo()
+        click.echo("Phase 2.1: Fingerprint deduplication...")
+        n_before_dedup = len(df)
+        df = dedup_by_fingerprint(
+            df, scoring_cfg.periods,
+            threshold=scoring_cfg.dedup.fingerprint_threshold,
+        )
+        n_removed = n_before_dedup - len(df)
+        click.echo(f"  {n_before_dedup} → {len(df)} factors ({n_removed} duplicates removed)")
+
+        # 4. Scoring
+        click.echo()
+        click.echo("Phase 1.2: Computing 5-dimension scores...")
+        df = score_factors(df, scoring_cfg)
+
+        # Print top factors table
+        print_top_scores(df, n=30)
+
+        # 5. Correlation-based greedy selection
+        # Load existing target factors (needed for both additive gatekeeper
+        # and competitive eviction modes)
+        from nautilus_quants.alpha.registry.repository import FactorRepository
+
+        target_existing_ids: list[str] = []
+        if not skip_corr or competitive:
+            target_db_query = RegistryDatabase.for_environment(target_env, db_dir)
+            try:
+                tgt_repo = FactorRepository(target_db_query)
+                existing_factors = tgt_repo.list_factors(status="active")
+                target_existing_ids = [f.factor_id for f in existing_factors]
+            finally:
+                target_db_query.close()
+
+        if not skip_corr:
+            if target_existing_ids:
+                click.echo()
+                mode_label = "competitive (will evict)" if competitive else "gatekeeper"
+                click.echo(
+                    f"  Target DB ({target_env}): {len(target_existing_ids)} "
+                    f"existing factors [{mode_label}]"
+                )
+
+            click.echo()
+            click.echo("Phase 2.2: Computing factor correlations...")
+            candidate_ids = df.index.tolist()
+            # Include target existing factors in correlation computation
+            all_corr_ids = list(dict.fromkeys(candidate_ids + target_existing_ids))
+            try:
+                # Use both source and target DBs for registry fallback
+                target_db_for_corr = RegistryDatabase.for_environment(target_env, db_dir)
+                try:
+                    corr_matrix = compute_factor_correlation(
+                        all_corr_ids, scoring_cfg,
+                        registry_dbs=[source_db, target_db_for_corr],
+                    )
+                finally:
+                    target_db_for_corr.close()
+
+                if not corr_matrix.empty:
+                    click.echo(
+                        f"  Correlation matrix: {corr_matrix.shape[0]} × {corr_matrix.shape[1]}"
+                    )
+
+                    # Save correlation matrix CSV
+                    corr_dir = Path("logs/scoring")
+                    corr_dir.mkdir(parents=True, exist_ok=True)
+                    corr_csv = corr_dir / f"correlation_matrix_{timestamp}.csv"
+                    corr_matrix.to_csv(corr_csv)
+                    click.echo(f"  Saved: {corr_csv}")
+
+                    # Save heatmap
+                    try:
+                        import matplotlib
+                        matplotlib.use("Agg")
+                        import matplotlib.pyplot as plt
+                        import seaborn as sns
+
+                        fig, ax = plt.subplots(figsize=(20, 16))
+                        sns.heatmap(
+                            corr_matrix, vmin=-1, vmax=1, center=0,
+                            cmap="RdBu_r", ax=ax,
+                            xticklabels=True, yticklabels=True,
+                        )
+                        ax.set_title("Factor Spearman Correlation (cross-sectional avg)")
+                        plt.tight_layout()
+                        heatmap_path = corr_dir / f"correlation_heatmap_{timestamp}.png"
+                        fig.savefig(heatmap_path, dpi=100)
+                        plt.close(fig)
+                        click.echo(f"  Saved: {heatmap_path}")
+                    except Exception as e:
+                        click.echo(f"  Warning: Heatmap generation failed: {e}", err=True)
+
+                    # Greedy selection
+                    click.echo()
+                    if competitive:
+                        click.echo(
+                            "Phase 2.3: Competitive greedy selection "
+                            f"(max corr ≤ {scoring_cfg.dedup.max_corr}, "
+                            "no gatekeepers)..."
+                        )
+                        selected_ids = greedy_select(
+                            df, corr_matrix,
+                            max_corr=scoring_cfg.dedup.max_corr,
+                            max_factors=scoring_cfg.promote.max_factors,
+                        )
+                    else:
+                        click.echo(
+                            "Phase 2.3: Greedy selection (max corr "
+                            f"≤ {scoring_cfg.dedup.max_corr})..."
+                        )
+                        selected_ids = greedy_select(
+                            df, corr_matrix,
+                            max_corr=scoring_cfg.dedup.max_corr,
+                            max_factors=scoring_cfg.promote.max_factors,
+                            existing_ids=target_existing_ids,
+                        )
+                    click.echo(f"  Selected {len(selected_ids)} factors")
+
+                    # Competitive: report eviction plan
+                    if competitive and target_existing_ids:
+                        selected_set = set(selected_ids)
+                        existing_set = set(target_existing_ids)
+                        retained = selected_set & existing_set
+                        newly_added = selected_set - existing_set
+                        will_evict = existing_set - selected_set
+                        no_source = will_evict - set(df.index.tolist())
+                        if no_source:
+                            click.echo(
+                                f"  Warning: {len(no_source)} factors have "
+                                f"no source metrics in {source_env}: "
+                                f"{sorted(no_source)}"
+                            )
+                        click.echo(
+                            f"  Competitive diff: "
+                            f"{len(retained)} retained, "
+                            f"{len(newly_added)} new, "
+                            f"{len(will_evict)} to evict"
+                        )
+                        if will_evict:
+                            for fid in sorted(will_evict):
+                                click.echo(f"    - evict: {fid}")
+                else:
+                    click.echo("  Warning: Empty correlation matrix, skipping greedy selection")
+                    selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+            except Exception as e:
+                click.echo(f"  Warning: Correlation computation failed: {e}", err=True)
+                click.echo("  Falling back to score-only selection")
+                selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+        else:
+            click.echo()
+            click.echo("Phase 2.2: Skipping correlation (--skip-corr)")
+            selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+
+        # Save scores CSV
+        scores_dir = Path("logs/scoring")
+        scores_dir.mkdir(parents=True, exist_ok=True)
+        scores_csv = scores_dir / f"factor_scores_{timestamp}.csv"
+        score_cols = [
+            "final_score", "avg_period_score",
+            "pred_score", "mono_score",
+            "consistency", "turnover_friendliness",
+            "avg_icir", "avg_ic_mean", "avg_monotonicity",
+            "n_valid_periods",
+        ]
+        save_cols = [c for c in score_cols if c in df.columns]
+        df[save_cols].to_csv(scores_csv)
+        click.echo(f"\n  Scores saved: {scores_csv}")
+
+        # Summary
+        print_selected_factors(selected_ids, df)
+
+        # 6. Migrate (unless dry run)
+        if dry_run:
+            click.echo()
+            click.echo("  [DRY RUN] No migration performed.")
+        else:
+            click.echo()
+            target_db = RegistryDatabase.for_environment(target_env, db_dir)
+            try:
+                # Wrap evict + migrate in a transaction for atomicity
+                if competitive and target_existing_ids:
+                    target_db.connection.begin()
+                try:
+                    if competitive and target_existing_ids:
+                        evicted_ids = retire_evicted_factors(
+                            target_db, selected_ids, target_existing_ids,
+                        )
+                        if evicted_ids:
+                            click.echo(
+                                f"Phase 3a: Archived {len(evicted_ids)} "
+                                f"evicted factors from {target_env}.duckdb"
+                            )
+
+                    phase = "Phase 3b: Syncing" if competitive else "Phase 3: Migrating"
+                    click.echo(
+                        f"{phase} {len(selected_ids)} factors "
+                        f"to {target_env}.duckdb..."
+                    )
+                    counts = migrate_factors(
+                        source_db, target_db, selected_ids,
+                        target_status=scoring_cfg.promote.target_status,
+                        scores=df,
+                    )
+                    click.echo(
+                        f"  Migrated: {counts['factors']} factors, "
+                        f"{counts['metrics']} metrics, "
+                        f"{counts['configs']} config snapshots"
+                    )
+
+                    if competitive and target_existing_ids:
+                        target_db.connection.commit()
+                except Exception:
+                    if competitive and target_existing_ids:
+                        target_db.connection.rollback()
+                        click.echo(
+                            "  Error during competitive sync — "
+                            "rolled back all changes.", err=True,
+                        )
+                    raise
+            finally:
+                target_db.close()
+
+        source_db.close()
+        duration = time.time() - start_time
+        print_promote_summary(
+            n_after, n_after - n_removed, len(selected_ids),
+            duration, dry_run,
+        )
+
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+@cli.command()
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def audit(env_name: str | None, db_dir: str) -> None:
+    """Audit the factor registry for duplicates and prototype issues."""
+    from nautilus_quants.alpha.formatters import (
+        console as _console,
+        print_audit_duplicates,
+        print_audit_template_groups,
+    )
+    from nautilus_quants.alpha.registry.audit import (
+        find_expression_duplicates,
+        suggest_prototype_groups,
+    )
+
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        factors = repo.list_factors()
+        _console.print(f"Total factors: [bold]{len(factors)}[/bold]")
+
+        dup_groups = find_expression_duplicates(repo)
+        print_audit_duplicates(dup_groups)
+
+        groups = suggest_prototype_groups(repo)
+        print_audit_template_groups(groups)
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option("--execute", is_flag=True, default=False, help="Actually apply.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def backfill(execute: bool, env_name: str | None, db_dir: str) -> None:
+    """Backfill expression_hash, prototype, and parameters for all factors.
+
+    For each factor:
+    1. Compute expression_hash (for dedup).
+    2. Fix prototype from builtin libraries (ta_factors.py).
+    3. Extract numbers via expression_template → {p0, p1, ...} parameters.
+    """
+    from nautilus_quants.alpha.registry.audit import backfill_factors
+
+    from nautilus_quants.alpha.formatters import print_backfill_result
+
+    dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        counts = backfill_factors(repo, dry_run=dry_run)
+        print_backfill_result(counts, dry_run)
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option(
+    "--keep-source", default=None,
+    help="Preferred source to keep (e.g. alpha101).",
+)
+@click.option("--dry-run", is_flag=True, default=True, help="Preview only.")
+@click.option("--execute", is_flag=True, default=False, help="Actually delete.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def dedup(
+    keep_source: str | None,
+    dry_run: bool,
+    execute: bool,
+    env_name: str | None,
+    db_dir: str,
+) -> None:
+    """Remove duplicate factors by expression hash."""
+    from nautilus_quants.alpha.registry.audit import dedup_factors
+
+    from nautilus_quants.alpha.formatters import print_dedup_result
+
+    actual_dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        removed = dedup_factors(
+            repo, keep_source=keep_source, dry_run=actual_dry_run,
+        )
+        print_dedup_result(removed, actual_dry_run)
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.argument("config_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--rounds", default=5, type=int, help="Number of mining rounds.")
+@click.option("--factors-per-round", default=None, type=int,
+              help="Factors to generate per round (default: from config or 8).")
+@click.option("--model", default=None, help="Claude model (sonnet/opus, default: from config or sonnet).")
+@click.option("--hypothesis", default=None, help="Initial hypothesis direction for factor generation.")
+@click.option("--no-analyze", is_flag=True, help="Generate factors only, skip IC analysis.")
+def mine(
+    config_file: Path,
+    rounds: int,
+    factors_per_round: int | None,
+    model: str | None,
+    hypothesis: str | None,
+    no_analyze: bool,
+) -> None:
+    """LLM-driven alpha factor mining via Claude Code CLI.
+
+    Generates factor expressions using Claude, validates them against
+    the expression parser, and optionally runs alphalens analysis.
+
+    \b
+    Examples:
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --rounds 3
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --hypothesis "volume divergence"
+      python -m nautilus_quants.alpha mine config/cs/alpha_101.yaml --no-analyze --rounds 1
+    """
+    from nautilus_quants.alpha.mining.agent.miner import AlphaMiner, MiningConfig
+
+    config = MiningConfig.from_yaml(
+        config_file,
+        factors_per_round=factors_per_round,
+        model=model,
+        hypothesis=hypothesis,
+        auto_analyze=not no_analyze,
+    )
+    miner = AlphaMiner(config)
+    miner.run(rounds=rounds)
 
 
 if __name__ == "__main__":

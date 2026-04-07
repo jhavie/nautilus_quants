@@ -1,0 +1,156 @@
+# Bybit FR + OI Data Pipeline Configuration
+# 77 symbols with confirmed Bybit OI/FR data from 2022-01-01
+#
+# 运行方式:
+#   python -m nautilus_quants.data.cli -c config/cs/data_bybit.yaml download
+#   python -m nautilus_quants.data.cli -c config/cs/data_bybit.yaml transform
+version: "1.0"
+
+download:
+  exchange: binance
+  market_type: futures
+  symbols:
+    # --- 77 symbols: Bybit OI + FR available from 2022-01-01 ---
+    - "1INCHUSDT"
+    - "AAVEUSDT"
+    - "ADAUSDT"
+    - "ALGOUSDT"
+    - "ALICEUSDT"
+    - "ANKRUSDT"
+    - "ANTUSDT"
+    - "ARUSDT"
+    - "ATOMUSDT"
+    - "AUDIOUSDT"
+    - "AVAXUSDT"
+    - "AXSUSDT"
+    - "BATUSDT"
+    - "BCHUSDT"
+    - "BNBUSDT"
+    - "BTCUSDT"
+    - "C98USDT"
+    - "CELRUSDT"
+    - "CHRUSDT"
+    - "CHZUSDT"
+    - "COMPUSDT"
+    - "COTIUSDT"
+    - "CRVUSDT"
+    - "DASHUSDT"
+    - "DOGEUSDT"
+    - "DOTUSDT"
+    - "DUSKUSDT"
+    - "DYDXUSDT"
+    - "EGLDUSDT"
+    - "ENJUSDT"
+    - "ENSUSDT"
+    - "ETCUSDT"
+    - "ETHUSDT"
+    - "FILUSDT"
+    - "FTMUSDT"
+    - "GALAUSDT"
+    - "GRTUSDT"
+    - "GTCUSDT"
+    - "HBARUSDT"
+    - "IOSTUSDT"
+    - "IOTAUSDT"
+    - "IOTXUSDT"
+    - "KLAYUSDT"
+    - "KSMUSDT"
+    - "LINKUSDT"
+    - "LPTUSDT"
+    - "LRCUSDT"
+    - "LTCUSDT"
+    - "MANAUSDT"
+    - "MASKUSDT"
+    - "MATICUSDT"
+    - "NEARUSDT"
+    - "OMGUSDT"
+    - "ONEUSDT"
+    - "PEOPLEUSDT"
+    - "QTUMUSDT"
+    - "RENUSDT"
+    - "RSRUSDT"
+    - "RUNEUSDT"
+    - "SANDUSDT"
+    - "SFPUSDT"
+    - "SNXUSDT"
+    - "SOLUSDT"
+    - "STORJUSDT"
+    - "SUSHIUSDT"
+    - "SXPUSDT"
+    - "THETAUSDT"
+    - "TRXUSDT"
+    - "UNIUSDT"
+    - "VETUSDT"
+    - "XEMUSDT"
+    - "XLMUSDT"
+    - "XRPUSDT"
+    - "XTZUSDT"
+    - "YFIUSDT"
+    - "ZECUSDT"
+    - "ZENUSDT"
+
+    # --- 20 symbols: on Bybit now but no data in 2022 (listed later) ---
+    # - "1000XECUSDT"
+    # - "ARPAUSDT"
+    # - "BANDUSDT"
+    # - "BELUSDT"
+    # - "CELOUSDT"
+    # - "ICXUSDT"
+    # - "KAVAUSDT"
+    # - "MTLUSDT"
+    # - "NEOUSDT"
+    # - "OGNUSDT"
+    # - "ONTUSDT"
+    # - "RLCUSDT"
+    # - "ROSEUSDT"
+    # - "RVNUSDT"
+    # - "SKLUSDT"
+    # - "TRBUSDT"
+    # - "WAVESUSDT"
+    # - "XMRUSDT"
+    # - "ZILUSDT"
+    # - "ZRXUSDT"
+
+    # --- 18 symbols: not on Bybit at all ---
+    # - "1000SHIBUSDT"
+    # - "ALPHAUSDT"
+    # - "ATAUSDT"
+    # - "BAKEUSDT"
+    # - "BALUSDT"
+    # - "BLZUSDT"
+    # - "CTSIUSDT"
+    # - "DEFIUSDT"
+    # - "DENTUSDT"
+    # - "DGBUSDT"
+    # - "FLMUSDT"
+    # - "HOTUSDT"
+    # - "LINAUSDT"
+    # - "MKRUSDT"
+    # - "NKNUSDT"
+    # - "OCEANUSDT"
+    # - "REEFUSDT"
+    # - "STMXUSDT"
+
+  timeframes:
+    - 4h
+  start_date: "2022-01-01"
+  end_date: "2025-12-31"
+  funding_rate: true
+  open_interest: true
+  oi_period: "4h"
+
+  rate_limit:
+    max_retries: 5
+    initial_delay_seconds: 1
+    max_delay_seconds: 60
+    backoff_multiplier: 2
+
+  checkpoint:
+    enabled: true
+    batch_size: 1000
+
+paths:
+  raw_data: "data/data_4years_4h/raw"
+  processed_data: "data/data_4years_4h/processed"
+  catalog: "data/data_4years_4h/catalog"
+  logs: "logs/data_pipeline"

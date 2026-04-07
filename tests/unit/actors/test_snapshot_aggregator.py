@@ -17,7 +17,7 @@ from nautilus_quants.actors.snapshot_aggregator import (
     SnapshotAggregatorActorConfig,
     _elapsed_ms,
     _empty_exec_agg,
-    _tail_log_entries,
+    _read_log_incremental,
 )
 from nautilus_quants.execution.post_limit.state import (
     OrderExecutionStateSnapshot,
@@ -146,18 +146,18 @@ class TestExecutionSnapshotDecoding:
 
 
 # ---------------------------------------------------------------------------
-# Log tail
+# Incremental log reading
 # ---------------------------------------------------------------------------
 
 
-class TestLogTail:
+class TestReadLogIncremental:
     def _write_log(self, path: Path, lines: list[str]) -> None:
         with open(path, "w") as f:
             for line in lines:
                 f.write(line + "\n")
 
     def test_empty_dir(self, tmp_path):
-        entries = _tail_log_entries(tmp_path, 60, 50)
+        entries, path, offset = _read_log_incremental(tmp_path, "", 0)
         assert entries == []
 
     def test_parse_warn_and_error(self, tmp_path):
@@ -171,7 +171,7 @@ class TestLogTail:
         log_file = tmp_path / "T-001_2026-04-03.log"
         self._write_log(log_file, lines)
 
-        entries = _tail_log_entries(tmp_path, 60, 50)
+        entries, path, offset = _read_log_incremental(tmp_path, "", 0)
         assert len(entries) == 2
         assert entries[0]["level"] == "WARN"
         assert entries[0]["component"] == "PostLimit"
@@ -179,28 +179,51 @@ class TestLogTail:
         assert entries[1]["level"] == "ERROR"
         assert entries[1]["component"] == "redis::cache"
 
-    def test_respects_time_window(self, tmp_path):
-        old_ts = "2020-01-01T00:00:00.000000000"
+    def test_incremental_reads_only_new(self, tmp_path):
+        """Second call should only return entries written after first call."""
         now = time.strftime("%Y-%m-%dT%H:%M:%S.000000000", time.gmtime())
-        lines = [
-            f"{old_ts}Z [ERROR] T-001.old: ancient error",
-            f"{now}Z [ERROR] T-001.new: recent error",
-        ]
         log_file = tmp_path / "T-001_2026-04-03.log"
-        self._write_log(log_file, lines)
 
-        entries = _tail_log_entries(tmp_path, 60, 50)
+        # First write
+        self._write_log(log_file, [f"{now}Z [ERROR] T-001.old: first error"])
+        entries1, path, offset = _read_log_incremental(tmp_path, "", 0)
+        assert len(entries1) == 1
+
+        # Append new line
+        with open(log_file, "a") as f:
+            f.write(f"{now}Z [ERROR] T-001.new: second error\n")
+
+        entries2, path, offset = _read_log_incremental(tmp_path, path, offset)
+        assert len(entries2) == 1
+        assert entries2[0]["component"] == "new"
+
+    def test_no_new_data_returns_empty(self, tmp_path):
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000000000", time.gmtime())
+        log_file = tmp_path / "T-001_2026-04-03.log"
+        self._write_log(log_file, [f"{now}Z [ERROR] T-001.comp: msg"])
+
+        entries1, path, offset = _read_log_incremental(tmp_path, "", 0)
+        assert len(entries1) == 1
+
+        # No new writes — should return empty
+        entries2, path, offset = _read_log_incremental(tmp_path, path, offset)
+        assert entries2 == []
+
+    def test_log_rotation(self, tmp_path):
+        """When log file changes, should read from new file."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%S.000000000", time.gmtime())
+
+        old_log = tmp_path / "T-001_2026-04-01.log"
+        self._write_log(old_log, [f"{now}Z [ERROR] T-001.old: old error"])
+        _, path, offset = _read_log_incremental(tmp_path, "", 0)
+
+        # New log file (more recent mtime)
+        new_log = tmp_path / "T-001_2026-04-02.log"
+        self._write_log(new_log, [f"{now}Z [ERROR] T-001.new: new error"])
+
+        entries, path, offset = _read_log_incremental(tmp_path, path, offset)
         assert len(entries) == 1
         assert entries[0]["component"] == "new"
-
-    def test_max_entries_limit(self, tmp_path):
-        now = time.strftime("%Y-%m-%dT%H:%M:%S.000000000", time.gmtime())
-        lines = [f"{now}Z [WARN] T-001.comp{i}: msg {i}" for i in range(100)]
-        log_file = tmp_path / "T-001_2026-04-03.log"
-        self._write_log(log_file, lines)
-
-        entries = _tail_log_entries(tmp_path, 60, 5)
-        assert len(entries) == 5
 
     def test_message_truncation(self, tmp_path):
         now = time.strftime("%Y-%m-%dT%H:%M:%S.000000000", time.gmtime())
@@ -209,7 +232,7 @@ class TestLogTail:
         log_file = tmp_path / "T-001_2026-04-03.log"
         self._write_log(log_file, lines)
 
-        entries = _tail_log_entries(tmp_path, 60, 50)
+        entries, _, _ = _read_log_incremental(tmp_path, "", 0)
         assert len(entries) == 1
         assert len(entries[0]["message"]) == 200
 
