@@ -143,8 +143,8 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2022-01-01"
-    end_time: "2022-03-31"
+    start_time: "2024-01-01"
+    end_time: "2024-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -193,7 +193,7 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        composite_factor: "alpha044_8h"
+        composite_factor: "composite"
         rebalance_interval: 2
 
         # =============================================================
