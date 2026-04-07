@@ -1425,11 +1425,7 @@ def promote(config_path: Path) -> None:
             df = score_factors(df, scoring_cfg)
             print_top_scores(df, n=30)
         else:
-            click.echo("[scoring] — SKIPPED, ranking by |ICIR|...")
-            icir_cols = [c for c in df.columns if c.startswith("icir_")]
-            df["final_score"] = df[icir_cols].abs().mean(axis=1)
-            df = df.sort_values("final_score", ascending=False)
-            click.echo(f"  {len(df)} factors ranked")
+            click.echo("[scoring] — SKIPPED")
 
         # ── [dedup] ──
         click.echo()
@@ -1679,21 +1675,22 @@ def promote(config_path: Path) -> None:
         else:
             click.echo("[orthogonalization] — SKIPPED")
 
-        # ── Save scores CSV ──
-        scores_csv = diag_dir / f"factor_scores_{timestamp}.csv"
-        save_cols = [
-            c for c in [
-                "final_score", "avg_period_score", "pred_score",
-                "mono_score", "consistency", "turnover_friendliness",
-                "avg_icir", "avg_ic_mean", "avg_monotonicity",
-                "n_valid_periods",
-            ] if c in df.columns
-        ]
-        df[save_cols].to_csv(scores_csv)
-        click.echo(f"\n  Scores saved: {scores_csv}")
-
-        # Summary
-        print_selected_factors(selected_ids, df)
+        # ── Save scores CSV (only when scoring enabled) ──
+        if scoring_cfg.weights.enabled:
+            scores_csv = diag_dir / f"factor_scores_{timestamp}.csv"
+            save_cols = [
+                c for c in [
+                    "final_score", "avg_period_score", "pred_score",
+                    "mono_score", "consistency", "turnover_friendliness",
+                    "avg_icir", "avg_ic_mean", "avg_monotonicity",
+                    "n_valid_periods",
+                ] if c in df.columns
+            ]
+            df[save_cols].to_csv(scores_csv)
+            click.echo(f"\n  Scores saved: {scores_csv}")
+            print_selected_factors(selected_ids, df)
+        else:
+            click.echo(f"\n  Selected {len(selected_ids)} factors (no scoring)")
 
         # ── [migrate] ──
         click.echo()
