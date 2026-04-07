@@ -1416,8 +1416,8 @@ def promote(
             scoring_cfg.promote.max_factors,
         )
 
-        # 1. Load data from source
-        click.echo("Phase 1: Loading scoring data...")
+        # Load data from source
+        click.echo("Loading scoring data...")
         source_db = RegistryDatabase(Path(source_db_path))
         df = load_scoring_data(source_db, scoring_cfg.periods)
 
@@ -1428,10 +1428,10 @@ def promote(
 
         click.echo(f"  Loaded {len(df)} factors with metrics across {scoring_cfg.periods}")
 
-        # 2. Hard filters
+        # [hard_filters]
         click.echo()
         if scoring_cfg.hard_filters.enabled:
-            click.echo("Phase 1.1: Applying hard filters...")
+            click.echo("[hard_filters]...")
             n_before = len(df)
             df = apply_hard_filters(df, scoring_cfg.hard_filters, scoring_cfg.periods)
             n_after = len(df)
@@ -1447,13 +1447,13 @@ def promote(
             for n_periods, count in period_counts.items():
                 click.echo(f"    {n_periods} valid periods: {count} factors")
         else:
-            click.echo("Phase 1.1: Hard filters SKIPPED (enabled=false)")
+            click.echo("[hard_filters] — SKIPPED (enabled=false)")
             click.echo(f"  All {len(df)} factors pass through")
 
-        # 3. Fingerprint dedup
+        # [dedup] Fingerprint dedup
         click.echo()
         if scoring_cfg.dedup.enabled:
-            click.echo("Phase 2.1: Fingerprint deduplication...")
+            click.echo("[dedup] Fingerprint dedup...")
             n_before_dedup = len(df)
             df = dedup_by_fingerprint(
                 df, scoring_cfg.periods,
@@ -1462,23 +1462,23 @@ def promote(
             n_removed = n_before_dedup - len(df)
             click.echo(f"  {n_before_dedup} → {len(df)} factors ({n_removed} duplicates removed)")
         else:
-            click.echo("Phase 2.1: Fingerprint dedup SKIPPED (enabled=false)")
+            click.echo("[dedup] Fingerprint dedup — SKIPPED (enabled=false)")
 
-        # 4. Scoring
+        # [scoring]
         click.echo()
         if scoring_cfg.weights.enabled:
-            click.echo("Phase 1.2: Computing 5-dimension scores...")
+            click.echo("[scoring] (4-dimension)...")
             df = score_factors(df, scoring_cfg)
             print_top_scores(df, n=30)
         else:
-            click.echo("Phase 1.2: Scoring SKIPPED (enabled=false), ranking by |ICIR|...")
+            click.echo("[scoring] — SKIPPED (enabled=false), ranking by |ICIR|...")
             # Rank by average |ICIR| across valid periods
             icir_cols = [c for c in df.columns if c.startswith("icir_")]
             df["final_score"] = df[icir_cols].abs().mean(axis=1)
             df = df.sort_values("final_score", ascending=False)
             click.echo(f"  {len(df)} factors ranked by avg |ICIR|")
 
-        # 5. Correlation-based greedy selection
+        # [dedup] Correlation-based greedy selection
         # Load existing target factors (needed for both additive gatekeeper
         # and competitive eviction modes)
         from nautilus_quants.alpha.registry.repository import FactorRepository
@@ -1505,7 +1505,7 @@ def promote(
                 )
 
             click.echo()
-            click.echo("Phase 2.2: Computing factor correlations...")
+            click.echo("[dedup] Computing factor correlations...")
             candidate_ids = df.index.tolist()
             # Include target existing factors in correlation computation
             all_corr_ids = list(dict.fromkeys(candidate_ids + target_existing_ids))
@@ -1558,7 +1558,7 @@ def promote(
                     click.echo()
                     if competitive:
                         click.echo(
-                            "Phase 2.3: Competitive greedy selection "
+                            "[dedup] Competitive greedy selection "
                             f"(max corr ≤ {scoring_cfg.dedup.max_corr}, "
                             "no gatekeepers)..."
                         )
@@ -1569,7 +1569,7 @@ def promote(
                         )
                     else:
                         click.echo(
-                            "Phase 2.3: Greedy selection (max corr "
+                            "[dedup] Greedy selection (max corr "
                             f"≤ {scoring_cfg.dedup.max_corr})..."
                         )
                         selected_ids = greedy_select(
@@ -1613,7 +1613,7 @@ def promote(
         else:
             click.echo()
             reason = "dedup.enabled=false" if not scoring_cfg.dedup.enabled else "--skip-corr"
-            click.echo(f"Phase 2.2: Skipping correlation ({reason})")
+            click.echo(f"[dedup] Dedup + greedy — SKIPPED ({reason})")
             selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
 
         # Save scores CSV
@@ -1652,11 +1652,11 @@ def promote(
                         )
                         if evicted_ids:
                             click.echo(
-                                f"Phase 3a: Archived {len(evicted_ids)} "
+                                f"[migrate] Archived {len(evicted_ids)} "
                                 f"evicted factors from {target_db_path}"
                             )
 
-                    phase = "Phase 3b: Syncing" if competitive else "Phase 3: Migrating"
+                    phase = "[migrate] Syncing" if competitive else "[migrate] Migrating"
                     click.echo(
                         f"{phase} {len(selected_ids)} factors "
                         f"to {target_db_path}..."
