@@ -1569,19 +1569,25 @@ def promote(config_path: Path) -> None:
 
         # ── [clustering] ──
         click.echo()
+        factor_panels: dict[str, object] | None = None
         if scoring_cfg.clustering.enabled:
             click.echo("[clustering] HDBSCAN + PCA...")
-            # Need corr matrix — compute if dedup was skipped
+            # Need corr matrix + factor panels — compute if dedup was skipped
             if corr_matrix is None or corr_matrix.empty:
                 click.echo("  Computing correlation matrix for clustering...")
-                target_db_for_corr = RegistryDatabase(Path(target_db_path))
+                dbs_for_corr = [source_db]
+                if target_db_path:
+                    target_db_for_corr = RegistryDatabase(Path(target_db_path))
+                    dbs_for_corr.append(target_db_for_corr)
                 try:
-                    corr_matrix = compute_factor_correlation(
+                    corr_matrix, factor_panels = compute_factor_correlation(
                         selected_ids, scoring_cfg,
-                        registry_dbs=[source_db, target_db_for_corr],
+                        registry_dbs=dbs_for_corr,
+                        return_panels=True,
                     )
                 finally:
-                    target_db_for_corr.close()
+                    if target_db_path:
+                        target_db_for_corr.close()
 
             if corr_matrix is not None and not corr_matrix.empty:
                 from nautilus_quants.alpha.registry.clustering import (
@@ -1627,6 +1633,7 @@ def promote(config_path: Path) -> None:
                     factor_expressions=factor_exprs,
                     corr_matrix=corr_matrix,
                     config=cluster_cfg,
+                    factor_panels=factor_panels,
                     factor_tags=factor_tags_map,
                 )
 

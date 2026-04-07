@@ -674,7 +674,8 @@ def compute_factor_correlation(
     config: ScoringConfig,
     registry_db: RegistryDatabase | None = None,
     registry_dbs: list[RegistryDatabase] | None = None,
-) -> pd.DataFrame:
+    return_panels: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
     """Compute cross-sectional Spearman rank correlation matrix.
 
     1. Load OHLCV data (40 coins × 4 years × 4h bars)
@@ -923,6 +924,8 @@ def compute_factor_correlation(
         avg_corr = np.where(n_valid > 0, corr_sum / n_valid, 0.0)
 
     corr_df = pd.DataFrame(avg_corr, index=matched_ids, columns=matched_ids)
+    if return_panels:
+        return corr_df, all_factor_panels
     return corr_df
 
 
