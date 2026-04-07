@@ -20,7 +20,7 @@ periods:
 # Each period is checked independently; factor is eliminated only if
 # ALL periods fail.  At least min_valid_periods must pass.
 hard_filters:
-  enabled: true                   # false = skip hard filtering
+  enabled: false                   # false = skip hard filtering
   icir_abs_min: 0.05          # |ICIR| ≥ 0.05
   t_stat_nw_abs_min: 2.0      # |t_stat_nw| ≥ 2.0
   p_value_nw_max: 0.05        # p_value_nw ≤ 0.05
@@ -39,7 +39,7 @@ hard_filters:
 # Eliminated sub-metrics:
 #   t_stat_nw (corr 0.978 with ICIR), win_rate, ic_linearity
 scoring:
-  enabled: true                   # false = skip scoring, rank by |ICIR|
+  enabled: false                   # false = skip scoring, rank by |ICIR|
   # Dimension weights (must sum to 1.0)
   weights:
     predictiveness: 0.40       # ICIR + ic_mean
@@ -55,19 +55,19 @@ scoring:
 
 # ── Phase 2: Deduplication ──
 dedup:
-  enabled: true                   # false = skip dedup + greedy selection
+  enabled: false                   # false = skip dedup + greedy selection
   # Fingerprint-based exact dedup
   # 8-tuple: (icir_4h, ic_mean_4h, icir_8h, ic_mean_8h, icir_12h, ic_mean_12h, icir_1d, ic_mean_1d)
   fingerprint_threshold: 1.0e-3   # Euclidean distance threshold
 
   # Correlation-based dedup
-  max_corr: 0.5                  # Max allowed |Spearman corr| between selected factors
+  max_corr: 0.7                  # Max allowed |Spearman corr| between selected factors
 
 # ── Layer 4: HDBSCAN Clustering + Super Alpha ──
 # Auto-detect factor clusters, compose Super Alphas via PCA/equal/ICIR.
 # Noise factors (HDBSCAN label=-1) are automatically discarded.
 clustering:
-  enabled: false                  # true = enable clustering (default OFF)
+  enabled: true                  # true = enable clustering (default OFF)
   min_cluster_size: 3             # HDBSCAN: at least 3 factors to form a cluster
   cluster_selection_method: "eom" # "eom" (conservative) | "leaf" (finer)
   min_samples: null               # null = defaults to min_cluster_size
@@ -95,8 +95,8 @@ diagnostics:
 
 # ── Promotion ──
 promote:
-  source_env: "test"              # Source registry environment
-  target_env: "dev"               # Target registry environment
+  source_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/test.duckdb"
+  target_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/dev.duckdb"
   max_factors: 50                 # Max factors to promote
   target_status: "active"         # Status for promoted factors
 
@@ -108,11 +108,11 @@ data:
   funding_rate: true
   oi_data_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
   # Factor config files for correlation computation
-  factor_configs:
-    - "config/alpha_batch/factors_alpha101.yaml"
-    - "config/alpha_batch/factors_alpha158.yaml"
-    - "config/alpha_batch/factors_alpha191.yaml"
-    - "config/alpha_batch/factors_ta.yaml"
+  factor_configs: []
+    # - "config/alpha_batch/factors_alpha101.yaml"
+    # - "config/alpha_batch/factors_alpha158.yaml"
+    # - "config/alpha_batch/factors_alpha191.yaml"
+    # - "config/alpha_batch/factors_ta.yaml"
   # 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
   # (10 delisted/renamed on Bybit excluded)
   instrument_ids:

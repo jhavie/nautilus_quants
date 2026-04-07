@@ -120,8 +120,8 @@ class DiagnosticsConfig:
 class PromoteConfig:
     """Promotion configuration."""
 
-    source_env: str = "test"
-    target_env: str = "dev"
+    source_db_path: str = ""
+    target_db_path: str = ""
     max_factors: int = 50
     target_status: str = "active"
 
@@ -241,8 +241,8 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             overlap_validation=dg.get("overlap_validation", True),
         ),
         promote=PromoteConfig(
-            source_env=pr.get("source_env", "test"),
-            target_env=pr.get("target_env", "dev"),
+            source_db_path=pr.get("source_db_path", ""),
+            target_db_path=pr.get("target_db_path", ""),
             max_factors=pr.get("max_factors", 50),
             target_status=pr.get("target_status", "active"),
         ),
