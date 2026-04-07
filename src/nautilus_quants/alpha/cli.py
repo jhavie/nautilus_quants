@@ -1316,50 +1316,23 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
     "--config", "config_path",
     default="config/examples/scoring.yaml",
     type=click.Path(exists=True, path_type=Path),
-    help="Scoring configuration file (contains source/target db paths).",
+    help="Scoring configuration file (all behavior driven by config).",
 )
-@click.option("--dry-run", is_flag=True, help="Score and rank without migrating.")
-@click.option("--skip-corr", is_flag=True, help="Skip correlation computation (fingerprint dedup only).")
-@click.option("--max-factors", default=None, type=int, help="Override max factors to promote.")
-@click.option(
-    "--competitive", is_flag=True,
-    help="Full re-selection: existing target factors compete with candidates. "
-         "Factors that lose are archived.",
-)
-def promote(
-    config_path: Path,
-    dry_run: bool,
-    skip_corr: bool,
-    max_factors: int | None,
-    competitive: bool,
-) -> None:
-    """Score, deduplicate, decorrelate, and promote factors.
-
-    Source and target DB paths are read from the config file
-    (promote.source_db_path / promote.target_db_path).
+def promote(config_path: Path) -> None:
+    """Config-driven factor promote pipeline.
 
     \b
-    Full pipeline (each layer has enabled toggle):
-      1. Hard filters (per-period)
-      2. Score factors (4-dimension)
-      3. Fingerprint dedup + correlation greedy selection
-      4. HDBSCAN clustering + PCA Super Alpha (if enabled)
-      5. Löwdin orthogonalization (if enabled)
-      6. Migrate to target DB (unless --dry-run)
-
-    \b
-    Modes:
-      Default (additive): existing target factors are gatekeepers; new factors
-        are added without evicting incumbents.
-      --competitive: full re-selection from source. Existing target factors
-        that are not re-selected are archived.
+    All behavior controlled by scoring.yaml (each layer has enabled toggle):
+      [hard_filters]       — eliminate garbage factors
+      [scoring]            — 4D quality ranking
+      [dedup]              — fingerprint + correlation greedy
+      [clustering]         — HDBSCAN + PCA → Super Alpha
+      [orthogonalization]  — Löwdin weight optimization
+      [migrate]            — promote.enabled controls DB migration
 
     \b
     Examples:
       python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml
-      python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --competitive --dry-run
-      python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --skip-corr
-      python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml --max-factors 50
     """
     import warnings
     from datetime import datetime, timezone
@@ -1383,26 +1356,9 @@ def promote(
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     try:
-        # 0. Load scoring config
         scoring_cfg = load_scoring_config(config_path)
-        if max_factors is not None:
-            # Override from CLI
-            scoring_cfg = scoring_cfg.__class__(
-                periods=scoring_cfg.periods,
-                hard_filters=scoring_cfg.hard_filters,
-                weights=scoring_cfg.weights,
-                sub_weights=scoring_cfg.sub_weights,
-                dedup=scoring_cfg.dedup,
-                promote=scoring_cfg.promote.__class__(
-                    max_factors=max_factors,
-                    target_status=scoring_cfg.promote.target_status,
-                ),
-                data=scoring_cfg.data,
-            )
 
         from nautilus_quants.alpha.formatters import (
-            console as _console,
-            print_promote_header,
             print_promote_summary,
             print_selected_factors,
             print_top_scores,
@@ -1410,121 +1366,114 @@ def promote(
 
         source_db_path = scoring_cfg.promote.source_db_path
         target_db_path = scoring_cfg.promote.target_db_path
+        competitive = scoring_cfg.promote.competitive
+        diag_dir = Path(scoring_cfg.diagnostics.output_dir)
+        diag_dir.mkdir(parents=True, exist_ok=True)
 
         if not source_db_path:
-            click.echo(
-                "Error: promote.source_db_path is required in config.",
-                err=True,
-            )
-            sys.exit(1)
-        if not target_db_path:
-            click.echo(
-                "Error: promote.target_db_path is required in config.",
-                err=True,
-            )
+            click.echo("Error: promote.source_db_path required.", err=True)
             sys.exit(1)
 
-        print_promote_header(
-            source_db_path, target_db_path, str(config_path),
-            scoring_cfg.periods, dry_run, skip_corr,
-            scoring_cfg.promote.max_factors,
-        )
+        click.echo(f"Config: {config_path}")
+        click.echo(f"Source: {source_db_path}")
+        if scoring_cfg.promote.enabled:
+            click.echo(f"Target: {target_db_path}")
+        click.echo()
 
-        # Load data from source
+        # ── Load ──
         click.echo("Loading scoring data...")
         source_db = RegistryDatabase(Path(source_db_path))
         df = load_scoring_data(source_db, scoring_cfg.periods)
 
         if df.empty:
-            click.echo("Error: No metrics found in source database.", err=True)
+            click.echo("Error: No metrics found.", err=True)
             source_db.close()
             sys.exit(1)
 
-        click.echo(f"  Loaded {len(df)} factors with metrics across {scoring_cfg.periods}")
+        n_loaded = len(df)
+        n_after_filter = n_loaded
+        n_after_dedup = n_loaded
+        click.echo(f"  Loaded {n_loaded} factors")
 
-        # [hard_filters]
+        # ── [hard_filters] ──
         click.echo()
         if scoring_cfg.hard_filters.enabled:
             click.echo("[hard_filters]...")
             n_before = len(df)
-            df = apply_hard_filters(df, scoring_cfg.hard_filters, scoring_cfg.periods)
-            n_after = len(df)
-            click.echo(f"  {n_before} → {n_after} factors ({n_before - n_after} eliminated)")
-
+            df = apply_hard_filters(
+                df, scoring_cfg.hard_filters, scoring_cfg.periods,
+            )
+            n_after_filter = len(df)
+            click.echo(
+                f"  {n_before} → {n_after_filter} "
+                f"({n_before - n_after_filter} eliminated)",
+            )
             if df.empty:
-                click.echo("Error: No factors passed hard filters.", err=True)
+                click.echo("Error: No factors passed.", err=True)
                 source_db.close()
                 sys.exit(1)
-
-            # Show valid period distribution
             period_counts = df["n_valid_periods"].value_counts().sort_index()
-            for n_periods, count in period_counts.items():
-                click.echo(f"    {n_periods} valid periods: {count} factors")
+            for n_p, cnt in period_counts.items():
+                click.echo(f"    {n_p} valid periods: {cnt} factors")
         else:
-            click.echo("[hard_filters] — SKIPPED (enabled=false)")
-            click.echo(f"  All {len(df)} factors pass through")
+            click.echo("[hard_filters] — SKIPPED")
 
-        # [dedup] Fingerprint dedup
-        click.echo()
-        if scoring_cfg.dedup.enabled:
-            click.echo("[dedup] Fingerprint dedup...")
-            n_before_dedup = len(df)
-            df = dedup_by_fingerprint(
-                df, scoring_cfg.periods,
-                threshold=scoring_cfg.dedup.fingerprint_threshold,
-            )
-            n_removed = n_before_dedup - len(df)
-            click.echo(f"  {n_before_dedup} → {len(df)} factors ({n_removed} duplicates removed)")
-        else:
-            click.echo("[dedup] Fingerprint dedup — SKIPPED (enabled=false)")
-
-        # [scoring]
+        # ── [scoring] ──
         click.echo()
         if scoring_cfg.weights.enabled:
             click.echo("[scoring] (4-dimension)...")
             df = score_factors(df, scoring_cfg)
             print_top_scores(df, n=30)
         else:
-            click.echo("[scoring] — SKIPPED (enabled=false), ranking by |ICIR|...")
-            # Rank by average |ICIR| across valid periods
+            click.echo("[scoring] — SKIPPED, ranking by |ICIR|...")
             icir_cols = [c for c in df.columns if c.startswith("icir_")]
             df["final_score"] = df[icir_cols].abs().mean(axis=1)
             df = df.sort_values("final_score", ascending=False)
-            click.echo(f"  {len(df)} factors ranked by avg |ICIR|")
+            click.echo(f"  {len(df)} factors ranked")
 
-        # [dedup] Correlation-based greedy selection
-        # Load existing target factors (needed for both additive gatekeeper
-        # and competitive eviction modes)
-        from nautilus_quants.alpha.registry.repository import FactorRepository
+        # ── [dedup] ──
+        click.echo()
+        corr_matrix = None
+        if scoring_cfg.dedup.enabled:
+            # Fingerprint dedup
+            click.echo("[dedup] Fingerprint dedup...")
+            n_before_fp = len(df)
+            df = dedup_by_fingerprint(
+                df, scoring_cfg.periods,
+                threshold=scoring_cfg.dedup.fingerprint_threshold,
+            )
+            n_after_dedup = len(df)
+            click.echo(
+                f"  {n_before_fp} → {n_after_dedup} "
+                f"({n_before_fp - n_after_dedup} duplicates)",
+            )
 
-        target_existing_ids: list[str] = []
-        if not skip_corr or competitive:
-            target_db_query = RegistryDatabase(Path(target_db_path))
-            try:
-                tgt_repo = FactorRepository(target_db_query)
-                existing_factors = tgt_repo.list_factors(status="active")
-                target_existing_ids = [f.factor_id for f in existing_factors]
-            finally:
-                target_db_query.close()
+            # Load target existing factors
+            from nautilus_quants.alpha.registry.repository import FactorRepository
 
-        # Skip correlation if dedup disabled or --skip-corr
-        skip_corr_effective = skip_corr or not scoring_cfg.dedup.enabled
-        if not skip_corr_effective:
+            target_existing_ids: list[str] = []
+            if target_db_path:
+                target_db_query = RegistryDatabase(Path(target_db_path))
+                try:
+                    tgt_repo = FactorRepository(target_db_query)
+                    existing = tgt_repo.list_factors(status="active")
+                    target_existing_ids = [f.factor_id for f in existing]
+                finally:
+                    target_db_query.close()
+
             if target_existing_ids:
-                click.echo()
-                mode_label = "competitive (will evict)" if competitive else "gatekeeper"
+                mode = "competitive" if competitive else "gatekeeper"
                 click.echo(
-                    f"  Target DB ({target_db_path}): {len(target_existing_ids)} "
-                    f"existing factors [{mode_label}]"
+                    f"  Target: {len(target_existing_ids)} existing [{mode}]",
                 )
 
-            click.echo()
-            click.echo("[dedup] Computing factor correlations...")
+            # Correlation + greedy
+            click.echo("[dedup] Computing correlations...")
             candidate_ids = df.index.tolist()
-            # Include target existing factors in correlation computation
-            all_corr_ids = list(dict.fromkeys(candidate_ids + target_existing_ids))
+            all_corr_ids = list(
+                dict.fromkeys(candidate_ids + target_existing_ids),
+            )
             try:
-                # Use both source and target DBs for registry fallback
                 target_db_for_corr = RegistryDatabase(Path(target_db_path))
                 try:
                     corr_matrix = compute_factor_correlation(
@@ -1536,17 +1485,14 @@ def promote(
 
                 if not corr_matrix.empty:
                     click.echo(
-                        f"  Correlation matrix: {corr_matrix.shape[0]} × {corr_matrix.shape[1]}"
+                        f"  Matrix: {corr_matrix.shape[0]}×{corr_matrix.shape[1]}",
                     )
-
-                    # Save correlation matrix CSV
-                    corr_dir = Path("logs/scoring")
-                    corr_dir.mkdir(parents=True, exist_ok=True)
-                    corr_csv = corr_dir / f"correlation_matrix_{timestamp}.csv"
+                    # Save CSV
+                    corr_csv = diag_dir / f"correlation_matrix_{timestamp}.csv"
                     corr_matrix.to_csv(corr_csv)
                     click.echo(f"  Saved: {corr_csv}")
 
-                    # Save heatmap
+                    # Heatmap
                     try:
                         import matplotlib
                         matplotlib.use("Agg")
@@ -1559,22 +1505,21 @@ def promote(
                             cmap="RdBu_r", ax=ax,
                             xticklabels=True, yticklabels=True,
                         )
-                        ax.set_title("Factor Spearman Correlation (cross-sectional avg)")
+                        ax.set_title("Factor Spearman Correlation")
                         plt.tight_layout()
-                        heatmap_path = corr_dir / f"correlation_heatmap_{timestamp}.png"
-                        fig.savefig(heatmap_path, dpi=100)
+                        hm = diag_dir / f"correlation_heatmap_{timestamp}.png"
+                        fig.savefig(hm, dpi=100)
                         plt.close(fig)
-                        click.echo(f"  Saved: {heatmap_path}")
+                        click.echo(f"  Saved: {hm}")
                     except Exception as e:
-                        click.echo(f"  Warning: Heatmap generation failed: {e}", err=True)
+                        click.echo(f"  Warning: Heatmap failed: {e}", err=True)
 
                     # Greedy selection
                     click.echo()
                     if competitive:
                         click.echo(
-                            "[dedup] Competitive greedy selection "
-                            f"(max corr ≤ {scoring_cfg.dedup.max_corr}, "
-                            "no gatekeepers)..."
+                            f"[dedup] Competitive greedy "
+                            f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
                         )
                         selected_ids = greedy_select(
                             df, corr_matrix,
@@ -1583,8 +1528,8 @@ def promote(
                         )
                     else:
                         click.echo(
-                            "[dedup] Greedy selection (max corr "
-                            f"≤ {scoring_cfg.dedup.max_corr})..."
+                            f"[dedup] Greedy "
+                            f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
                         )
                         selected_ids = greedy_select(
                             df, corr_matrix,
@@ -1594,69 +1539,166 @@ def promote(
                         )
                     click.echo(f"  Selected {len(selected_ids)} factors")
 
-                    # Competitive: report eviction plan
+                    # Competitive diff report
                     if competitive and target_existing_ids:
-                        selected_set = set(selected_ids)
-                        existing_set = set(target_existing_ids)
-                        retained = selected_set & existing_set
-                        newly_added = selected_set - existing_set
-                        will_evict = existing_set - selected_set
-                        no_source = will_evict - set(df.index.tolist())
-                        if no_source:
-                            click.echo(
-                                f"  Warning: {len(no_source)} factors have "
-                                f"no source metrics in {source_db_path}: "
-                                f"{sorted(no_source)}"
-                            )
+                        sel_set = set(selected_ids)
+                        ex_set = set(target_existing_ids)
                         click.echo(
-                            f"  Competitive diff: "
-                            f"{len(retained)} retained, "
-                            f"{len(newly_added)} new, "
-                            f"{len(will_evict)} to evict"
+                            f"  Competitive: {len(sel_set & ex_set)} retained, "
+                            f"{len(sel_set - ex_set)} new, "
+                            f"{len(ex_set - sel_set)} evict",
                         )
-                        if will_evict:
-                            for fid in sorted(will_evict):
-                                click.echo(f"    - evict: {fid}")
+                        for fid in sorted(ex_set - sel_set):
+                            click.echo(f"    - evict: {fid}")
                 else:
-                    click.echo("  Warning: Empty correlation matrix, skipping greedy selection")
-                    selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+                    click.echo("  Warning: Empty corr matrix")
+                    selected_ids = df.index.tolist()[
+                        :scoring_cfg.promote.max_factors
+                    ]
             except Exception as e:
-                click.echo(f"  Warning: Correlation computation failed: {e}", err=True)
-                click.echo("  Falling back to score-only selection")
-                selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+                click.echo(f"  Warning: Correlation failed: {e}", err=True)
+                selected_ids = df.index.tolist()[
+                    :scoring_cfg.promote.max_factors
+                ]
         else:
-            click.echo()
-            reason = "dedup.enabled=false" if not scoring_cfg.dedup.enabled else "--skip-corr"
-            click.echo(f"[dedup] Dedup + greedy — SKIPPED ({reason})")
-            selected_ids = df.index.tolist()[:scoring_cfg.promote.max_factors]
+            click.echo("[dedup] — SKIPPED")
+            target_existing_ids = []
+            selected_ids = df.index.tolist()[
+                :scoring_cfg.promote.max_factors
+            ]
 
-        # Save scores CSV
-        scores_dir = Path("logs/scoring")
-        scores_dir.mkdir(parents=True, exist_ok=True)
-        scores_csv = scores_dir / f"factor_scores_{timestamp}.csv"
-        score_cols = [
-            "final_score", "avg_period_score",
-            "pred_score", "mono_score",
-            "consistency", "turnover_friendliness",
-            "avg_icir", "avg_ic_mean", "avg_monotonicity",
-            "n_valid_periods",
+        # ── [clustering] ──
+        click.echo()
+        if scoring_cfg.clustering.enabled:
+            click.echo("[clustering] HDBSCAN + PCA...")
+            # Need corr matrix — compute if dedup was skipped
+            if corr_matrix is None or corr_matrix.empty:
+                click.echo("  Computing correlation matrix for clustering...")
+                target_db_for_corr = RegistryDatabase(Path(target_db_path))
+                try:
+                    corr_matrix = compute_factor_correlation(
+                        selected_ids, scoring_cfg,
+                        registry_dbs=[source_db, target_db_for_corr],
+                    )
+                finally:
+                    target_db_for_corr.close()
+
+            if corr_matrix is not None and not corr_matrix.empty:
+                from nautilus_quants.alpha.registry.clustering import (
+                    build_super_alphas,
+                    cluster_factors,
+                    plot_cluster_heatmap,
+                )
+                from nautilus_quants.alpha.registry.repository import (
+                    FactorRepository,
+                )
+
+                # Get factor expressions from source DB
+                src_repo = FactorRepository(source_db)
+                factor_exprs: dict[str, str] = {}
+                factor_tags_map: dict[str, list[str]] = {}
+                for fid in selected_ids:
+                    rec = src_repo.get_factor(fid)
+                    if rec:
+                        factor_exprs[fid] = rec.expression
+                        factor_tags_map[fid] = rec.tags
+
+                # Build clustering config
+                from nautilus_quants.alpha.registry.clustering import (
+                    ClusterConfig,
+                )
+                cluster_cfg = ClusterConfig(
+                    enabled=True,
+                    min_cluster_size=scoring_cfg.clustering.min_cluster_size,
+                    cluster_selection_method=scoring_cfg.clustering.cluster_selection_method,
+                    min_samples=(
+                        scoring_cfg.clustering.min_samples
+                        if scoring_cfg.clustering.min_samples
+                        else None
+                    ),
+                    composition_method=scoring_cfg.clustering.composition_method,
+                    single_factor_passthrough=scoring_cfg.clustering.single_factor_passthrough,
+                    super_alpha_prefix=scoring_cfg.clustering.super_alpha_prefix,
+                    component_status=scoring_cfg.clustering.component_status,
+                )
+
+                super_alphas, noise = build_super_alphas(
+                    factor_ids=selected_ids,
+                    factor_expressions=factor_exprs,
+                    corr_matrix=corr_matrix,
+                    config=cluster_cfg,
+                    factor_tags=factor_tags_map,
+                )
+
+                # Cluster heatmap
+                clusters_for_plot, noise_for_plot = cluster_factors(
+                    corr_matrix.loc[
+                        [f for f in selected_ids if f in corr_matrix.index],
+                        [f for f in selected_ids if f in corr_matrix.columns],
+                    ],
+                    cluster_cfg,
+                )
+                heatmap_path = diag_dir / f"cluster_heatmap_{timestamp}.png"
+                try:
+                    plot_cluster_heatmap(
+                        corr_matrix, clusters_for_plot, noise_for_plot,
+                        output_path=str(heatmap_path),
+                    )
+                    click.echo(f"  Saved: {heatmap_path}")
+                except Exception as e:
+                    click.echo(f"  Warning: Heatmap failed: {e}", err=True)
+
+                click.echo(
+                    f"  {len(super_alphas)} Super Alphas, "
+                    f"{len(noise)} noise discarded",
+                )
+                for sa in super_alphas:
+                    click.echo(
+                        f"    {sa.name}: {len(sa.members)} members "
+                        f"[{sa.method}] tags={sa.tags}",
+                    )
+            else:
+                click.echo("  Warning: No corr matrix, skipping clustering")
+        else:
+            click.echo("[clustering] — SKIPPED")
+
+        # ── [orthogonalization] ──
+        click.echo()
+        if scoring_cfg.orthogonalization.enabled:
+            click.echo("[orthogonalization] Löwdin...")
+            click.echo("  (S^{-1/2} computation — to be applied by regime command)")
+            # TODO: compute S^{-1/2}, save to diag_dir
+            click.echo(f"  Output dir: {diag_dir}")
+        else:
+            click.echo("[orthogonalization] — SKIPPED")
+
+        # ── Save scores CSV ──
+        scores_csv = diag_dir / f"factor_scores_{timestamp}.csv"
+        save_cols = [
+            c for c in [
+                "final_score", "avg_period_score", "pred_score",
+                "mono_score", "consistency", "turnover_friendliness",
+                "avg_icir", "avg_ic_mean", "avg_monotonicity",
+                "n_valid_periods",
+            ] if c in df.columns
         ]
-        save_cols = [c for c in score_cols if c in df.columns]
         df[save_cols].to_csv(scores_csv)
         click.echo(f"\n  Scores saved: {scores_csv}")
 
         # Summary
         print_selected_factors(selected_ids, df)
 
-        # 6. Migrate (unless dry run)
-        if dry_run:
-            click.echo()
-            click.echo("  [DRY RUN] No migration performed.")
-        else:
-            click.echo()
+        # ── [migrate] ──
+        click.echo()
+        if scoring_cfg.promote.enabled:
+            if not target_db_path:
+                click.echo(
+                    "Error: promote.target_db_path required.", err=True,
+                )
+                sys.exit(1)
+
             target_db = RegistryDatabase(Path(target_db_path))
             try:
-                # Wrap evict + migrate in a transaction for atomicity
                 if competitive and target_existing_ids:
                     target_db.connection.begin()
                 try:
@@ -1667,13 +1709,13 @@ def promote(
                         if evicted_ids:
                             click.echo(
                                 f"[migrate] Archived {len(evicted_ids)} "
-                                f"evicted factors from {target_db_path}"
+                                f"evicted factors",
                             )
 
-                    phase = "[migrate] Syncing" if competitive else "[migrate] Migrating"
+                    label = "[migrate] Syncing" if competitive else "[migrate] Migrating"
                     click.echo(
-                        f"{phase} {len(selected_ids)} factors "
-                        f"to {target_db_path}..."
+                        f"{label} {len(selected_ids)} factors "
+                        f"to {target_db_path}...",
                     )
                     counts = migrate_factors(
                         source_db, target_db, selected_ids,
@@ -1683,7 +1725,7 @@ def promote(
                     click.echo(
                         f"  Migrated: {counts['factors']} factors, "
                         f"{counts['metrics']} metrics, "
-                        f"{counts['configs']} config snapshots"
+                        f"{counts['configs']} configs",
                     )
 
                     if competitive and target_existing_ids:
@@ -1692,18 +1734,19 @@ def promote(
                     if competitive and target_existing_ids:
                         target_db.connection.rollback()
                         click.echo(
-                            "  Error during competitive sync — "
-                            "rolled back all changes.", err=True,
+                            "  Error — rolled back.", err=True,
                         )
                     raise
             finally:
                 target_db.close()
+        else:
+            click.echo("[migrate] — SKIPPED (promote.enabled=false)")
 
         source_db.close()
         duration = time.time() - start_time
         print_promote_summary(
-            n_after, n_after - n_removed, len(selected_ids),
-            duration, dry_run,
+            n_after_filter, n_after_dedup, len(selected_ids),
+            duration, not scoring_cfg.promote.enabled,
         )
 
     except Exception as e:

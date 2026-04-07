@@ -81,12 +81,15 @@ diagnostics:
   score_super_alphas: true
   overlap_validation: true
 
-# ── Promote ──
+# ── [migrate] ──
+# enabled=false → no DB migration, only console + logs output.
 promote:
+  enabled: false                  # false = 不入库，只看结果
   source_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/test.duckdb"
   target_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/dev.duckdb"
   max_factors: 50
   target_status: "active"
+  competitive: true               # full re-selection, evict losers
 
 # ── Data paths (for correlation computation) ──
 data:

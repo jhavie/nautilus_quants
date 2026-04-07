@@ -120,10 +120,12 @@ class DiagnosticsConfig:
 class PromoteConfig:
     """Promotion configuration."""
 
+    enabled: bool = True
     source_db_path: str = ""
     target_db_path: str = ""
     max_factors: int = 50
     target_status: str = "active"
+    competitive: bool = False
 
 
 @dataclass(frozen=True)
@@ -240,10 +242,12 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             overlap_validation=dg.get("overlap_validation", True),
         ),
         promote=PromoteConfig(
+            enabled=pr.get("enabled", True),
             source_db_path=pr.get("source_db_path", ""),
             target_db_path=pr.get("target_db_path", ""),
             max_factors=pr.get("max_factors", 50),
             target_status=pr.get("target_status", "active"),
+            competitive=pr.get("competitive", False),
         ),
         data=DataConfig(
             catalog_path=da.get("catalog_path", ""),
