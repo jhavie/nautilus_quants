@@ -21,7 +21,7 @@ def export_factors_yaml(
     status: str = "active",
     composite_method: str = "equal",
     composite_top_n: int = 30,
-    composite_transform: str = "cs_rank",
+    composite_transform: str = "normalize",
 ) -> Path:
     """Generate a complete ``factors.yaml`` from the registry.
 

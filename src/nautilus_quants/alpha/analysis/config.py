@@ -9,6 +9,57 @@ import yaml
 
 
 @dataclass(frozen=True)
+class JumpModelConfig:
+    """Jump Model regime detection parameters.
+
+    Attributes:
+        n_states: Number of regime states.
+        jump_penalty: Lambda controlling regime persistence (higher=fewer switches).
+        feature_set: Feature set for regime detection.
+        refit_window: Rolling window size in bars (0=expanding window).
+        refit_interval: How often to refit in bars.
+        min_train: Minimum bars required before first fit.
+    """
+
+    n_states: int = 3
+    jump_penalty: float = 5000.0
+    feature_set: str = "full"  # full/paper/returns_only
+    refit_window: int = 0      # 0=expanding, >0=rolling window size
+    refit_interval: int = 504  # refit every N bars (~84 days at 4h)
+    min_train: int = 1008      # minimum training bars (~168 days at 4h)
+
+
+@dataclass(frozen=True)
+class EmaConfig:
+    """EMA baseline regime detection parameters."""
+
+    span: int = 200
+
+
+@dataclass(frozen=True)
+class RegimeConfig:
+    """Configuration for regime-conditional factor analysis.
+
+    Attributes:
+        regime_instrument: Instrument for regime detection (e.g. BTC).
+        jump_model: Jump Model hyperparameters.
+        ema: EMA baseline parameters.
+        forward_period: Forward return period in bar counts for IC.
+        min_obs: Minimum cross-sectional observations per timestamp.
+        min_weight: Floor weight per factor per regime.
+        export_weights: Whether to export per-regime weight_map YAML.
+    """
+
+    regime_instrument: str = "BTCUSDT.BINANCE"
+    jump_model: JumpModelConfig = field(default_factory=JumpModelConfig)
+    ema: EmaConfig = field(default_factory=EmaConfig)
+    forward_period: int = 1
+    min_obs: int = 20
+    min_weight: float = 0.02
+    export_weights: bool = True
+
+
+@dataclass(frozen=True)
 class MetricsConfig:
     """Configuration for extended factor metrics.
 
@@ -75,6 +126,7 @@ class AlphaAnalysisConfig:
     output_format: tuple[str, ...] = ("png",)
     factor_cache_path: str = ""
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
+    regime: RegimeConfig | None = None
 
     # Registry auto-persist configuration
     registry_env: str = "test"
@@ -140,6 +192,7 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         output_format=tuple(output_format),
         factor_cache_path=raw.get("factor_cache_path", ""),
         metrics=_parse_metrics_config(raw.get("metrics", {})),
+        regime=_parse_regime_config(raw.get("regime")),
         registry_env=reg.get("env", "test"),
         registry_db_dir=reg.get("db_dir", "logs/registry"),
         registry_enabled=reg.get("enabled", True),
@@ -152,4 +205,32 @@ def _parse_metrics_config(raw: dict | None) -> MetricsConfig:
         return MetricsConfig()
     return MetricsConfig(
         factor_metrics=raw.get("factor_metrics", False),
+    )
+
+
+def _parse_regime_config(raw: dict | None) -> RegimeConfig | None:
+    """Parse regime analysis configuration from YAML dict."""
+    if not raw:
+        return None
+
+    jm_raw = raw.get("jump_model", {}) or {}
+    ema_raw = raw.get("ema", {}) or {}
+
+    return RegimeConfig(
+        regime_instrument=raw.get("regime_instrument", "BTCUSDT.BINANCE"),
+        jump_model=JumpModelConfig(
+            n_states=jm_raw.get("n_states", 3),
+            jump_penalty=jm_raw.get("jump_penalty", 100.0),
+            feature_set=jm_raw.get("feature_set", "full"),
+            refit_window=jm_raw.get("refit_window", 0),
+            refit_interval=jm_raw.get("refit_interval", 126),
+            min_train=jm_raw.get("min_train", 504),
+        ),
+        ema=EmaConfig(
+            span=ema_raw.get("span", 20),
+        ),
+        forward_period=raw.get("forward_period", 1),
+        min_obs=raw.get("min_obs", 20),
+        min_weight=raw.get("min_weight", 0.02),
+        export_weights=raw.get("export_weights", True),
     )

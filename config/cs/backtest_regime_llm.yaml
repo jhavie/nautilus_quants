@@ -1,0 +1,241 @@
+# CS Strategy Backtest — Regime-Aware (LLM Claude Factors)
+#
+# Pipeline:
+#   FactorEngineActor → 10 LLM Claude factors
+#     → RegimeCompositeActor → regime composite (from regime_config.yaml)
+#       → DecisionEngineActor → RebalanceOrders → CSStrategy
+#
+# Usage:
+#   1. Generate regime_config.yaml:
+#      python -m nautilus_quants.alpha regime config/cs/regime_llm_claude.yaml -v
+#   2. Update regime_config_path below to point to the output
+#   3. Run backtest:
+#      python -m nautilus_quants.backtest run config/cs/backtest_regime_llm.yaml -v
+#
+# 115 Symbols, 4h bars, 2022-01-01 ~ 2025-12-31
+# 初始资金: 10000 USDT, 持仓: 多空各40, TopKDropout n_drop=4
+
+registry:
+  env: dev
+  db_dir: logs/registry
+  enabled: true
+
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "4h"
+    instrument_ids: &instrument_ids
+      - "1000SHIBUSDT.BINANCE"
+      - "1000XECUSDT.BINANCE"
+      - "1INCHUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "ALICEUSDT.BINANCE"
+      - "ALPHAUSDT.BINANCE"
+      - "ANKRUSDT.BINANCE"
+      - "ANTUSDT.BINANCE"
+      - "ARPAUSDT.BINANCE"
+      - "ARUSDT.BINANCE"
+      - "ATAUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "AUDIOUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "BAKEUSDT.BINANCE"
+      - "BALUSDT.BINANCE"
+      - "BANDUSDT.BINANCE"
+      - "BATUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+      - "BELUSDT.BINANCE"
+      - "BLZUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "C98USDT.BINANCE"
+      - "CELOUSDT.BINANCE"
+      - "CELRUSDT.BINANCE"
+      - "CHRUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "COMPUSDT.BINANCE"
+      - "COTIUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "CTSIUSDT.BINANCE"
+      - "DASHUSDT.BINANCE"
+      - "DEFIUSDT.BINANCE"
+      - "DENTUSDT.BINANCE"
+      - "DGBUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "DUSKUSDT.BINANCE"
+      - "DYDXUSDT.BINANCE"
+      - "EGLDUSDT.BINANCE"
+      - "ENJUSDT.BINANCE"
+      - "ENSUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "FLMUSDT.BINANCE"
+      - "FTMUSDT.BINANCE"
+      - "GALAUSDT.BINANCE"
+      - "GRTUSDT.BINANCE"
+      - "GTCUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "HOTUSDT.BINANCE"
+      - "ICXUSDT.BINANCE"
+      - "IOSTUSDT.BINANCE"
+      - "IOTAUSDT.BINANCE"
+      - "IOTXUSDT.BINANCE"
+      - "KAVAUSDT.BINANCE"
+      - "KLAYUSDT.BINANCE"
+      - "KSMUSDT.BINANCE"
+      - "LINAUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "LPTUSDT.BINANCE"
+      - "LRCUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "MANAUSDT.BINANCE"
+      - "MASKUSDT.BINANCE"
+      - "MATICUSDT.BINANCE"
+      - "MKRUSDT.BINANCE"
+      - "MTLUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "NEOUSDT.BINANCE"
+      - "NKNUSDT.BINANCE"
+      - "OCEANUSDT.BINANCE"
+      - "OGNUSDT.BINANCE"
+      - "OMGUSDT.BINANCE"
+      - "ONEUSDT.BINANCE"
+      - "ONTUSDT.BINANCE"
+      - "PEOPLEUSDT.BINANCE"
+      - "QTUMUSDT.BINANCE"
+      - "REEFUSDT.BINANCE"
+      - "RENUSDT.BINANCE"
+      - "RLCUSDT.BINANCE"
+      - "ROSEUSDT.BINANCE"
+      - "RSRUSDT.BINANCE"
+      - "RUNEUSDT.BINANCE"
+      - "RVNUSDT.BINANCE"
+      - "SANDUSDT.BINANCE"
+      - "SFPUSDT.BINANCE"
+      - "SKLUSDT.BINANCE"
+      - "SNXUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "STMXUSDT.BINANCE"
+      - "STORJUSDT.BINANCE"
+      - "SUSHIUSDT.BINANCE"
+      - "SXPUSDT.BINANCE"
+      - "THETAUSDT.BINANCE"
+      - "TRBUSDT.BINANCE"
+      - "TRXUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "VETUSDT.BINANCE"
+      - "WAVESUSDT.BINANCE"
+      - "XEMUSDT.BINANCE"
+      - "XLMUSDT.BINANCE"
+      - "XMRUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "XTZUSDT.BINANCE"
+      - "YFIUSDT.BINANCE"
+      - "ZECUSDT.BINANCE"
+      - "ZENUSDT.BINANCE"
+      - "ZILUSDT.BINANCE"
+      - "ZRXUSDT.BINANCE"
+    start_time: "2023-01-01"
+    end_time: "2023-12-31"
+
+engine:
+  trader_id: "BACKTESTER-CS-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true
+
+  actors:
+    # 1) Factor Engine: 10 LLM Claude factors
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cs/factors_llm_claude.yaml"
+        # factor_cache_path: "data/factor_cache/cache_alpha101_llm_claude"
+        interval: "4h"
+        signal_prefix: "factor"
+        max_history: 100
+        publish_signals: true
+
+    # 2) Regime Composite: schedule lookup from regime_config.yaml
+    - actor_path: "nautilus_quants.actors.regime_composite:RegimeCompositeActor"
+      config_path: "nautilus_quants.actors.regime_composite:RegimeCompositeActorConfig"
+      config:
+        regime_config_path: "logs/regime_llm_claude/regime_20260406_141742/regime_config.yaml"
+        regime_method: "jump_model"   # or "ema"
+        composite_name: "regime_composite"
+
+    # 3) Equity Snapshot
+    - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
+      config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
+      config:
+        interval: "4h"
+        venue_name: "BINANCE"
+        currency: "USDT"
+
+    # 4) Decision Engine: consumes regime-aware composite
+    - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
+      config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
+      config:
+        composite_factor: "composite"
+        rebalance_interval: 2
+        selection_policy: "TopKDropoutSelectionPolicy"
+        position_mode: "fixed"
+        position_value: 250
+        topk_long: 40
+        topk_short: 40
+        n_drop_long: 4
+        n_drop_short: 4
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: *instrument_ids
+        execution_policy: "MarketExecutionPolicy"
+
+report:
+  output_dir: "logs/performance"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "CS Regime-Aware Backtest (LLM Claude + JM)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "CS Regime-Aware QuantStats Analysis"
+    output_format:
+      - html
+      - png
+  position_viz:
+    enabled: true
+    title: "CS Regime-Aware Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "4h"
