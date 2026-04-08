@@ -88,6 +88,7 @@ class TestClusterFactors:
         )
         config = ClusterConfig(
             enabled=True,
+            algorithm="hdbscan",
             min_cluster_size=3,
             min_samples=2,
         )
@@ -128,6 +129,7 @@ class TestClusterFactors:
 
         config = ClusterConfig(
             enabled=True,
+            algorithm="hdbscan",
             min_cluster_size=3,
             min_samples=2,
         )
@@ -137,6 +139,153 @@ class TestClusterFactors:
         assert "f6" in noise, (
             f"Expected f6 in noise, got noise={noise}, clusters={clusters}"
         )
+
+    def test_noise_passthrough(self) -> None:
+        """Noise factors should become standalone Super Alphas when enabled."""
+        n = 7
+        corr = _build_block_corr(
+            n_factors=n,
+            groups=[[0, 1, 2], [3, 4, 5]],
+            within_corr=0.85,
+            between_corr=0.05,
+        )
+        factor_ids = [f"f{i}" for i in range(n)]
+        factor_expressions = {fid: f"cs_rank(close_{fid})" for fid in factor_ids}
+
+        config = ClusterConfig(
+            enabled=True,
+            algorithm="hdbscan",
+            min_cluster_size=3,
+            min_samples=2,
+            composition_method="equal",
+            noise_passthrough=True,
+        )
+
+        super_alphas, noise = build_super_alphas(
+            factor_ids=factor_ids,
+            factor_expressions=factor_expressions,
+            corr_matrix=corr,
+            config=config,
+        )
+
+        # f6 should be a passthrough Super Alpha, not discarded
+        assert len(noise) == 0, f"Expected no discarded noise, got {noise}"
+        passthrough_sas = [sa for sa in super_alphas if sa.method == "passthrough"]
+        assert len(passthrough_sas) >= 1
+        passthrough_members = [m for sa in passthrough_sas for m in sa.members]
+        assert "f6" in passthrough_members
+
+    def test_noise_discarded_when_disabled(self) -> None:
+        """Noise factors should be discarded when noise_passthrough=False."""
+        n = 7
+        corr = _build_block_corr(
+            n_factors=n,
+            groups=[[0, 1, 2], [3, 4, 5]],
+            within_corr=0.85,
+            between_corr=0.05,
+        )
+        factor_ids = [f"f{i}" for i in range(n)]
+        factor_expressions = {fid: f"cs_rank(close_{fid})" for fid in factor_ids}
+
+        config = ClusterConfig(
+            enabled=True,
+            algorithm="hdbscan",
+            min_cluster_size=3,
+            min_samples=2,
+            composition_method="equal",
+            noise_passthrough=False,
+        )
+
+        super_alphas, noise = build_super_alphas(
+            factor_ids=factor_ids,
+            factor_expressions=factor_expressions,
+            corr_matrix=corr,
+            config=config,
+        )
+
+        assert "f6" in noise
+
+
+class TestAgglomerativeClustering:
+    """Tests for Agglomerative hierarchical clustering."""
+
+    def test_two_blocks(self) -> None:
+        """Two blocks of correlated factors → 2 clusters, no noise."""
+        corr = _build_block_corr(
+            n_factors=6,
+            groups=[[0, 1, 2], [3, 4, 5]],
+            within_corr=0.85,
+            between_corr=0.05,
+        )
+        config = ClusterConfig(
+            enabled=True,
+            algorithm="agglomerative",
+            linkage="average",
+            distance_threshold=0.3,
+        )
+
+        clusters, noise = cluster_factors(corr, config)
+
+        assert len(clusters) == 2
+        assert len(noise) == 0  # No noise in agglomerative
+
+    def test_no_noise(self) -> None:
+        """Agglomerative assigns every factor — outlier gets its own cluster."""
+        corr = _build_block_corr(
+            n_factors=7,
+            groups=[[0, 1, 2], [3, 4, 5]],
+            within_corr=0.85,
+            between_corr=0.05,
+        )
+        config = ClusterConfig(
+            enabled=True,
+            algorithm="agglomerative",
+            linkage="average",
+            distance_threshold=0.3,
+        )
+
+        clusters, noise = cluster_factors(corr, config)
+
+        assert len(noise) == 0
+        all_members = [fid for members in clusters.values() for fid in members]
+        assert "f6" in all_members  # Not discarded
+
+    def test_threshold_controls_granularity(self) -> None:
+        """Lower threshold → more clusters."""
+        corr = _build_block_corr(
+            n_factors=6,
+            groups=[[0, 1, 2], [3, 4, 5]],
+            within_corr=0.85,
+            between_corr=0.05,
+        )
+
+        # Tight threshold — should split more
+        config_tight = ClusterConfig(
+            enabled=True,
+            algorithm="agglomerative",
+            linkage="average",
+            distance_threshold=0.05,
+        )
+        clusters_tight, _ = cluster_factors(corr, config_tight)
+
+        # Loose threshold — should merge more
+        config_loose = ClusterConfig(
+            enabled=True,
+            algorithm="agglomerative",
+            linkage="average",
+            distance_threshold=0.5,
+        )
+        clusters_loose, _ = cluster_factors(corr, config_loose)
+
+        assert len(clusters_tight) >= len(clusters_loose)
+
+    def test_unknown_algorithm_raises(self) -> None:
+        """Unknown algorithm name should raise ValueError."""
+        corr = _build_block_corr(n_factors=4, groups=[[0, 1, 2]], within_corr=0.9)
+        config = ClusterConfig(enabled=True, algorithm="kmeans")
+
+        with pytest.raises(ValueError, match="Unknown clustering algorithm"):
+            cluster_factors(corr, config)
 
 
 # ---------------------------------------------------------------------------
@@ -285,8 +434,9 @@ class TestBuildSuperAlphasE2E:
 
         config = ClusterConfig(
             enabled=True,
-            min_cluster_size=3,
-            min_samples=2,
+            algorithm="agglomerative",
+            linkage="average",
+            distance_threshold=0.3,
             composition_method="equal",
             single_factor_passthrough=True,
         )

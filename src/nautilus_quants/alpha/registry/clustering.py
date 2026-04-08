@@ -27,17 +27,26 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ClusterConfig:
-    """HDBSCAN clustering configuration."""
+    """Multi-algorithm clustering configuration."""
 
     enabled: bool = False
-    min_cluster_size: int = 3
-    cluster_selection_method: str = "eom"  # "eom" | "leaf"
-    min_samples: int | None = None  # None = defaults to min_cluster_size
+    algorithm: str = "agglomerative"  # "hdbscan" | "agglomerative"
+    # --- Common ---
     distance_metric: str = "spearman"
     composition_method: str = "pca"  # "pca" | "equal" | "icir"
     single_factor_passthrough: bool = True
+    noise_passthrough: bool = True
     super_alpha_prefix: str = "SA"
     component_status: str = "component"
+    # --- HDBSCAN ---
+    min_cluster_size: int = 3
+    cluster_selection_method: str = "eom"  # "eom" | "leaf"
+    min_samples: int | None = None
+    # --- Agglomerative ---
+    linkage: str = "average"  # "average" | "complete" | "single"
+    distance_threshold: float = 0.3  # |corr| < 1-threshold → 不合并
+    # --- Distance ---
+    abs_correlation: bool = True  # True: 1-|corr|, False: (1-corr)/2
 
 
 # ---------------------------------------------------------------------------
@@ -59,25 +68,34 @@ class SuperAlpha:
 
 
 # ---------------------------------------------------------------------------
-# Step 1: HDBSCAN clustering
+# Step 1: Clustering (HDBSCAN / Agglomerative)
 # ---------------------------------------------------------------------------
 
 
-def cluster_factors(
+def _corr_to_distance(
     corr_matrix: pd.DataFrame,
+    abs_correlation: bool = True,
+) -> np.ndarray:
+    """Convert correlation matrix to distance.
+
+    abs_correlation=True:  1 - |corr|.  ±0.9 → 0.1 (same cluster)
+    abs_correlation=False: (1 - corr)/2. +0.9 → 0.05, -0.9 → 0.95
+    """
+    if abs_correlation:
+        distance = 1.0 - corr_matrix.abs().values
+    else:
+        distance = (1.0 - corr_matrix.values) / 2.0
+    np.fill_diagonal(distance, 0.0)
+    distance = (distance + distance.T) / 2.0
+    return np.clip(distance, 0.0, 1.0)
+
+
+def _cluster_hdbscan(
+    factor_ids: list[str],
+    distance: np.ndarray,
     config: ClusterConfig,
 ) -> tuple[dict[int, list[str]], list[str]]:
-    """HDBSCAN clustering on correlation distance matrix.
-
-    Args:
-        corr_matrix: Factor Spearman correlation matrix (factor_id x factor_id).
-        config: Clustering configuration.
-
-    Returns:
-        (clusters, noise_factors):
-            clusters: {cluster_id -> [factor_ids]} -- valid clusters
-            noise_factors: [factor_ids] -- HDBSCAN label=-1, discarded
-    """
+    """HDBSCAN density-based clustering."""
     try:
         import hdbscan
     except ImportError:
@@ -85,17 +103,6 @@ def cluster_factors(
             "hdbscan is required for clustering. "
             "Install: pip install hdbscan"
         )
-
-    # Distance = 1 - |correlation|
-    factor_ids = corr_matrix.index.tolist()
-    distance = 1.0 - corr_matrix.abs().values
-
-    # Ensure diagonal is 0 and matrix is symmetric
-    np.fill_diagonal(distance, 0.0)
-    distance = (distance + distance.T) / 2.0
-
-    # Clip to [0, 1] for numerical stability
-    distance = np.clip(distance, 0.0, 1.0)
 
     min_samples = config.min_samples or config.min_cluster_size
     clusterer = hdbscan.HDBSCAN(
@@ -115,12 +122,65 @@ def cluster_factors(
             clusters.setdefault(label, []).append(fid)
 
     logger.info(
-        "HDBSCAN: %d clusters, %d noise factors from %d total",
-        len(clusters),
-        len(noise),
-        len(factor_ids),
+        "HDBSCAN: %d clusters, %d noise from %d total",
+        len(clusters), len(noise), len(factor_ids),
     )
     return clusters, noise
+
+
+def _cluster_agglomerative(
+    factor_ids: list[str],
+    distance: np.ndarray,
+    config: ClusterConfig,
+) -> tuple[dict[int, list[str]], list[str]]:
+    """Agglomerative hierarchical clustering with distance threshold."""
+    from sklearn.cluster import AgglomerativeClustering
+
+    clusterer = AgglomerativeClustering(
+        n_clusters=None,
+        metric="precomputed",
+        linkage=config.linkage,
+        distance_threshold=config.distance_threshold,
+    )
+    labels = clusterer.fit_predict(distance)
+
+    clusters: dict[int, list[str]] = {}
+    for fid, label in zip(factor_ids, labels):
+        clusters.setdefault(int(label), []).append(fid)
+
+    logger.info(
+        "Agglomerative: %d clusters from %d total "
+        "(linkage=%s, threshold=%.3f)",
+        len(clusters), len(factor_ids),
+        config.linkage, config.distance_threshold,
+    )
+    return clusters, []  # No noise concept
+
+
+def cluster_factors(
+    corr_matrix: pd.DataFrame,
+    config: ClusterConfig,
+) -> tuple[dict[int, list[str]], list[str]]:
+    """Cluster factors using the configured algorithm.
+
+    Args:
+        corr_matrix: Factor Spearman correlation matrix.
+        config: Clustering configuration.
+
+    Returns:
+        (clusters, noise_factors):
+            clusters: {cluster_id -> [factor_ids]}
+            noise_factors: [factor_ids] (empty for agglomerative)
+    """
+    factor_ids = corr_matrix.index.tolist()
+    distance = _corr_to_distance(corr_matrix, config.abs_correlation)
+
+    if config.algorithm == "hdbscan":
+        return _cluster_hdbscan(factor_ids, distance, config)
+    elif config.algorithm == "agglomerative":
+        return _cluster_agglomerative(factor_ids, distance, config)
+    else:
+        raise ValueError(f"Unknown clustering algorithm: {config.algorithm}")
 
 
 # ---------------------------------------------------------------------------
@@ -373,13 +433,39 @@ def build_super_alphas(
 
         super_alphas.append(sa)
 
+    # Step 3: Noise factors -> standalone Super Alphas (if enabled)
+    passthrough_noise: list[str] = []
+    if config.noise_passthrough and noise:
+        next_id = max(clusters.keys(), default=-1) + 1
+        for i, fid in enumerate(noise):
+            if fid not in factor_expressions:
+                continue
+            sa = SuperAlpha(
+                name=f"{config.super_alpha_prefix}_{next_id + i:03d}",
+                expression=factor_expressions[fid],
+                members=[fid],
+                weights={fid: 1.0},
+                method="passthrough",
+                cluster_id=next_id + i,
+                tags=sorted(
+                    {*(factor_tags.get(fid, []) if factor_tags else []), "noise_passthrough"},
+                ),
+            )
+            super_alphas.append(sa)
+            passthrough_noise.append(fid)
+        remaining_noise = [f for f in noise if f not in passthrough_noise]
+    else:
+        remaining_noise = noise
+
     logger.info(
-        "Built %d Super Alphas from %d clusters (%d noise discarded)",
+        "Built %d Super Alphas from %d clusters "
+        "(%d noise passthrough, %d noise discarded)",
         len(super_alphas),
         len(clusters),
-        len(noise),
+        len(passthrough_noise),
+        len(remaining_noise),
     )
-    return super_alphas, noise
+    return super_alphas, remaining_noise
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -433,11 +519,14 @@ def plot_cluster_heatmap(
     palette = sns.color_palette("husl", max(n_clusters, 1))
 
     fig, ax = plt.subplots(figsize=(max(12, len(available) * 0.4), max(10, len(available) * 0.35)))
+    annot_fontsize = max(5, min(8, 200 // max(len(available), 1)))
     sns.heatmap(
         sub_corr, vmin=-1, vmax=1, center=0,
         cmap="RdBu_r", ax=ax,
         xticklabels=True, yticklabels=True,
         linewidths=0.1,
+        annot=True, fmt=".2f",
+        annot_kws={"size": annot_fontsize},
     )
 
     # Draw cluster boundary rectangles

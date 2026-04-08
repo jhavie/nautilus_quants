@@ -82,17 +82,26 @@ class DedupConfig:
 
 @dataclass(frozen=True)
 class ClusteringConfig:
-    """HDBSCAN clustering + Super Alpha composition configuration."""
+    """Multi-algorithm clustering + Super Alpha composition configuration."""
 
     enabled: bool = False
-    min_cluster_size: int = 3
-    cluster_selection_method: str = "eom"
-    min_samples: int | None = None
+    algorithm: str = "agglomerative"  # "hdbscan" | "agglomerative"
+    # Common
     distance_metric: str = "spearman"
     composition_method: str = "pca"
     single_factor_passthrough: bool = True
+    noise_passthrough: bool = True
     super_alpha_prefix: str = "SA"
     component_status: str = "component"
+    # HDBSCAN
+    min_cluster_size: int = 3
+    cluster_selection_method: str = "eom"
+    min_samples: int | None = None
+    # Agglomerative
+    linkage: str = "average"
+    distance_threshold: float = 0.3
+    # Distance
+    abs_correlation: bool = True
 
 
 @dataclass(frozen=True)
@@ -137,6 +146,7 @@ class DataConfig:
     factor_configs: list[str] = field(default_factory=list)
     instrument_ids: list[str] = field(default_factory=list)
     extra_data_path: str = ""
+    panels_cache_dir: str = ""
 
 
 @dataclass(frozen=True)
@@ -215,18 +225,25 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
         ),
         clustering=ClusteringConfig(
             enabled=cl.get("enabled", False),
-            min_cluster_size=cl.get("min_cluster_size", 3),
-            cluster_selection_method=cl.get(
-                "cluster_selection_method", "eom",
-            ),
-            min_samples=cl.get("min_samples"),
+            algorithm=cl.get("algorithm", "agglomerative"),
             distance_metric=cl.get("distance_metric", "spearman"),
             composition_method=cl.get("composition_method", "pca"),
             single_factor_passthrough=cl.get(
                 "single_factor_passthrough", True,
             ),
+            noise_passthrough=cl.get("noise_passthrough", True),
             super_alpha_prefix=cl.get("super_alpha_prefix", "SA"),
             component_status=cl.get("component_status", "component"),
+            # HDBSCAN
+            min_cluster_size=cl.get("min_cluster_size", 3),
+            cluster_selection_method=cl.get(
+                "cluster_selection_method", "eom",
+            ),
+            min_samples=cl.get("min_samples"),
+            # Agglomerative
+            linkage=cl.get("linkage", "average"),
+            distance_threshold=cl.get("distance_threshold", 0.3),
+            abs_correlation=cl.get("abs_correlation", True),
         ),
         orthogonalization=OrthogonalizationConfig(
             enabled=ot.get("enabled", False),
@@ -255,6 +272,7 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             factor_configs=da.get("factor_configs", []),
             instrument_ids=da.get("instrument_ids", []),
             extra_data_path=da.get("extra_data_path", ""),
+            panels_cache_dir=da.get("panels_cache_dir", ""),
         ),
     )
 
@@ -724,14 +742,45 @@ def compute_factor_correlation(
             extra_data=load_extra_data_config(data_cfg.extra_data_path),
         )
 
-    # Load bar data
-    loader = CatalogDataLoader(data_cfg.catalog_path, data_cfg.bar_spec)
-    bars_by_instrument = loader.load_bars(data_cfg.instrument_ids)
+    # ── Panel cache: load cached panels ──
+    cache_dir: Path | None = None
+    if data_cfg.panels_cache_dir:
+        cache_dir = Path(data_cfg.panels_cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # Compute factor values from each config
     all_factor_panels: dict[str, pd.DataFrame] = {}
+    uncached_ids: set[str] = set(factor_ids)
 
+    if cache_dir:
+        for fid in factor_ids:
+            cache_file = cache_dir / f"{fid}.parquet"
+            if cache_file.exists():
+                try:
+                    all_factor_panels[fid] = pd.read_parquet(cache_file)
+                    uncached_ids.discard(fid)
+                except Exception as e:
+                    logger.warning("Cache read failed for %s: %s", fid, e)
+        if all_factor_panels:
+            msg = (
+                f"Panel cache: loaded {len(all_factor_panels)}/{len(factor_ids)} "
+                f"factors from {cache_dir}"
+            )
+            logger.info(msg)
+            print(f"  {msg}")
+
+    if not uncached_ids:
+        msg = f"All {len(factor_ids)} panels from cache, skipping factor computation"
+        logger.info(msg)
+        print(f"  {msg}")
+    else:
+        # Load bar data
+        loader = CatalogDataLoader(data_cfg.catalog_path, data_cfg.bar_spec)
+        bars_by_instrument = loader.load_bars(data_cfg.instrument_ids)
+
+    # Compute factor values from each config (skip cached)
     for config_path in data_cfg.factor_configs:
+        if not uncached_ids:
+            break
         try:
             factor_config = load_factor_config(config_path)
             evaluator = FactorEvaluator(factor_config, analysis_config=analysis_config)
@@ -739,10 +788,10 @@ def compute_factor_correlation(
 
             for fname, series in factor_series.items():
                 fid = generate_factor_id(factor_config.source, fname)
-                if fid in factor_ids:
-                    # Unstack to panel (timestamps × instruments)
+                if fid in uncached_ids:
                     panel = series.unstack(level="asset")
                     all_factor_panels[fid] = panel
+                    uncached_ids.discard(fid)
         except Exception as e:
             logger.warning("Failed to compute factors from %s: %s", config_path, e)
 
@@ -856,6 +905,20 @@ def compute_factor_correlation(
                 loaded_count, len(groups),
             )
 
+    # ── Panel cache: save newly computed panels ──
+    if cache_dir:
+        saved = 0
+        for fid, panel in all_factor_panels.items():
+            cache_file = cache_dir / f"{fid}.parquet"
+            if not cache_file.exists():
+                try:
+                    panel.to_parquet(cache_file)
+                    saved += 1
+                except Exception as e:
+                    logger.warning("Cache write failed for %s: %s", fid, e)
+        if saved:
+            logger.info("Panel cache: saved %d new panels to %s", saved, cache_dir)
+
     if len(all_factor_panels) < 2:
         logger.warning(
             "Only %d factors computed for correlation (need ≥ 2)",
@@ -877,20 +940,62 @@ def compute_factor_correlation(
     matched_ids = [fid for fid in factor_ids if fid in all_factor_panels]
     n_factors = len(matched_ids)
 
-    # Cross-sectional Spearman correlation, averaged over time
+    # ── Correlation cache: incremental computation ──
+    cached_corr: pd.DataFrame | None = None
+    corr_cache_file: Path | None = None
+    if cache_dir:
+        corr_cache_file = cache_dir / "_correlation_matrix.parquet"
+        if corr_cache_file.exists():
+            try:
+                cached_corr = pd.read_parquet(corr_cache_file)
+            except Exception as e:
+                logger.warning("Corr cache read failed: %s", e)
+                cached_corr = None
+
+    # Determine which factor pairs need computation
+    if cached_corr is not None:
+        cached_set = set(cached_corr.index) & set(cached_corr.columns)
+        new_ids = [fid for fid in matched_ids if fid not in cached_set]
+        existing_ids_in_cache = [fid for fid in matched_ids if fid in cached_set]
+    else:
+        new_ids = matched_ids
+        existing_ids_in_cache = []
+
+    if not new_ids and cached_corr is not None:
+        # All factors already in cache — just slice
+        corr_df = cached_corr.loc[matched_ids, matched_ids]
+        msg = f"Corr cache: all {len(matched_ids)} factors cached, skipping computation"
+        logger.info(msg)
+        print(f"  {msg}")
+        if return_panels:
+            return corr_df, all_factor_panels
+        return corr_df
+
+    # Need to compute correlations for new factors
+    # Compute only new×all pairs (incremental)
+    if new_ids and existing_ids_in_cache:
+        msg = (
+            f"Corr cache: {len(existing_ids_in_cache)} cached, "
+            f"{len(new_ids)} new — incremental computation"
+        )
+        logger.info(msg)
+        print(f"  {msg}")
+
     from scipy.stats import spearmanr
 
-    corr_sum = np.zeros((n_factors, n_factors))
-    n_valid = np.zeros((n_factors, n_factors))
+    # Full computation for new factors vs all factors
+    compute_ids = matched_ids  # need all for cross-section alignment
+    n_compute = len(compute_ids)
+
+    corr_sum = np.zeros((n_compute, n_compute))
+    n_valid = np.zeros((n_compute, n_compute))
 
     for t in common_idx:
-        # Get cross-section at time t for each factor
         cs_data = {}
-        for fid in matched_ids:
+        for fid in compute_ids:
             row = all_factor_panels[fid].loc[t].dropna()
             cs_data[fid] = row
 
-        # Need at least 5 common assets
         common_assets = None
         for fid, row in cs_data.items():
             if common_assets is None:
@@ -903,27 +1008,71 @@ def compute_factor_correlation(
 
         common_assets_list = sorted(common_assets)
 
-        # Build matrix: factors × assets
-        cs_matrix = np.column_stack([
-            cs_data[fid].loc[common_assets_list].values
-            for fid in matched_ids
-        ])
+        if new_ids and cached_corr is not None:
+            # Incremental: only compute new factor columns
+            new_indices = [compute_ids.index(fid) for fid in new_ids]
+            all_vectors = {
+                fid: cs_data[fid].loc[common_assets_list].values
+                for fid in compute_ids
+            }
+            for ni in new_indices:
+                new_fid = compute_ids[ni]
+                new_vec = all_vectors[new_fid]
+                for j, other_fid in enumerate(compute_ids):
+                    if j == ni:
+                        corr_sum[ni, j] += 1.0
+                        n_valid[ni, j] += 1
+                        continue
+                    other_vec = all_vectors[other_fid]
+                    rho_val, _ = spearmanr(new_vec, other_vec)
+                    if not np.isnan(rho_val):
+                        corr_sum[ni, j] += rho_val
+                        corr_sum[j, ni] += rho_val
+                        n_valid[ni, j] += 1
+                        n_valid[j, ni] += 1
+        else:
+            # Full computation
+            cs_matrix = np.column_stack([
+                cs_data[fid].loc[common_assets_list].values
+                for fid in compute_ids
+            ])
+            rho, _ = spearmanr(cs_matrix)
+            if rho.ndim == 0:
+                rho = np.array([[1.0, float(rho)], [float(rho), 1.0]])
 
-        # Spearman rank correlation for this cross-section
-        rho, _ = spearmanr(cs_matrix)
-        if rho.ndim == 0:
-            # Only 2 factors
-            rho = np.array([[1.0, float(rho)], [float(rho), 1.0]])
+            valid_mask = ~np.isnan(rho)
+            corr_sum[valid_mask] += rho[valid_mask]
+            n_valid[valid_mask] += 1
 
-        valid_mask = ~np.isnan(rho)
-        corr_sum[valid_mask] += rho[valid_mask]
-        n_valid[valid_mask] += 1
-
-    # Average
     with np.errstate(invalid="ignore"):
         avg_corr = np.where(n_valid > 0, corr_sum / n_valid, 0.0)
 
-    corr_df = pd.DataFrame(avg_corr, index=matched_ids, columns=matched_ids)
+    new_corr = pd.DataFrame(avg_corr, index=compute_ids, columns=compute_ids)
+
+    # Merge with cached correlation matrix
+    if cached_corr is not None and existing_ids_in_cache:
+        # Overlay: keep cached values for existing×existing pairs,
+        # use new values for new×any pairs
+        merged = cached_corr.reindex(
+            index=matched_ids, columns=matched_ids, fill_value=0.0,
+        ).copy()
+        for ni in new_ids:
+            if ni in new_corr.index:
+                for fid in matched_ids:
+                    if fid in new_corr.columns:
+                        merged.loc[ni, fid] = new_corr.loc[ni, fid]
+                        merged.loc[fid, ni] = new_corr.loc[ni, fid]
+        corr_df = merged
+    else:
+        corr_df = new_corr
+
+    # Save correlation cache
+    if corr_cache_file is not None:
+        try:
+            corr_df.to_parquet(corr_cache_file)
+        except Exception as e:
+            logger.warning("Corr cache write failed: %s", e)
+
     if return_panels:
         return corr_df, all_factor_panels
     return corr_df

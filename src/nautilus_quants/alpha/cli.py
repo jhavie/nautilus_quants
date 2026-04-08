@@ -1430,6 +1430,7 @@ def promote(config_path: Path) -> None:
         # ── [dedup] ──
         click.echo()
         corr_matrix = None
+        factor_panels: dict[str, object] | None = None
         if scoring_cfg.dedup.enabled:
             # Fingerprint dedup
             click.echo("[dedup] Fingerprint dedup...")
@@ -1472,9 +1473,10 @@ def promote(config_path: Path) -> None:
             try:
                 target_db_for_corr = RegistryDatabase(Path(target_db_path))
                 try:
-                    corr_matrix = compute_factor_correlation(
+                    corr_matrix, factor_panels = compute_factor_correlation(
                         all_corr_ids, scoring_cfg,
                         registry_dbs=[source_db, target_db_for_corr],
+                        return_panels=True,
                     )
                 finally:
                     target_db_for_corr.close()
@@ -1565,9 +1567,10 @@ def promote(config_path: Path) -> None:
 
         # ── [clustering] ──
         click.echo()
-        factor_panels: dict[str, object] | None = None
         if scoring_cfg.clustering.enabled:
-            click.echo("[clustering] HDBSCAN + PCA...")
+            algo = scoring_cfg.clustering.algorithm
+            comp = scoring_cfg.clustering.composition_method
+            click.echo(f"[clustering] {algo} + {comp}...")
             # Need corr matrix + factor panels — compute if dedup was skipped
             if corr_matrix is None or corr_matrix.empty:
                 click.echo("  Computing correlation matrix for clustering...")
@@ -1611,17 +1614,20 @@ def promote(config_path: Path) -> None:
                 )
                 cluster_cfg = ClusterConfig(
                     enabled=True,
-                    min_cluster_size=scoring_cfg.clustering.min_cluster_size,
-                    cluster_selection_method=scoring_cfg.clustering.cluster_selection_method,
-                    min_samples=(
-                        scoring_cfg.clustering.min_samples
-                        if scoring_cfg.clustering.min_samples
-                        else None
-                    ),
+                    algorithm=scoring_cfg.clustering.algorithm,
                     composition_method=scoring_cfg.clustering.composition_method,
                     single_factor_passthrough=scoring_cfg.clustering.single_factor_passthrough,
+                    noise_passthrough=scoring_cfg.clustering.noise_passthrough,
                     super_alpha_prefix=scoring_cfg.clustering.super_alpha_prefix,
                     component_status=scoring_cfg.clustering.component_status,
+                    # HDBSCAN
+                    min_cluster_size=scoring_cfg.clustering.min_cluster_size,
+                    cluster_selection_method=scoring_cfg.clustering.cluster_selection_method,
+                    min_samples=scoring_cfg.clustering.min_samples or None,
+                    # Agglomerative
+                    linkage=scoring_cfg.clustering.linkage,
+                    distance_threshold=scoring_cfg.clustering.distance_threshold,
+                    abs_correlation=scoring_cfg.clustering.abs_correlation,
                 )
 
                 super_alphas, noise = build_super_alphas(
@@ -1651,9 +1657,48 @@ def promote(config_path: Path) -> None:
                 except Exception as e:
                     click.echo(f"  Warning: Heatmap failed: {e}", err=True)
 
+                # Save cluster assignment CSV
+                cluster_csv_path = diag_dir / f"cluster_assignments_{timestamp}.csv"
+                rows = []
+                for sa in super_alphas:
+                    for member in sa.members:
+                        rows.append({
+                            "factor_id": member,
+                            "super_alpha": sa.name,
+                            "method": sa.method,
+                            "weight": sa.weights.get(member, 0.0),
+                            "cluster_id": sa.cluster_id,
+                            "tags": "|".join(sa.tags),
+                        })
+                for nid in noise:
+                    rows.append({
+                        "factor_id": nid,
+                        "super_alpha": "",
+                        "method": "noise_discarded",
+                        "weight": 0.0,
+                        "cluster_id": -1,
+                        "tags": "",
+                    })
+                import csv as _csv
+                with open(cluster_csv_path, "w", newline="") as f:
+                    writer = _csv.DictWriter(f, fieldnames=rows[0].keys())
+                    writer.writeheader()
+                    writer.writerows(rows)
+                click.echo(f"  Saved: {cluster_csv_path}")
+
+                n_passthrough = sum(
+                    1 for sa in super_alphas if sa.method == "passthrough"
+                )
+                n_composed = len(super_alphas) - n_passthrough
+                noise_msg = (
+                    f"{len(noise)} noise discarded"
+                    if noise
+                    else f"{n_passthrough} noise passthrough"
+                )
                 click.echo(
-                    f"  {len(super_alphas)} Super Alphas, "
-                    f"{len(noise)} noise discarded",
+                    f"  {len(super_alphas)} Super Alphas "
+                    f"({n_composed} composed, {n_passthrough} passthrough), "
+                    f"{noise_msg}",
                 )
                 for sa in super_alphas:
                     click.echo(
