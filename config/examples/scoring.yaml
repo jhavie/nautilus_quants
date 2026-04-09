@@ -47,14 +47,14 @@ scoring:
 # ── [dedup] ──
 # Fingerprint exact dedup + Spearman correlation greedy selection.
 dedup:
-  enabled: false                  # false = skip dedup + greedy
+  enabled: true                  # false = skip dedup + greedy
   fingerprint_threshold: 1.0e-3
-  max_corr: 0.85
+  max_corr: 0.3
 
 # ── [clustering] ──
 # Auto-detect factor clusters, compose Super Alphas via PCA/equal/ICIR.
 clustering:
-  enabled: true
+  enabled: false
   abs_correlation: true
   algorithm: "agglomerative"       # "hdbscan" | "agglomerative"
   composition_method: "pca"        # "pca" | "equal" | "icir"

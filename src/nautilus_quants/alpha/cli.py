@@ -1569,6 +1569,7 @@ def promote(config_path: Path) -> None:
             ]
 
         # ── [clustering] ──
+        super_alphas: list | None = None
         click.echo()
         if scoring_cfg.clustering.enabled:
             algo = scoring_cfg.clustering.algorithm
@@ -1715,13 +1716,192 @@ def promote(config_path: Path) -> None:
 
         # ── [orthogonalization] ──
         click.echo()
-        if scoring_cfg.orthogonalization.enabled:
-            click.echo("[orthogonalization] Löwdin...")
-            click.echo("  (S^{-1/2} computation — to be applied by regime command)")
-            # TODO: compute S^{-1/2}, save to diag_dir
-            click.echo(f"  Output dir: {diag_dir}")
-        else:
+        if not scoring_cfg.orthogonalization.enabled:
             click.echo("[orthogonalization] — SKIPPED")
+        elif factor_panels is None:
+            click.echo(
+                "[orthogonalization] — SKIPPED "
+                "(factor_panels unavailable; "
+                "re-run with dedup or clustering enabled)",
+                err=True,
+            )
+        else:
+            click.echo("[orthogonalization] Löwdin...")
+            import csv as _csv
+
+            import numpy as _np
+            from nautilus_quants.alpha.registry.orthogonalization import (
+                OrthConfig,
+                OrthResult,
+                orthogonalize_factor_weights,
+            )
+
+            typed_panels: dict[str, pd.DataFrame] = (
+                factor_panels  # type: ignore[assignment]
+            )
+            orth_cfg = OrthConfig(
+                enabled=True,
+                method=scoring_cfg.orthogonalization.method,
+                min_eigenvalue=scoring_cfg.orthogonalization.min_eigenvalue,
+                max_condition_number=(
+                    scoring_cfg.orthogonalization.max_condition_number
+                ),
+            )
+
+            orth_result: OrthResult | None = None
+
+            if super_alphas is not None and len(super_alphas) >= 2:
+                # Inter-SA orthogonalization:
+                # 1. Compose each SA's panel from member weights
+                # 2. Löwdin across SA composite panels
+                sa_panels: dict[str, pd.DataFrame] = {}
+                for sa in super_alphas:
+                    panels_for_sa = [
+                        typed_panels[fid] * sa.weights.get(fid, 0.0)
+                        for fid in sa.members
+                        if fid in typed_panels
+                    ]
+                    if not panels_for_sa:
+                        continue
+                    composite = panels_for_sa[0]
+                    for p in panels_for_sa[1:]:
+                        composite = composite.add(p, fill_value=0.0)
+                    sa_panels[sa.name] = composite
+
+                sa_ids = list(sa_panels.keys())
+                if len(sa_ids) < 2:
+                    click.echo("  Skipped: <2 Super Alphas with panels")
+                else:
+                    n_sa = len(sa_ids)
+                    sa_weights = {sid: 1.0 / n_sa for sid in sa_ids}
+                    click.echo(
+                        f"  Inter-SA: {n_sa} Super Alphas, "
+                        f"equal initial weights",
+                    )
+                    try:
+                        orth_result = orthogonalize_factor_weights(
+                            factor_ids=sa_ids,
+                            factor_panels=sa_panels,
+                            original_weights=sa_weights,
+                            config=orth_cfg,
+                        )
+                    except ValueError as exc:
+                        click.echo(
+                            f"  Warning: inter-SA: {exc}", err=True,
+                        )
+            elif super_alphas is not None and len(super_alphas) < 2:
+                click.echo("  Skipped: <2 Super Alphas")
+            else:
+                # No clustering — global orthogonalization
+                available_ids = [
+                    f for f in selected_ids if f in typed_panels
+                ]
+                if len(available_ids) < 2:
+                    click.echo("  Skipped: <2 factors with panels")
+                else:
+                    if "final_score" in df.columns:
+                        scores_s = df.loc[
+                            df.index.isin(available_ids), "final_score"
+                        ].clip(lower=0)
+                        total = scores_s.sum()
+                        n = len(available_ids)
+                        global_weights = {
+                            fid: (
+                                float(scores_s.get(fid, 1.0 / n))
+                                / total
+                                if total > 0
+                                else 1.0 / n
+                            )
+                            for fid in available_ids
+                        }
+                    else:
+                        n = len(available_ids)
+                        global_weights = {
+                            fid: 1.0 / n for fid in available_ids
+                        }
+
+                    global_panels = {
+                        fid: typed_panels[fid] for fid in available_ids
+                    }
+                    click.echo(
+                        f"  Global: {len(available_ids)} factors",
+                    )
+                    try:
+                        orth_result = orthogonalize_factor_weights(
+                            factor_ids=available_ids,
+                            factor_panels=global_panels,
+                            original_weights=global_weights,
+                            config=orth_cfg,
+                        )
+                    except ValueError as exc:
+                        click.echo(
+                            f"  Warning: global: {exc}", err=True,
+                        )
+
+            # Print summary + save diagnostics
+            if orth_result is not None:
+                click.echo(
+                    f"  cond={orth_result.condition_number:.2f}  "
+                    f"eig=[{orth_result.eigenvalues.min():.4f}"
+                    f"..{orth_result.eigenvalues.max():.4f}]",
+                )
+                for fid in orth_result.orth_weights:
+                    ov = orth_result.overlap_scores.get(fid, 0.0)
+                    flag = "  [LOW]" if ov < 0.90 else ""
+                    click.echo(
+                        f"    {fid}: "
+                        f"w={orth_result.original_weights.get(fid, 0):.3f}"
+                        f" -> {orth_result.orth_weights.get(fid, 0):.3f}"
+                        f"  overlap={ov:.3f}{flag}",
+                    )
+
+                # Save S^{-1/2} matrix
+                matrix_path = diag_dir / "lowdin_transform.npy"
+                _np.save(str(matrix_path), orth_result.transform_matrix)
+                click.echo(f"  Saved: {matrix_path}")
+
+                # Save weights + overlap CSV
+                weights_csv = diag_dir / "orth_weights.csv"
+                w_rows = [
+                    {
+                        "factor_id": fid,
+                        "original_weight": orth_result.original_weights.get(
+                            fid, 0.0,
+                        ),
+                        "orth_weight": orth_result.orth_weights.get(
+                            fid, 0.0,
+                        ),
+                        "overlap_score": orth_result.overlap_scores.get(
+                            fid, 0.0,
+                        ),
+                    }
+                    for fid in orth_result.orth_weights
+                ]
+                with open(weights_csv, "w", newline="") as fh:
+                    writer = _csv.DictWriter(
+                        fh,
+                        fieldnames=[
+                            "factor_id", "original_weight",
+                            "orth_weight", "overlap_score",
+                        ],
+                    )
+                    writer.writeheader()
+                    writer.writerows(w_rows)
+                click.echo(f"  Saved: {weights_csv}")
+
+                # Save eigenvalues CSV
+                eig_csv = diag_dir / "lowdin_eigenvalues.csv"
+                with open(eig_csv, "w", newline="") as fh:
+                    writer = _csv.DictWriter(
+                        fh, fieldnames=["index", "eigenvalue"],
+                    )
+                    writer.writeheader()
+                    for i, ev in enumerate(orth_result.eigenvalues):
+                        writer.writerow(
+                            {"index": i, "eigenvalue": float(ev)},
+                        )
+                click.echo(f"  Saved: {eig_csv}")
+            click.echo(f"  Output dir: {diag_dir}")
 
         # ── Save scores CSV (only when scoring enabled) ──
         if scoring_cfg.weights.enabled:
