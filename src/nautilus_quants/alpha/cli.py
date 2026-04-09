@@ -408,6 +408,55 @@ def analyze(
                     f"{len(ic_results)} factors)",
                 )
 
+        # 9b. Persist quantile returns + spread returns as Parquet
+        if al_results and ic_results:
+            import alphalens.performance as al_perf
+
+            periods_saved = set()
+            for period in sorted(periods_in_ic):
+                qret_frames: dict[str, pd.DataFrame] = {}
+                spread_frames: dict[str, pd.Series] = {}
+
+                for fname, al_result in al_results.items():
+                    fd = al_result["factor_data"]
+                    try:
+                        mean_ret, std_err = al_perf.mean_return_by_quantile(
+                            fd, by_date=True,
+                        )
+                        if period in mean_ret.columns.get_level_values(0):
+                            qret_frames[fname] = mean_ret[period]
+
+                        spread, _ = al_perf.compute_mean_returns_spread(
+                            mean_ret,
+                            upper_quant=fd["factor_quantile"].max(),
+                            lower_quant=fd["factor_quantile"].min(),
+                            std_err=std_err,
+                        )
+                        if period in spread.columns:
+                            spread_frames[fname] = spread[period]
+                    except Exception:
+                        continue
+
+                if qret_frames:
+                    qret_panel = pd.concat(qret_frames, axis=1)
+                    qret_panel.to_parquet(
+                        output_dir / f"quantile_returns_{period}.parquet",
+                    )
+                    periods_saved.add(period)
+
+                if spread_frames:
+                    spread_panel = pd.DataFrame(spread_frames)
+                    spread_panel.to_parquet(
+                        output_dir / f"spread_returns_{period}.parquet",
+                    )
+
+            if not quiet and periods_saved:
+                click.echo(
+                    f"  Quantile & spread returns saved: "
+                    f"{len(periods_saved)} periods × "
+                    f"{len(al_results)} factors",
+                )
+
         # Generate summary
         if ic_results:
             report_gen.generate_summary(ic_results, output_dir, factor_series=factor_series)
