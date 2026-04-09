@@ -1335,7 +1335,11 @@ def promote(config_path: Path) -> None:
       python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml
     """
     import warnings
-    from datetime import datetime, timezone
+
+    from nautilus_quants.backtest.utils.reporting import (
+        create_output_directory,
+        generate_run_id,
+    )
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -1353,7 +1357,7 @@ def promote(config_path: Path) -> None:
     )
 
     start_time = time.time()
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_id = generate_run_id()
 
     try:
         scoring_cfg = load_scoring_config(config_path)
@@ -1367,8 +1371,7 @@ def promote(config_path: Path) -> None:
         source_db_path = scoring_cfg.promote.source_db_path
         target_db_path = scoring_cfg.promote.target_db_path
         competitive = scoring_cfg.promote.competitive
-        diag_dir = Path(scoring_cfg.diagnostics.output_dir)
-        diag_dir.mkdir(parents=True, exist_ok=True)
+        diag_dir = create_output_directory(scoring_cfg.diagnostics.output_dir, run_id)
 
         if not source_db_path:
             click.echo("Error: promote.source_db_path required.", err=True)
@@ -1486,7 +1489,7 @@ def promote(config_path: Path) -> None:
                         f"  Matrix: {corr_matrix.shape[0]}×{corr_matrix.shape[1]}",
                     )
                     # Save CSV
-                    corr_csv = diag_dir / f"correlation_matrix_{timestamp}.csv"
+                    corr_csv = diag_dir / "correlation_matrix.csv"
                     corr_matrix.to_csv(corr_csv)
                     click.echo(f"  Saved: {corr_csv}")
 
@@ -1505,7 +1508,7 @@ def promote(config_path: Path) -> None:
                         )
                         ax.set_title("Factor Spearman Correlation")
                         plt.tight_layout()
-                        hm = diag_dir / f"correlation_heatmap_{timestamp}.png"
+                        hm = diag_dir / "correlation_heatmap.png"
                         fig.savefig(hm, dpi=100)
                         plt.close(fig)
                         click.echo(f"  Saved: {hm}")
@@ -1647,7 +1650,7 @@ def promote(config_path: Path) -> None:
                     ],
                     cluster_cfg,
                 )
-                heatmap_path = diag_dir / f"cluster_heatmap_{timestamp}.png"
+                heatmap_path = diag_dir / "cluster_heatmap.png"
                 try:
                     plot_cluster_heatmap(
                         corr_matrix, clusters_for_plot, noise_for_plot,
@@ -1658,7 +1661,7 @@ def promote(config_path: Path) -> None:
                     click.echo(f"  Warning: Heatmap failed: {e}", err=True)
 
                 # Save cluster assignment CSV
-                cluster_csv_path = diag_dir / f"cluster_assignments_{timestamp}.csv"
+                cluster_csv_path = diag_dir / "cluster_assignments.csv"
                 rows = []
                 for sa in super_alphas:
                     for member in sa.members:
@@ -1722,7 +1725,7 @@ def promote(config_path: Path) -> None:
 
         # ── Save scores CSV (only when scoring enabled) ──
         if scoring_cfg.weights.enabled:
-            scores_csv = diag_dir / f"factor_scores_{timestamp}.csv"
+            scores_csv = diag_dir / "factor_scores.csv"
             save_cols = [
                 c for c in [
                     "final_score", "avg_period_score", "pred_score",
