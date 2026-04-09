@@ -80,7 +80,7 @@ orthogonalization:
 
 # ── Diagnostics ──
 diagnostics:
-  output_dir: "logs/promote"
+  output_dir: "logs/alpha_promote"
   correlation_heatmap: true
   cluster_report: true
   score_super_alphas: true
@@ -98,7 +98,7 @@ promote:
 
 # ── Data paths (for correlation computation) ──
 data:
-  panels_cache_dir: "logs/promote/panels_cache"
+  panels_cache_dir: "data/factor_cache/panels_promote"
   catalog_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
   bar_spec: "4h"
   # Extra data sources (FR, OI, quote_volume, btc_close, eth_close)

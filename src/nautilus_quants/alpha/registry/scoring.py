@@ -118,7 +118,7 @@ class OrthogonalizationConfig:
 class DiagnosticsConfig:
     """Diagnostic output configuration."""
 
-    output_dir: str = "logs/promote"
+    output_dir: str = "logs/alpha_promote"
     correlation_heatmap: bool = True
     cluster_report: bool = True
     score_super_alphas: bool = True
@@ -252,7 +252,7 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             max_condition_number=ot.get("max_condition_number", 1e6),
         ),
         diagnostics=DiagnosticsConfig(
-            output_dir=dg.get("output_dir", "logs/promote"),
+            output_dir=dg.get("output_dir", "logs/alpha_promote"),
             correlation_heatmap=dg.get("correlation_heatmap", True),
             cluster_report=dg.get("cluster_report", True),
             score_super_alphas=dg.get("score_super_alphas", True),
