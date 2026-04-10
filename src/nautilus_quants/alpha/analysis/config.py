@@ -7,6 +7,12 @@ from pathlib import Path
 
 import yaml
 
+from nautilus_quants.factors.engine.extra_data import (
+    ExtraDataConfig,
+    load_extra_data_config,
+    parse_extra_data_raw,
+)
+
 
 @dataclass(frozen=True)
 class JumpModelConfig:
@@ -128,7 +134,11 @@ class AlphaAnalysisConfig:
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     regime: RegimeConfig | None = None
 
-    # FR/OI data injection
+    # Unified extra data (replaces funding_rate/oi_data_path)
+    extra_data_path: str = ""
+    extra_data: list[ExtraDataConfig] = field(default_factory=list)
+
+    # Deprecated: kept for backward compatibility
     funding_rate: bool = False
     oi_data_path: str = ""
     oi_timeframe: str = "4h"
@@ -165,6 +175,29 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
     # Parse registry config
     reg = raw.get("registry", {}) or {}
 
+    # Load extra_data: file path takes precedence, then inline, then legacy
+    extra_data_path = raw.get("extra_data_path", "")
+    if extra_data_path:
+        extra_data = load_extra_data_config(extra_data_path)
+    elif raw.get("extra_data"):
+        extra_data = parse_extra_data_raw(raw["extra_data"])
+    else:
+        # Backward compat: convert legacy fields to ExtraDataConfig
+        extra_data = []
+        if raw.get("funding_rate"):
+            extra_data.append(ExtraDataConfig(
+                name="funding_rate",
+                source="catalog",
+                path=raw.get("catalog_path", ""),
+            ))
+        if raw.get("oi_data_path"):
+            extra_data.append(ExtraDataConfig(
+                name="open_interest",
+                source="parquet",
+                path=raw["oi_data_path"],
+                timeframe=raw.get("oi_timeframe", "4h"),
+            ))
+
     return AlphaAnalysisConfig(
         catalog_path=raw["catalog_path"],
         factor_config_path=raw["factor_config_path"],
@@ -181,6 +214,8 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         factor_cache_path=raw.get("factor_cache_path", ""),
         metrics=_parse_metrics_config(raw.get("metrics", {})),
         regime=_parse_regime_config(raw.get("regime")),
+        extra_data_path=extra_data_path,
+        extra_data=extra_data,
         funding_rate=raw.get("funding_rate", False),
         oi_data_path=raw.get("oi_data_path", ""),
         oi_timeframe=raw.get("oi_timeframe", "4h"),

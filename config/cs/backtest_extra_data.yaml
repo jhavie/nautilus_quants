@@ -1,13 +1,15 @@
-# CS Strategy Backtest Configuration
-# FMZ 逻辑 via DecisionEngineActor (NETTING mode, one-shot flip)
+# CS Strategy Backtest — Extra Data Sources E2E Test
+# Tests all 5 extra data sources: FR, OI, quote_volume, btc_close, eth_close
 #
-# 125 Symbols
-# 时间范围: 2022-01-01 ~ 2022-03-31
+# 67 symbols with confirmed Bybit OI/FR data
+# 时间范围: 2025-01-01 ~ 2025-03-31
 # 初始资金: 10000 USDT
-# 持仓数量: 多空各40个
-# 单品种仓位: 300 USDT
-# 调仓周期: 每根 bar (4h)
-# 因子: alpha044 (correlation(high, rank(volume), 5))
+# 持仓数量: 多空各15个
+# 单品种仓位: 200 USDT
+# 因子: factors_extra_data.yaml (13 factors using all 5 data sources)
+#
+# Usage:
+#   python -m nautilus_quants.backtest run config/cs/backtest_extra_data.yaml
 
 registry:
   env: test
@@ -27,46 +29,30 @@ data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
     data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "4h"
+    # 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+    # (10 delisted/renamed on Bybit excluded)
     instrument_ids: &instrument_ids
-      - "1000SHIBUSDT.BINANCE"
-      - "1000XECUSDT.BINANCE"
       - "1INCHUSDT.BINANCE"
       - "AAVEUSDT.BINANCE"
       - "ADAUSDT.BINANCE"
       - "ALGOUSDT.BINANCE"
       - "ALICEUSDT.BINANCE"
-      - "ALPHAUSDT.BINANCE"
       - "ANKRUSDT.BINANCE"
-      - "ANTUSDT.BINANCE"
-      - "ARPAUSDT.BINANCE"
       - "ARUSDT.BINANCE"
-      - "ATAUSDT.BINANCE"
       - "ATOMUSDT.BINANCE"
-      - "AUDIOUSDT.BINANCE"
       - "AVAXUSDT.BINANCE"
       - "AXSUSDT.BINANCE"
-      - "BAKEUSDT.BINANCE"
-      - "BALUSDT.BINANCE"
-      - "BANDUSDT.BINANCE"
       - "BATUSDT.BINANCE"
       - "BCHUSDT.BINANCE"
-      - "BELUSDT.BINANCE"
-      - "BLZUSDT.BINANCE"
       - "BNBUSDT.BINANCE"
       - "BTCUSDT.BINANCE"
       - "C98USDT.BINANCE"
-      - "CELOUSDT.BINANCE"
-      - "CELRUSDT.BINANCE"
       - "CHRUSDT.BINANCE"
       - "CHZUSDT.BINANCE"
       - "COMPUSDT.BINANCE"
       - "COTIUSDT.BINANCE"
       - "CRVUSDT.BINANCE"
-      - "CTSIUSDT.BINANCE"
       - "DASHUSDT.BINANCE"
-      - "DEFIUSDT.BINANCE"
-      - "DENTUSDT.BINANCE"
-      - "DGBUSDT.BINANCE"
       - "DOGEUSDT.BINANCE"
       - "DOTUSDT.BINANCE"
       - "DUSKUSDT.BINANCE"
@@ -77,108 +63,58 @@ data:
       - "ETCUSDT.BINANCE"
       - "ETHUSDT.BINANCE"
       - "FILUSDT.BINANCE"
-      - "FLMUSDT.BINANCE"
-      - "FTMUSDT.BINANCE"
       - "GALAUSDT.BINANCE"
       - "GRTUSDT.BINANCE"
-      - "GTCUSDT.BINANCE"
       - "HBARUSDT.BINANCE"
-      - "HOTUSDT.BINANCE"
-      - "ICXUSDT.BINANCE"
       - "IOSTUSDT.BINANCE"
       - "IOTAUSDT.BINANCE"
       - "IOTXUSDT.BINANCE"
-      - "KAVAUSDT.BINANCE"
-      - "KLAYUSDT.BINANCE"
       - "KSMUSDT.BINANCE"
-      - "LINAUSDT.BINANCE"
       - "LINKUSDT.BINANCE"
       - "LPTUSDT.BINANCE"
       - "LRCUSDT.BINANCE"
       - "LTCUSDT.BINANCE"
       - "MANAUSDT.BINANCE"
       - "MASKUSDT.BINANCE"
-      - "MATICUSDT.BINANCE"
-      - "MKRUSDT.BINANCE"
-      - "MTLUSDT.BINANCE"
       - "NEARUSDT.BINANCE"
-      - "NEOUSDT.BINANCE"
-      - "NKNUSDT.BINANCE"
-      - "OCEANUSDT.BINANCE"
-      - "OGNUSDT.BINANCE"
-      - "OMGUSDT.BINANCE"
       - "ONEUSDT.BINANCE"
-      - "ONTUSDT.BINANCE"
       - "PEOPLEUSDT.BINANCE"
       - "QTUMUSDT.BINANCE"
-      - "REEFUSDT.BINANCE"
-      - "RENUSDT.BINANCE"
-      - "RLCUSDT.BINANCE"
-      - "ROSEUSDT.BINANCE"
       - "RSRUSDT.BINANCE"
       - "RUNEUSDT.BINANCE"
-      - "RVNUSDT.BINANCE"
       - "SANDUSDT.BINANCE"
       - "SFPUSDT.BINANCE"
-      - "SKLUSDT.BINANCE"
       - "SNXUSDT.BINANCE"
       - "SOLUSDT.BINANCE"
-      - "STMXUSDT.BINANCE"
       - "STORJUSDT.BINANCE"
       - "SUSHIUSDT.BINANCE"
       - "SXPUSDT.BINANCE"
       - "THETAUSDT.BINANCE"
-      - "TRBUSDT.BINANCE"
       - "TRXUSDT.BINANCE"
       - "UNIUSDT.BINANCE"
       - "VETUSDT.BINANCE"
-      - "WAVESUSDT.BINANCE"
-      - "XEMUSDT.BINANCE"
       - "XLMUSDT.BINANCE"
-      - "XMRUSDT.BINANCE"
       - "XRPUSDT.BINANCE"
       - "XTZUSDT.BINANCE"
       - "YFIUSDT.BINANCE"
       - "ZECUSDT.BINANCE"
       - "ZENUSDT.BINANCE"
-      - "ZILUSDT.BINANCE"
-      - "ZRXUSDT.BINANCE"
     start_time: "2022-01-01"
     end_time: "2022-12-31"
 
 engine:
-  trader_id: "BACKTESTER-CS-001"
+  trader_id: "BACKTESTER-EXTRA-DATA-001"
   logging:
     log_level: "INFO"
   risk_engine:
     bypass: true
 
-  # controller:
-    # controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
-    # config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
-    # config:
-    #   interval: "1h"
-    #   venue_name: "BINANCE"
-    #   currency: "USDT"
-    #   min_equity_ratio: 0.5
-    #   guarded_strategy_ids: []
-    #   drawdown_rules:
-    #     - name: "monthly"
-    #       drawdown_window: "30d"
-    #       drawdown_ratio: 0.8
-    #       cooldown_period: "72h"
-    #     - name: "daily"
-    #       drawdown_window: "1d"
-    #       drawdown_ratio: 0.95
-    #       cooldown_period: "24h"
-
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
-        factor_config_path: "config/cs/factors_alpha101.yaml"
+        factor_config_path: "config/cs/factors_extra_data.yaml"
         extra_data_path: "config/cs/extra_data.yaml"
-        factor_cache_path: "data/factor_cache/cache_alpha101"
         interval: "4h"
         signal_prefix: "factor"
         max_history: 0
@@ -195,36 +131,14 @@ engine:
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
         composite_factor: "composite"
-        rebalance_interval: 2
-
-        # =============================================================
-        # Selection Policy — uncomment ONE block below
-        # =============================================================
-
-        # --- [1] FMZSelectionPolicy (截面排序, 最小N做多/最大N做空) ---
-        # selection_policy: "FMZSelectionPolicy"
-        # position_mode: "fixed"
-        # position_value: 300
-        # n_long: 40
-        # n_short: 40
-
-        # --- [2] TopKDropoutSelectionPolicy (渐进换仓, 降低换手率) ---
+        rebalance_interval: 1
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
-        position_value: 250
-        topk_long: 40
-        topk_short: 40
-        n_drop_long: 4
-        n_drop_short: 4
-
-        # --- [3] WorldQuantSelectionPolicy (BRAIN 7-step, 异质权重) ---
-        # selection_policy: "WorldQuantSelectionPolicy"
-        # position_mode: "weighted"
-        # total_capital: 10000
-        # delay: 0
-        # decay: 4
-        # neutralization: "MARKET"
-        # truncation: 0.0
+        position_value: 400
+        topk_long: 20
+        topk_short: 20
+        n_drop_long: 2
+        n_drop_short: 2
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
@@ -232,19 +146,15 @@ engine:
       config:
         instrument_ids: *instrument_ids
         execution_policy: "MarketExecutionPolicy"
-        # bracket:
-        #   take_profit_pct: 0.05
-        #   stop_loss_pct: 0.1
-
 
 report:
-  output_dir: "logs/performance"
+  output_dir: "logs/performance_extra_data"
   formats:
     - csv
     - html
   tearsheet:
     enabled: true
-    title: "CS Strategy Backtest (2022-01 to 2022-03)"
+    title: "Extra Data Sources E2E Backtest (2025-Q1, 67 coins)"
     theme: "nautilus"
     height: 1500
     charts:
@@ -255,16 +165,14 @@ report:
       - monthly_returns
       - distribution
       - rolling_sharpe
-      - yearly_returns
   quantstats:
     enabled: true
-    title: "CS Strategy QuantStats Analysis"
+    title: "Extra Data QuantStats Analysis"
     output_format:
       - html
-      - png
   position_viz:
     enabled: true
-    title: "CS Strategy Position Timeline"
+    title: "Extra Data Position Timeline"
     output_subdir: "echarts"
     chart_height: 500
     interval: "4h"

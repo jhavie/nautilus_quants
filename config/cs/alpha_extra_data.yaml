@@ -1,0 +1,115 @@
+# Alpha Factor Analysis — Extra Data Sources E2E Test
+# Tests all 5 extra data sources with factors_extra_data.yaml
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/cs/alpha_extra_data.yaml
+
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+
+# Data source (4h bars, same catalog as mining)
+catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+# Factor definition (13 factors using all 5 data sources)
+factor_config_path: "config/cs/factors_extra_data.yaml"
+
+# Unified extra data
+extra_data_path: "config/cs/extra_data.yaml"
+
+# 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+# (10 delisted/renamed on Bybit excluded)
+instrument_ids:
+  - "1INCHUSDT.BINANCE"
+  - "AAVEUSDT.BINANCE"
+  - "ADAUSDT.BINANCE"
+  - "ALGOUSDT.BINANCE"
+  - "ALICEUSDT.BINANCE"
+  - "ANKRUSDT.BINANCE"
+  - "ARUSDT.BINANCE"
+  - "ATOMUSDT.BINANCE"
+  - "AVAXUSDT.BINANCE"
+  - "AXSUSDT.BINANCE"
+  - "BATUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "BTCUSDT.BINANCE"
+  - "C98USDT.BINANCE"
+  - "CHRUSDT.BINANCE"
+  - "CHZUSDT.BINANCE"
+  - "COMPUSDT.BINANCE"
+  - "COTIUSDT.BINANCE"
+  - "CRVUSDT.BINANCE"
+  - "DASHUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "DUSKUSDT.BINANCE"
+  - "DYDXUSDT.BINANCE"
+  - "EGLDUSDT.BINANCE"
+  - "ENJUSDT.BINANCE"
+  - "ENSUSDT.BINANCE"
+  - "ETCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "FILUSDT.BINANCE"
+  - "GALAUSDT.BINANCE"
+  - "GRTUSDT.BINANCE"
+  - "HBARUSDT.BINANCE"
+  - "IOSTUSDT.BINANCE"
+  - "IOTAUSDT.BINANCE"
+  - "IOTXUSDT.BINANCE"
+  - "KSMUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "LPTUSDT.BINANCE"
+  - "LRCUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "MANAUSDT.BINANCE"
+  - "MASKUSDT.BINANCE"
+  - "NEARUSDT.BINANCE"
+  - "ONEUSDT.BINANCE"
+  - "PEOPLEUSDT.BINANCE"
+  - "QTUMUSDT.BINANCE"
+  - "RSRUSDT.BINANCE"
+  - "RUNEUSDT.BINANCE"
+  - "SANDUSDT.BINANCE"
+  - "SFPUSDT.BINANCE"
+  - "SNXUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "STORJUSDT.BINANCE"
+  - "SUSHIUSDT.BINANCE"
+  - "SXPUSDT.BINANCE"
+  - "THETAUSDT.BINANCE"
+  - "TRXUSDT.BINANCE"
+  - "UNIUSDT.BINANCE"
+  - "VETUSDT.BINANCE"
+  - "XLMUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "XTZUSDT.BINANCE"
+  - "YFIUSDT.BINANCE"
+  - "ZECUSDT.BINANCE"
+  - "ZENUSDT.BINANCE"
+
+# Analyze all 13 factors
+factors: []
+
+# Alphalens parameters (4h bars)
+periods: [1, 2, 3, 6]    # 4h, 8h, 12h, 24h
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
+
+charts:
+  - quantile_returns_bar
+  - monthly_ic_heatmap
+  - cumulative_returns
+  - cumulative_returns_long_short
+  - ic_histogram
+  - turnover
+
+output_dir: "logs/alpha_extra_data"
+output_format:
+  - png

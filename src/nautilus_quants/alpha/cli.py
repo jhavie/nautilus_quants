@@ -263,23 +263,28 @@ def analyze(
             _env = resolve_env(env_name, config.registry_env)
             _db = RegistryDatabase.for_environment(_env, config.registry_db_dir)
             already: set[str] = set()
-            for fname in list(factor_series.keys()):
-                fdef = factor_config.get_factor(fname)
-                if fdef is None:
-                    continue
-                try:
-                    h = _expr_hash(fdef.expression)
-                except Exception:
-                    continue
-                row = _db.fetch_one(
-                    "SELECT f.factor_id FROM factors f "
-                    "JOIN alpha_analysis_metrics m "
-                    "ON f.factor_id = m.factor_id "
-                    "WHERE f.expression_hash = ? LIMIT 1",
-                    [h],
-                )
-                if row is not None:
-                    already.add(fname)
+
+            try:
+                for fname in list(factor_series.keys()):
+                    fdef = factor_config.get_factor(fname)
+                    if fdef is None:
+                        continue
+                    try:
+                        h = _expr_hash(fdef.expression)
+                    except Exception:
+                        continue
+                    row = _db.fetch_one(
+                        "SELECT f.factor_id FROM factors f "
+                        "JOIN alpha_analysis_metrics m "
+                        "ON f.factor_id = m.factor_id "
+                        "WHERE f.expression_hash = ? LIMIT 1",
+                        [h],
+                    )
+                    if row is not None:
+                        already.add(fname)
+            except Exception:
+                # expression_hash column may not exist in older DBs — skip dedup
+                already = set()
             _db.close()
 
             if already:

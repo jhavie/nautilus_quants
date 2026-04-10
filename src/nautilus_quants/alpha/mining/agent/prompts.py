@@ -145,24 +145,42 @@ _CONSTRUCTION_RULES = """\
    - {window_guide}
    - **CRITICAL:** With 4h bars, funding_rate only changes every 2 bars (forward-filled).
 
-6. **Avoid strict equalities.** Use ranges instead of `==`:
+6. **Market factor variables:**
+   - btc_close/eth_close are broadcast (same value across all instruments)
+   - btc_beta measures how much an altcoin moves with BTC; high beta = high BTC sensitivity
+   - Use btc_beta for market-neutral strategies: `vector_neut(returns, btc_returns)`
+   - Combine beta with momentum: `cs_rank(btc_beta * returns)` (beta-weighted momentum)
+   - vwap deviation: `(close - vwap) / replace_zero(vwap)` (intraday mean reversion)
+
+7. **Avoid strict equalities.** Use ranges instead of `==`:
    - BAD:  `ts_min(low, 10) == delay(ts_min(low, 10), 1)`
    - GOOD: `abs(ts_min(low, 10) - delay(ts_min(low, 10), 1)) < ts_std(low, 20) * 0.1`
 
-7. **Expression complexity.** Aim for 2-4 operator nesting levels.
+8. **Expression complexity.** Aim for 2-4 operator nesting levels.
    - Too simple: `cs_rank(close)` (trivial, unlikely to have alpha)
    - Too complex: 6+ nested calls (overfitting risk, slow to compute)
 
-8. **Each factor must be independent.** Do not reference other factor names."""
+9. **Each factor must be independent.** Do not reference other factor names."""
 
 
 _AVAILABLE_VARIABLES = (
-    "close, open, high, low, volume, returns, funding_rate, open_interest\n"
+    "close, open, high, low, volume, returns, "
+    "funding_rate, open_interest, quote_volume, "
+    "btc_close, eth_close, btc_returns, eth_returns, "
+    "btc_vol, eth_vol, btc_beta, eth_beta, vwap\n"
     "- returns = delta(close,1)/delay(close,1), pre-computed\n"
-    "- funding_rate = 8-hour perpetual funding rate from Bybit "
-    "(typically ±0.01%, forward-filled across bars)\n"
-    "- open_interest = total open interest in base asset units from Bybit "
-    "(e.g. BTC quantity, 4h granularity)"
+    "- funding_rate = 8h perpetual funding rate (typically ±0.01%, forward-filled)\n"
+    "- open_interest = total open interest in base asset units (4h granularity)\n"
+    "- quote_volume = traded value in USDT (intra-bar turnover)\n"
+    "- vwap = quote_volume / volume, volume-weighted average price\n"
+    "- btc_close = BTC close price broadcast to all instruments\n"
+    "- eth_close = ETH close price broadcast to all instruments\n"
+    "- btc_returns = BTC log-returns, pre-computed\n"
+    "- eth_returns = ETH log-returns, pre-computed\n"
+    "- btc_vol = ts_std(btc_returns, 42), BTC 7-day realized volatility\n"
+    "- eth_vol = ts_std(eth_returns, 42), ETH 7-day realized volatility\n"
+    "- btc_beta = rolling beta to BTC (42 bars), measures sensitivity to BTC moves\n"
+    "- eth_beta = rolling beta to ETH (42 bars), measures sensitivity to ETH moves"
 )
 
 

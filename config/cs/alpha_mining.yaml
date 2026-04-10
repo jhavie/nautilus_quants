@@ -33,10 +33,8 @@ charts:
 catalog_path: "/Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/data/data_4years_4h/catalog"
 bar_spec: "4h"
 
-# FR/OI data injection
-funding_rate: true
-oi_data_path: "/Users/joe/Sync/worktrees/feature-039-funding-rate-open-interest/data/data_4years_4h/catalog"
-oi_timeframe: "4h"
+# Unified extra data (replaces legacy funding_rate/oi_data_path)
+extra_data_path: "config/cs/extra_data.yaml"
 
 # factor_config_path: auto-generated per round by miner
 # factors: auto-generated per round (empty = analyze all)

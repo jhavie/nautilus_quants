@@ -166,6 +166,43 @@ class Buffer:
         """Return number of known instruments."""
         return len(self._instruments)
 
+    def inject_staged_field(
+        self,
+        ts: int,
+        field_name: str,
+        source_instrument: str,
+        source_field: str = "close",
+    ) -> None:
+        """Copy one instrument's staged value to a new field for all instruments.
+
+        Must be called AFTER all instruments have reported for ``ts``
+        (staging complete) but BEFORE ``flush_timestamp(ts)``.  This
+        ensures broadcast values are correct and consistent across all
+        instruments at the same timestamp.
+
+        Parameters
+        ----------
+        ts : int
+            Timestamp (nanoseconds) in the staging area.
+        field_name : str
+            Target field name (e.g. "btc_close").
+        source_instrument : str
+            Instrument whose value to broadcast.
+        source_field : str
+            Field to read from the source instrument (default "close").
+        """
+        staged = self._staging.get(ts)
+        if not staged:
+            return
+        source_data = staged.get(source_instrument)
+        if source_data is None:
+            return
+        value = source_data.get(source_field)
+        if value is None:
+            return
+        for inst_data in staged.values():
+            inst_data[field_name] = value
+
     def reset(self) -> None:
         """Clear all data."""
         self._staging.clear()
