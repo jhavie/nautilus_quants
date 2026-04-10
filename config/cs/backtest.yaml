@@ -143,8 +143,8 @@ data:
       - "ZENUSDT.BINANCE"
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
-    start_time: "2024-01-01"
-    end_time: "2024-03-31"
+    start_time: "2022-01-01"
+    end_time: "2022-12-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"

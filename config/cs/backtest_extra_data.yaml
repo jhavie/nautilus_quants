@@ -100,7 +100,7 @@ data:
       - "ZECUSDT.BINANCE"
       - "ZENUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-01-31"
+    end_time: "2022-12-31"
 
 engine:
   trader_id: "BACKTESTER-EXTRA-DATA-001"
@@ -131,7 +131,7 @@ engine:
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
         composite_factor: "composite"
-        rebalance_interval: 2
+        rebalance_interval: 1
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
         position_value: 400

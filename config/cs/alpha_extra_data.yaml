@@ -94,7 +94,7 @@ instrument_ids:
 factors: []
 
 # Alphalens parameters (4h bars)
-periods: [1, 2, 6, 18]    # 4h, 8h, 24h, 72h
+periods: [1, 2, 3, 6]    # 4h, 8h, 12h, 24h
 quantiles: 5
 max_loss: 0.3
 filter_zscore: 20.0

@@ -94,7 +94,7 @@ factors:
 
   # ── BTC Beta Factors ──
   beta_momentum:
-    expression: "cs_rank(btc_beta * returns)"
+    expression: "cs_rank(-btc_beta * returns)"
     description: "Beta-weighted momentum: high-beta coins with positive returns"
     tags: ["beta", "momentum"]
 
@@ -124,6 +124,28 @@ factors:
     expression: "cs_rank(btc_beta * vwap_deviation)"
     description: "High-beta coins with VWAP deviation → amplified mean reversion"
     tags: ["beta", "vwap", "composite"]
+
+# Declarative composite: 3-factor low-correlation combination
+# Factor selection rationale (from IC/ICIR analysis + correlation matrix):
+#   - beta_momentum:    avg|ICIR|=0.080, IC<0 → negative weight (reversal signal)
+#   - oi_concentration: avg|ICIR|=0.055, IC>0 → positive weight (independent: corr=-0.030)
+#   - low_beta_alpha:   avg|ICIR|=0.046, IC>0 → positive weight (independent: corr=0.023/0.220)
+# Dropped: beta_residual (corr=0.838 w/ beta_momentum), vwap_mean_revert (corr=-0.945 w/ combo),
+#          beta_vwap_combo (redundant), eth_beta_spread (not significant), oi_flow (noise)
+# Weights: ICIR-proportional (0.080:0.055:0.046 → 0.44:0.30:0.26)
+composite:
+  name: composite
+  transform: normalize
+  weights:
+    beta_momentum: 0.50
+    vwap_mean_revert: 0.50
+# composite:
+#   name: composite
+#   transform: normalize
+#   weights:
+#     beta_momentum: -0.44
+#     oi_concentration: 0.30
+#     low_beta_alpha: 0.26
 
 performance:
   enable_timing: true
