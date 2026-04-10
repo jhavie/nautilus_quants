@@ -37,6 +37,7 @@ from nautilus_quants.factors.config import (
 from nautilus_quants.factors.engine.extra_data import (
     ExtraDataConfig,
     load_extra_data_config,
+    load_lookup,
 )
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
@@ -115,59 +116,6 @@ def _extract_bar_data(bar: Bar) -> dict[str, float]:
             except (TypeError, ValueError):
                 pass
     return data
-
-
-def _load_bar_field_lookup(
-    field_name: str,
-    catalog_path: str,
-    instruments: list[str],
-) -> dict[str, dict[int, float]]:
-    """Preload a bar field from catalog's binance_bar parquet into a lookup.
-
-    Returns {instrument_id: {ts_ns: value}} for per-bar injection.
-    """
-    import pyarrow.parquet as pq
-
-    binance_bar_dir = Path(catalog_path) / "data" / "binance_bar"
-    if not binance_bar_dir.exists():
-        return {}
-
-    inst_set = set(instruments)
-    lookup: dict[str, dict[int, float]] = {}
-
-    for inst_dir in sorted(binance_bar_dir.iterdir()):
-        if not inst_dir.is_dir():
-            continue
-        inst_id = inst_dir.name.split("-")[0]
-        if inst_id not in inst_set:
-            continue
-
-        parquet_files = list(inst_dir.glob("*.parquet"))
-        if not parquet_files:
-            continue
-
-        try:
-            table = pq.read_table(
-                str(parquet_files[0]),
-                columns=["ts_event", field_name],
-            )
-        except (KeyError, Exception):
-            continue
-
-        df = table.to_pandas()
-        if field_name not in df.columns:
-            continue
-
-        inst_lookup: dict[int, float] = {}
-        for _, row in df.iterrows():
-            try:
-                inst_lookup[int(row["ts_event"])] = float(row[field_name])
-            except (TypeError, ValueError):
-                continue
-        if inst_lookup:
-            lookup[inst_id] = inst_lookup
-
-    return lookup
 
 
 class FactorEngineActorConfig(ActorConfig, frozen=True):
@@ -367,6 +315,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         for cfg in extra_configs:
             if cfg.source == "catalog":
+                # FR: event-driven subscription (Actor-specific, not a loader)
                 for inst_id_str in self._expected_instruments:
                     self.subscribe_funding_rates(InstrumentId.from_str(inst_id_str))
                 extra_buffer_fields.append(cfg.name)
@@ -374,58 +323,38 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                     f"Extra data '{cfg.name}': subscribed to "
                     f"{len(self._expected_instruments)} instruments"
                 )
-            elif cfg.source == "parquet":
-                from nautilus_quants.data.transform.open_interest import (
-                    load_oi_lookup,
-                )
-                try:
-                    timeframe = cfg.timeframe or self._config.bar_spec or "4h"
-                    target = cfg.instruments or list(self._expected_instruments)
-                    self._oi_lookup = load_oi_lookup(cfg.path, target, timeframe)
-                    total = sum(len(m) for m in self._oi_lookup.values())
-                    self.log.info(
-                        f"Extra data '{cfg.name}': loaded {len(self._oi_lookup)} "
-                        f"instruments, {total} data points"
-                    )
-                except Exception as e:
-                    self.log.warning(f"Extra data '{cfg.name}' load failed: {e}")
-                    self._oi_lookup = {}
-                extra_buffer_fields.append(cfg.name)
-            elif cfg.source == "bar":
-                extra_buffer_fields.append(cfg.name)
-                if cfg.path:
-                    # Preload from catalog's binance_bar parquet
-                    try:
-                        lookup = _load_bar_field_lookup(
-                            cfg.name, cfg.path,
-                            list(self._expected_instruments),
-                        )
-                        if lookup:
-                            self._bar_field_lookups[cfg.name] = lookup
-                            total = sum(len(v) for v in lookup.values())
-                            self.log.info(
-                                f"Extra data '{cfg.name}': preloaded from parquet, "
-                                f"{len(lookup)} instruments, {total} data points"
-                            )
-                        else:
-                            self.log.warning(
-                                f"Extra data '{cfg.name}': no parquet data found"
-                            )
-                    except Exception as e:
-                        self.log.warning(
-                            f"Extra data '{cfg.name}' preload failed: {e}"
-                        )
-                else:
-                    self.log.info(
-                        f"Extra data '{cfg.name}': bar field auto-extract"
-                    )
             elif cfg.source == "broadcast":
+                # Broadcast: flush 前 Buffer.inject_staged_field (Actor-specific)
                 self._broadcast_configs.append(cfg)
                 extra_buffer_fields.append(cfg.name)
                 self.log.info(
-                    f"Extra data '{cfg.name}': broadcast from "
-                    f"{cfg.instruments}"
+                    f"Extra data '{cfg.name}': broadcast from {cfg.instruments}"
                 )
+            elif cfg.source in ("bar", "parquet"):
+                # bar/parquet: preload lookup via extra_data.py unified entry
+                extra_buffer_fields.append(cfg.name)
+                try:
+                    lookup = load_lookup(cfg, list(self._expected_instruments))
+                    if lookup:
+                        if cfg.source == "bar":
+                            self._bar_field_lookups[cfg.name] = lookup
+                        else:
+                            self._oi_lookup = lookup
+                        total = sum(len(v) for v in lookup.values())
+                        self.log.info(
+                            f"Extra data '{cfg.name}': preloaded "
+                            f"{len(lookup)} instruments, {total} data points"
+                        )
+                    elif cfg.source == "bar" and not cfg.path:
+                        self.log.info(
+                            f"Extra data '{cfg.name}': bar field auto-extract"
+                        )
+                    else:
+                        self.log.warning(
+                            f"Extra data '{cfg.name}': no data found"
+                        )
+                except Exception as e:
+                    self.log.warning(f"Extra data '{cfg.name}' load failed: {e}")
 
         # Register all extra fields so Buffer tracks them
         if extra_buffer_fields and self._engine is not None:

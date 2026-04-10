@@ -397,6 +397,110 @@ def _load_parquet_field(
         return None
 
 
+# ── Lookup Loaders (backtest/live per-bar injection) ─────────────────────
+
+
+def load_bar_field_lookup(
+    cfg: ExtraDataConfig,
+    instruments: list[str],
+) -> dict[str, dict[int, float]]:
+    """Preload a bar field from catalog's binance_bar parquet into a lookup.
+
+    Returns ``{instrument_id: {ts_ns: value}}`` for per-bar injection
+    in the streaming (backtest/live) path.
+    """
+    import pyarrow.parquet as pq
+
+    if not cfg.path:
+        return {}
+
+    binance_bar_dir = Path(cfg.path) / "data" / "binance_bar"
+    if not binance_bar_dir.exists():
+        return {}
+
+    inst_set = set(instruments)
+    lookup: dict[str, dict[int, float]] = {}
+
+    for inst_dir in sorted(binance_bar_dir.iterdir()):
+        if not inst_dir.is_dir():
+            continue
+        inst_id = inst_dir.name.split("-")[0]
+        if inst_id not in inst_set:
+            continue
+
+        parquet_files = list(inst_dir.glob("*.parquet"))
+        if not parquet_files:
+            continue
+
+        try:
+            table = pq.read_table(
+                str(parquet_files[0]),
+                columns=["ts_event", cfg.name],
+            )
+        except (KeyError, Exception):
+            continue
+
+        df = table.to_pandas()
+        if cfg.name not in df.columns:
+            continue
+
+        inst_lookup: dict[int, float] = {}
+        for _, row in df.iterrows():
+            try:
+                inst_lookup[int(row["ts_event"])] = float(row[cfg.name])
+            except (TypeError, ValueError):
+                continue
+        if inst_lookup:
+            lookup[inst_id] = inst_lookup
+
+    return lookup
+
+
+def load_parquet_field_lookup(
+    cfg: ExtraDataConfig,
+    instruments: list[str],
+) -> dict[str, dict[int, dict[str, float]]]:
+    """Preload OI (or similar parquet source) into a lookup.
+
+    Returns ``{instrument_id: {ts_ns: {field: value}}}`` for per-bar injection.
+    Wraps ``load_oi_lookup`` from the data transform module.
+    """
+    if not cfg.path:
+        return {}
+
+    from nautilus_quants.data.transform.open_interest import load_oi_lookup
+
+    target = cfg.instruments or instruments
+    timeframe = cfg.timeframe or "4h"
+    return load_oi_lookup(cfg.path, target, timeframe)
+
+
+def load_lookup(
+    cfg: ExtraDataConfig,
+    instruments: list[str],
+) -> dict:
+    """Backtest/live unified entry: dispatch to source-specific lookup loader.
+
+    Returns a precomputed lookup for per-bar injection by the Actor.
+    Sources that don't use lookups (catalog=subscription, broadcast=Buffer
+    inject) return an empty dict.
+
+    Args:
+        cfg: Extra data config entry.
+        instruments: Instrument IDs in the universe.
+
+    Returns:
+        - bar:     ``{inst_id: {ts_ns: float}}``
+        - parquet: ``{inst_id: {ts_ns: {field: float}}}``
+        - others:  ``{}``
+    """
+    if cfg.source == "bar":
+        return load_bar_field_lookup(cfg, instruments)
+    if cfg.source == "parquet":
+        return load_parquet_field_lookup(cfg, instruments)
+    return {}
+
+
 # ── ExtraDataManager ─────────────────────────────────────────────────────
 
 
