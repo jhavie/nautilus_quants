@@ -1,0 +1,130 @@
+# Extra Data Factor Configuration
+# Tests all 5 extra data sources: funding_rate, open_interest,
+# quote_volume (VWAP), btc_close (beta), eth_close (beta)
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/cs/alpha_extra_data.yaml
+#
+# Data sources (declared in config/cs/extra_data.yaml):
+#   funding_rate  — catalog: 8h perpetual funding rate
+#   open_interest — parquet: total OI in base asset units
+#   quote_volume  — bar: BinanceBar traded value in USDT
+#   btc_close     — broadcast: BTC close to all instruments
+#   eth_close     — broadcast: ETH close to all instruments
+
+metadata:
+  name: extra_data_factors
+  source: "extra_data"
+  version: "1.0"
+  description: "Factor suite using all 5 extra data sources"
+
+parameters:
+  # Rolling windows (4h bars)
+  w_short: 6     # 1 day
+  w_mid: 42      # 7 days
+  w_long: 180    # 30 days
+
+variables:
+  # ── Base returns ──
+  returns: "delta(close, 1) / delay(close, 1)"
+
+  # ── VWAP (from quote_volume) ──
+  vwap: "quote_volume / replace_zero(volume)"
+  vwap_deviation: "(close - vwap) / replace_zero(vwap)"
+
+  # ── Market returns (from broadcast) ──
+  btc_returns: "delta(btc_close, 1) / delay(btc_close, 1)"
+  eth_returns: "delta(eth_close, 1) / delay(eth_close, 1)"
+
+  # ── Market volatility ──
+  btc_vol: "ts_std(btc_returns, w_mid)"
+  eth_vol: "ts_std(eth_returns, w_mid)"
+
+  # ── Market beta ──
+  # beta = cov(r_i, r_mkt) / var(r_mkt)
+  btc_beta: "covariance(returns, btc_returns, w_mid) / replace_zero(power(btc_vol, 2))"
+  eth_beta: "covariance(returns, eth_returns, w_mid) / replace_zero(power(eth_vol, 2))"
+
+  # ── Funding rate derived ──
+  fr_momentum: "delta(funding_rate, w_short)"
+  fr_zscore: "cs_zscore(funding_rate)"
+
+  # ── Open interest derived ──
+  oi_change: "delta(open_interest, 1) / replace_zero(delay(open_interest, 1))"
+  oi_rank: "cs_rank(open_interest)"
+
+factors:
+  # ── Funding Rate Factors ──
+  fr_reversal:
+    expression: "-cs_rank(funding_rate)"
+    description: "High FR → shorts crowded → mean reversion"
+    tags: ["funding_rate", "reversal"]
+
+  fr_momentum_rank:
+    expression: "cs_rank(fr_momentum)"
+    description: "Rising FR momentum → increasing long pressure"
+    tags: ["funding_rate", "momentum"]
+
+  fr_extreme:
+    expression: "-cs_rank(abs(funding_rate))"
+    description: "Extreme FR (either direction) → reversal signal"
+    tags: ["funding_rate", "reversal"]
+
+  # ── Open Interest Factors ──
+  oi_flow:
+    expression: "cs_rank(oi_change)"
+    description: "OI increase → new positions opening → trend continuation"
+    tags: ["open_interest", "flow"]
+
+  oi_concentration:
+    expression: "-cs_rank(oi_rank * abs(returns))"
+    description: "High OI + large moves → crowded positioning → reversal"
+    tags: ["open_interest", "reversal"]
+
+  # ── VWAP Factors ──
+  vwap_mean_revert:
+    expression: "-cs_rank(vwap_deviation)"
+    description: "Price above VWAP → overbought → mean reversion"
+    tags: ["vwap", "reversal"]
+
+  vwap_trend:
+    expression: "cs_rank(ts_mean(vwap_deviation, w_short))"
+    description: "Sustained VWAP premium → trend strength"
+    tags: ["vwap", "momentum"]
+
+  # ── BTC Beta Factors ──
+  beta_momentum:
+    expression: "cs_rank(btc_beta * returns)"
+    description: "Beta-weighted momentum: high-beta coins with positive returns"
+    tags: ["beta", "momentum"]
+
+  low_beta_alpha:
+    expression: "-cs_rank(btc_beta)"
+    description: "Low-beta anomaly: low-beta coins outperform risk-adjusted"
+    tags: ["beta", "reversal"]
+
+  beta_residual:
+    expression: "cs_rank(returns - btc_beta * btc_returns)"
+    description: "Idiosyncratic return: return unexplained by BTC beta"
+    tags: ["beta", "alpha"]
+
+  # ── ETH Beta Factors ──
+  eth_beta_spread:
+    expression: "cs_rank(eth_beta - btc_beta)"
+    description: "ETH-BTC beta spread: relative altcoin sensitivity"
+    tags: ["beta", "relative"]
+
+  # ── Cross-Source Composite Factors ──
+  fr_oi_divergence:
+    expression: "cs_rank(fr_zscore * oi_change)"
+    description: "FR×OI divergence: funding pressure with position buildup"
+    tags: ["funding_rate", "open_interest", "composite"]
+
+  beta_vwap_combo:
+    expression: "cs_rank(btc_beta * vwap_deviation)"
+    description: "High-beta coins with VWAP deviation → amplified mean reversion"
+    tags: ["beta", "vwap", "composite"]
+
+performance:
+  enable_timing: true
+  warning_threshold_ms: 1.0
