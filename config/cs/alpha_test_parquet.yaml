@@ -1,0 +1,51 @@
+# Alpha Analysis Config — Test Parquet Persistence
+#
+# Verifies ic_timeseries_*.parquet and quantile_returns_*.parquet output
+#
+# Usage:
+#   python -m nautilus_quants.alpha analyze config/cs/alpha_test_parquet.yaml
+
+# Data source (4-year 4h bars)
+catalog_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
+bar_spec: "4h"
+
+# Factor definition
+factor_config_path: "config/cs/factors_test_parquet.yaml"
+
+# Small universe for fast test (12 coins)
+instrument_ids:
+  - "BTCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "ADAUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "AVAXUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+
+# alphalens parameters
+periods: [1, 2, 6]    # forward returns: 4h, 8h, 24h
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+# Minimal charts (speed)
+charts:
+  - ic_time_series
+  - quantile_returns_bar
+
+metrics:
+  factor_metrics: true
+
+# Registry disabled (just testing parquet output)
+registry:
+  enabled: false
+
+# Output
+output_dir: "logs/alpha_analysis"
+output_format:
+  - png

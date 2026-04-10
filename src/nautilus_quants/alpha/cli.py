@@ -387,7 +387,67 @@ def analyze(
             if verbose:
                 click.echo(f"  Charts generated in {time.time() - t2:.2f}s")
 
-        # 9. Generate summary
+        # 9. Persist IC time series as Parquet (for clustering, decay monitoring)
+        #    One file per period: ic_timeseries_4h.parquet, ic_timeseries_8h.parquet, ...
+        #    Each file: index=timestamp, columns=factor_names, values=IC
+        if ic_results:
+            periods_in_ic = set()
+            for ic_df in ic_results.values():
+                periods_in_ic.update(ic_df.columns.tolist())
+
+            for period in sorted(periods_in_ic):
+                ic_panel = pd.DataFrame(
+                    {name: ic_df[period]
+                     for name, ic_df in ic_results.items()
+                     if period in ic_df.columns},
+                )
+                if ic_panel.empty:
+                    continue
+                ic_parquet = output_dir / f"ic_timeseries_{period}.parquet"
+                ic_panel.to_parquet(ic_parquet)
+
+            if not quiet:
+                click.echo(
+                    f"  IC time series saved: {output_dir}/ic_timeseries_*.parquet "
+                    f"({len(periods_in_ic)} periods × "
+                    f"{len(ic_results)} factors)",
+                )
+
+        # 9b. Persist quantile returns as Parquet
+        #     spread = Q_top - Q_bottom can be derived, no need to store separately
+        if al_results and ic_results:
+            import alphalens.performance as al_perf
+
+            periods_saved = set()
+            for period in sorted(periods_in_ic):
+                qret_frames: dict[str, pd.DataFrame] = {}
+
+                for fname, al_result in al_results.items():
+                    fd = al_result["factor_data"]
+                    try:
+                        mean_ret, _ = al_perf.mean_return_by_quantile(
+                            fd, by_date=True,
+                        )
+                        if period in mean_ret.columns.get_level_values(0):
+                            qret_frames[fname] = mean_ret[period]
+                    except Exception:
+                        continue
+
+                if qret_frames:
+                    qret_panel = pd.concat(qret_frames, axis=1)
+                    qret_panel.to_parquet(
+                        output_dir / f"quantile_returns_{period}.parquet",
+                    )
+                    periods_saved.add(period)
+
+            if not quiet and periods_saved:
+                click.echo(
+                    f"  Quantile returns saved: "
+                    f"{len(periods_saved)} periods × "
+                    f"{len(al_results)} factors",
+                )
+
+        # Generate summary
         if ic_results:
             report_gen.generate_summary(ic_results, output_dir, factor_series=factor_series)
 

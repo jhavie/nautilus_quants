@@ -1,0 +1,22 @@
+# Test factors for IC parquet persistence verification
+# Two mirror LLM factors: momentum vs reversal
+
+metadata:
+  name: test_parquet_persistence
+  source: "llm_claude"
+  version: "1.0"
+  description: "Two factors to verify IC timeseries + quantile returns parquet output"
+
+variables:
+  returns: "delta(close, 1) / delay(close, 1)"
+
+factors:
+  volume_confirmation_momentum:
+    expression: "cs_rank(correlation(returns, delta(log(volume), 1), 20))"
+    description: "Volume-return correlation momentum"
+    tags: [momentum, volume, correlation]
+
+  vol_return_correlation_reversal:
+    expression: "cs_rank(-1 * correlation(returns, delta(log(volume), 1) / replace_zero(delay(log(volume), 1)), 20))"
+    description: "Volume-return correlation reversal (inverse of momentum)"
+    tags: [reversal, volume, correlation]
