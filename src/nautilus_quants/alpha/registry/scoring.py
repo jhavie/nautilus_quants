@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 class HardFilterConfig:
     """Hard filter thresholds — any period failing all is excluded."""
 
+    enabled: bool = True
     icir_abs_min: float = 0.05
     t_stat_nw_abs_min: float = 2.0
     p_value_nw_max: float = 0.05
@@ -48,13 +49,18 @@ class HardFilterConfig:
 
 
 @dataclass(frozen=True)
-class ScoringWeights:
+class ScoringWeightsConfig:
     """Dimension weights for the scoring system (must sum to 1.0)."""
 
+    enabled: bool = True
     predictiveness: float = 0.40
     monotonicity: float = 0.25
     consistency: float = 0.15
     turnover_friendliness: float = 0.20
+
+
+# Keep backward-compatible alias
+ScoringWeights = ScoringWeightsConfig
 
 
 @dataclass(frozen=True)
@@ -69,14 +75,53 @@ class SubWeights:
 class DedupConfig:
     """Deduplication configuration."""
 
+    enabled: bool = True
     fingerprint_threshold: float = 1e-4
     max_corr: float = 0.30
+
+
+@dataclass(frozen=True)
+class ClusteringConfig:
+    """HDBSCAN clustering + Super Alpha composition configuration."""
+
+    enabled: bool = False
+    min_cluster_size: int = 3
+    cluster_selection_method: str = "eom"
+    min_samples: int | None = None
+    distance_metric: str = "spearman"
+    composition_method: str = "pca"
+    single_factor_passthrough: bool = True
+    super_alpha_prefix: str = "SA"
+    component_status: str = "component"
+
+
+@dataclass(frozen=True)
+class OrthogonalizationConfig:
+    """Löwdin symmetric orthogonalization configuration."""
+
+    enabled: bool = False
+    method: str = "lowdin"
+    min_eigenvalue: float = 1e-6
+    max_condition_number: float = 1e6
+
+
+@dataclass(frozen=True)
+class DiagnosticsConfig:
+    """Diagnostic output configuration."""
+
+    output_dir: str = "logs/promote"
+    correlation_heatmap: bool = True
+    cluster_report: bool = True
+    score_super_alphas: bool = True
+    overlap_validation: bool = True
 
 
 @dataclass(frozen=True)
 class PromoteConfig:
     """Promotion configuration."""
 
+    source_db_path: str = ""
+    target_db_path: str = ""
     max_factors: int = 50
     target_status: str = "active"
 
@@ -95,15 +140,24 @@ class DataConfig:
 
 @dataclass(frozen=True)
 class ScoringConfig:
-    """Complete scoring configuration."""
+    """Complete scoring configuration with 5-layer pipeline."""
 
     periods: list[str] = field(
         default_factory=lambda: ["4h", "8h", "12h", "1d"],
     )
     hard_filters: HardFilterConfig = field(default_factory=HardFilterConfig)
-    weights: ScoringWeights = field(default_factory=ScoringWeights)
+    weights: ScoringWeightsConfig = field(
+        default_factory=ScoringWeightsConfig,
+    )
     sub_weights: SubWeights = field(default_factory=SubWeights)
     dedup: DedupConfig = field(default_factory=DedupConfig)
+    clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
+    orthogonalization: OrthogonalizationConfig = field(
+        default_factory=OrthogonalizationConfig,
+    )
+    diagnostics: DiagnosticsConfig = field(
+        default_factory=DiagnosticsConfig,
+    )
     promote: PromoteConfig = field(default_factory=PromoteConfig)
     data: DataConfig = field(default_factory=DataConfig)
 
@@ -121,12 +175,16 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
     sc = raw.get("scoring", {})
     sw = sc.get("sub_weights", {})
     dd = raw.get("dedup", {})
+    cl = raw.get("clustering", {})
+    ot = raw.get("orthogonalization", {})
+    dg = raw.get("diagnostics", {})
     pr = raw.get("promote", {})
     da = raw.get("data", {})
 
     return ScoringConfig(
         periods=raw.get("periods", ["4h", "8h", "12h", "1d"]),
         hard_filters=HardFilterConfig(
+            enabled=hf.get("enabled", True),
             icir_abs_min=hf.get("icir_abs_min", 0.05),
             t_stat_nw_abs_min=hf.get("t_stat_nw_abs_min", 2.0),
             p_value_nw_max=hf.get("p_value_nw_max", 0.05),
@@ -137,19 +195,54 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             n_samples_min=hf.get("n_samples_min", 3000),
             min_valid_periods=hf.get("min_valid_periods", 2),
         ),
-        weights=ScoringWeights(
+        weights=ScoringWeightsConfig(
+            enabled=sc.get("enabled", True),
             **{k: v for k, v in sc.get("weights", {}).items()
-               if k in ScoringWeights.__dataclass_fields__},
-        ) if sc.get("weights") else ScoringWeights(),
+               if k in ScoringWeightsConfig.__dataclass_fields__
+               and k != "enabled"},
+        ) if sc.get("weights") else ScoringWeightsConfig(
+            enabled=sc.get("enabled", True),
+        ),
         sub_weights=SubWeights(
             pred_icir=sw.get("predictiveness", {}).get("icir", 0.65),
             pred_ic_mean=sw.get("predictiveness", {}).get("ic_mean", 0.35),
         ),
         dedup=DedupConfig(
+            enabled=dd.get("enabled", True),
             fingerprint_threshold=dd.get("fingerprint_threshold", 1e-4),
             max_corr=dd.get("max_corr", 0.30),
         ),
+        clustering=ClusteringConfig(
+            enabled=cl.get("enabled", False),
+            min_cluster_size=cl.get("min_cluster_size", 3),
+            cluster_selection_method=cl.get(
+                "cluster_selection_method", "eom",
+            ),
+            min_samples=cl.get("min_samples"),
+            distance_metric=cl.get("distance_metric", "spearman"),
+            composition_method=cl.get("composition_method", "pca"),
+            single_factor_passthrough=cl.get(
+                "single_factor_passthrough", True,
+            ),
+            super_alpha_prefix=cl.get("super_alpha_prefix", "SA"),
+            component_status=cl.get("component_status", "component"),
+        ),
+        orthogonalization=OrthogonalizationConfig(
+            enabled=ot.get("enabled", False),
+            method=ot.get("method", "lowdin"),
+            min_eigenvalue=ot.get("min_eigenvalue", 1e-6),
+            max_condition_number=ot.get("max_condition_number", 1e6),
+        ),
+        diagnostics=DiagnosticsConfig(
+            output_dir=dg.get("output_dir", "logs/promote"),
+            correlation_heatmap=dg.get("correlation_heatmap", True),
+            cluster_report=dg.get("cluster_report", True),
+            score_super_alphas=dg.get("score_super_alphas", True),
+            overlap_validation=dg.get("overlap_validation", True),
+        ),
         promote=PromoteConfig(
+            source_db_path=pr.get("source_db_path", ""),
+            target_db_path=pr.get("target_db_path", ""),
             max_factors=pr.get("max_factors", 50),
             target_status=pr.get("target_status", "active"),
         ),

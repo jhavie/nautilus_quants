@@ -1,61 +1,92 @@
-# Factor Scoring & Promotion Configuration
+# Factor Promote Pipeline Configuration
 # Used by: python -m nautilus_quants.alpha promote --config config/examples/scoring.yaml
+#
+# 5-Layer hot-swappable pipeline (each layer has enabled: true/false):
+#
+#   load → [hard_filters] → [scoring] → [dedup]
+#        → [clustering] → [orthogonalization] → migrate
+#
+# A/B testing: copy this file, toggle enabled flags, compare backtests.
 
-# Periods to evaluate (all four participate in scoring)
 periods:
   - "4h"
   - "8h"
   - "12h"
   - "1d"
 
-# ── Phase 1: Hard Filters ──
+# ── [hard_filters] ──
 # Each period is checked independently; factor is eliminated only if
-# ALL periods fail.  At least min_valid_periods must pass.
+# fewer than min_valid_periods pass ALL checks.
 hard_filters:
-  icir_abs_min: 0.05          # |ICIR| ≥ 0.05
-  t_stat_nw_abs_min: 2.0      # |t_stat_nw| ≥ 2.0
-  p_value_nw_max: 0.05        # p_value_nw ≤ 0.05
-  win_rate_lower: 0.45         # win_rate < 0.45 or > 0.55
+  enabled: false                  # false = skip, all factors pass through
+  icir_abs_min: 0.05
+  t_stat_nw_abs_min: 2.0
+  p_value_nw_max: 0.05
+  win_rate_lower: 0.45
   win_rate_upper: 0.55
-  ic_linearity_min: 0.85      # ic_linearity ≥ 0.85
-  coverage_min: 0.50           # coverage ≥ 0.50
-  n_samples_min: 3000          # n_samples ≥ 3000
-  min_valid_periods: 2         # at least 2 periods must pass
+  ic_linearity_min: 0.85
+  coverage_min: 0.50
+  n_samples_min: 3000
+  min_valid_periods: 2
 
-# ── Phase 1: Scoring Weights ──
-# 4-dimension scoring: predictiveness, monotonicity, consistency, turnover
-#
-# Eliminated dimensions:
-#   stability (ic_linearity CV=0.024 after filter, win_rate corr 0.984 with ICIR)
-# Eliminated sub-metrics:
-#   t_stat_nw (corr 0.978 with ICIR), win_rate, ic_linearity
+# ── [scoring] ──
+# 4-dimension scoring: predictiveness, monotonicity, consistency, turnover.
+# When disabled, factors are ranked by avg |ICIR| instead.
 scoring:
-  # Dimension weights (must sum to 1.0)
+  enabled: false                  # false = skip, rank by |ICIR|
   weights:
-    predictiveness: 0.40       # ICIR + ic_mean
-    monotonicity: 0.25         # quantile return monotonicity (most independent signal)
-    consistency: 0.15          # cross-period min/max ratio
-    turnover_friendliness: 0.20  # IC autocorrelation (ic_ar1)
-
-  # Sub-dimension weights
+    predictiveness: 0.40
+    monotonicity: 0.25
+    consistency: 0.15
+    turnover_friendliness: 0.20
   sub_weights:
     predictiveness:
-      icir: 0.65              # IC Sharpe ratio (primary)
-      ic_mean: 0.35           # absolute IC strength (complementary)
+      icir: 0.65
+      ic_mean: 0.35
 
-# ── Phase 2: Deduplication ──
+# ── [dedup] ──
+# Fingerprint exact dedup + Spearman correlation greedy selection.
 dedup:
-  # Fingerprint-based exact dedup
-  # 8-tuple: (icir_4h, ic_mean_4h, icir_8h, ic_mean_8h, icir_12h, ic_mean_12h, icir_1d, ic_mean_1d)
-  fingerprint_threshold: 1.0e-3   # Euclidean distance threshold
+  enabled: false                  # false = skip dedup + greedy
+  fingerprint_threshold: 1.0e-3
+  max_corr: 0.7
 
-  # Correlation-based dedup
-  max_corr: 0.5                  # Max allowed |Spearman corr| between selected factors
+# ── [clustering] ──
+# Auto-detect factor clusters, compose Super Alphas via PCA/equal/ICIR.
+# Noise factors (HDBSCAN label=-1) are automatically discarded.
+clustering:
+  enabled: true                   # false = skip, use individual factors
+  min_cluster_size: 3
+  cluster_selection_method: "eom" # "eom" (conservative) | "leaf" (finer)
+  min_samples: null
+  distance_metric: "spearman"
+  composition_method: "pca"       # "pca" | "equal" | "icir"
+  single_factor_passthrough: true
+  super_alpha_prefix: "SA"
+  component_status: "component"
 
-# ── Phase 3: Promotion ──
+# ── [orthogonalization] ──
+# Optimize composite weights to eliminate redundant exposure.
+orthogonalization:
+  enabled: false                  # false = skip, use original weights
+  method: "lowdin"
+  min_eigenvalue: 1.0e-6
+  max_condition_number: 1.0e+6
+
+# ── Diagnostics ──
+diagnostics:
+  output_dir: "logs/promote"
+  correlation_heatmap: true
+  cluster_report: true
+  score_super_alphas: true
+  overlap_validation: true
+
+# ── Promote ──
 promote:
-  max_factors: 50                 # Max factors to promote
-  target_status: "active"         # Status for promoted factors
+  source_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/test.duckdb"
+  target_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/dev.duckdb"
+  max_factors: 50
+  target_status: "active"
 
 # ── Data paths (for correlation computation) ──
 data:
@@ -65,11 +96,11 @@ data:
   funding_rate: true
   oi_data_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
   # Factor config files for correlation computation
-  factor_configs:
-    - "config/alpha_batch/factors_alpha101.yaml"
-    - "config/alpha_batch/factors_alpha158.yaml"
-    - "config/alpha_batch/factors_alpha191.yaml"
-    - "config/alpha_batch/factors_ta.yaml"
+  factor_configs: []
+    # - "config/alpha_batch/factors_alpha101.yaml"
+    # - "config/alpha_batch/factors_alpha158.yaml"
+    # - "config/alpha_batch/factors_alpha191.yaml"
+    # - "config/alpha_batch/factors_ta.yaml"
   # 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
   # (10 delisted/renamed on Bybit excluded)
   instrument_ids:
