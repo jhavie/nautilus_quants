@@ -117,6 +117,59 @@ def _extract_bar_data(bar: Bar) -> dict[str, float]:
     return data
 
 
+def _load_bar_field_lookup(
+    field_name: str,
+    catalog_path: str,
+    instruments: list[str],
+) -> dict[str, dict[int, float]]:
+    """Preload a bar field from catalog's binance_bar parquet into a lookup.
+
+    Returns {instrument_id: {ts_ns: value}} for per-bar injection.
+    """
+    import pyarrow.parquet as pq
+
+    binance_bar_dir = Path(catalog_path) / "data" / "binance_bar"
+    if not binance_bar_dir.exists():
+        return {}
+
+    inst_set = set(instruments)
+    lookup: dict[str, dict[int, float]] = {}
+
+    for inst_dir in sorted(binance_bar_dir.iterdir()):
+        if not inst_dir.is_dir():
+            continue
+        inst_id = inst_dir.name.split("-")[0]
+        if inst_id not in inst_set:
+            continue
+
+        parquet_files = list(inst_dir.glob("*.parquet"))
+        if not parquet_files:
+            continue
+
+        try:
+            table = pq.read_table(
+                str(parquet_files[0]),
+                columns=["ts_event", field_name],
+            )
+        except (KeyError, Exception):
+            continue
+
+        df = table.to_pandas()
+        if field_name not in df.columns:
+            continue
+
+        inst_lookup: dict[int, float] = {}
+        for _, row in df.iterrows():
+            try:
+                inst_lookup[int(row["ts_event"])] = float(row[field_name])
+            except (TypeError, ValueError):
+                continue
+        if inst_lookup:
+            lookup[inst_id] = inst_lookup
+
+    return lookup
+
+
 class FactorEngineActorConfig(ActorConfig, frozen=True):
     """
     Configuration for FactorEngineActor.
@@ -245,6 +298,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._latest_funding_rates: dict[str, float] = {}
         # Open interest: preloaded lookup {inst_id: {ts_ns: {field: val}}}
         self._oi_lookup: dict[str, dict[int, dict[str, float]]] = {}
+        # Bar field lookups: {field_name: {inst_id: {ts_ns: value}}}
+        self._bar_field_lookups: dict[str, dict[str, dict[int, float]]] = {}
         # Broadcast configs for pre-flush injection (btc_close, eth_close, etc.)
         self._broadcast_configs: list[ExtraDataConfig] = []
         # Resolved broadcast instrument IDs (pattern → actual instrument_id)
@@ -338,7 +393,32 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 extra_buffer_fields.append(cfg.name)
             elif cfg.source == "bar":
                 extra_buffer_fields.append(cfg.name)
-                self.log.info(f"Extra data '{cfg.name}': bar field auto-extract")
+                if cfg.path:
+                    # Preload from catalog's binance_bar parquet
+                    try:
+                        lookup = _load_bar_field_lookup(
+                            cfg.name, cfg.path,
+                            list(self._expected_instruments),
+                        )
+                        if lookup:
+                            self._bar_field_lookups[cfg.name] = lookup
+                            total = sum(len(v) for v in lookup.values())
+                            self.log.info(
+                                f"Extra data '{cfg.name}': preloaded from parquet, "
+                                f"{len(lookup)} instruments, {total} data points"
+                            )
+                        else:
+                            self.log.warning(
+                                f"Extra data '{cfg.name}': no parquet data found"
+                            )
+                    except Exception as e:
+                        self.log.warning(
+                            f"Extra data '{cfg.name}' preload failed: {e}"
+                        )
+                else:
+                    self.log.info(
+                        f"Extra data '{cfg.name}': bar field auto-extract"
+                    )
             elif cfg.source == "broadcast":
                 self._broadcast_configs.append(cfg)
                 extra_buffer_fields.append(cfg.name)
@@ -582,6 +662,13 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             oi_data = self._oi_lookup[instrument_id].get(ts)
             if oi_data:
                 bar_data.update(oi_data)
+
+        # Inject bar fields from preloaded parquet lookups (e.g. quote_volume)
+        for field_name, lookup in self._bar_field_lookups.items():
+            if field_name not in bar_data and instrument_id in lookup:
+                val = lookup[instrument_id].get(ts)
+                if val is not None:
+                    bar_data[field_name] = val
 
         self._engine.on_bar(instrument_id, bar_data, ts)
         self._pending_ts = ts

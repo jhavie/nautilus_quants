@@ -27,7 +27,7 @@ venues:
 
 data:
   - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
-    data_cls: "nautilus_trader.adapters.binance.common.types:BinanceBar"
+    data_cls: "nautilus_trader.model.data:Bar"
     bar_spec: "4h"
     # 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
     # (10 delisted/renamed on Bybit excluded)
