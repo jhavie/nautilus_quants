@@ -264,33 +264,27 @@ def analyze(
             _db = RegistryDatabase.for_environment(_env, config.registry_db_dir)
             already: set[str] = set()
 
-            # Build hash → factor_id lookup from DB (Python-side matching,
-            # avoids dependency on expression_hash column in schema).
-            _existing_hashes: dict[str, str] = {}
             try:
-                rows = _db.fetch_all(
-                    "SELECT f.factor_id, f.expression FROM factors f "
-                    "JOIN alpha_analysis_metrics m "
-                    "ON f.factor_id = m.factor_id"
-                )
-                for r in rows:
+                for fname in list(factor_series.keys()):
+                    fdef = factor_config.get_factor(fname)
+                    if fdef is None:
+                        continue
                     try:
-                        _existing_hashes[_expr_hash(r[1])] = r[0]
+                        h = _expr_hash(fdef.expression)
                     except Exception:
-                        pass
+                        continue
+                    row = _db.fetch_one(
+                        "SELECT f.factor_id FROM factors f "
+                        "JOIN alpha_analysis_metrics m "
+                        "ON f.factor_id = m.factor_id "
+                        "WHERE f.expression_hash = ? LIMIT 1",
+                        [h],
+                    )
+                    if row is not None:
+                        already.add(fname)
             except Exception:
-                pass
-
-            for fname in list(factor_series.keys()):
-                fdef = factor_config.get_factor(fname)
-                if fdef is None:
-                    continue
-                try:
-                    h = _expr_hash(fdef.expression)
-                except Exception:
-                    continue
-                if h in _existing_hashes:
-                    already.add(fname)
+                # expression_hash column may not exist in older DBs — skip dedup
+                already = set()
             _db.close()
 
             if already:
