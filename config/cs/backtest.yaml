@@ -144,7 +144,7 @@ data:
       - "ZILUSDT.BINANCE"
       - "ZRXUSDT.BINANCE"
     start_time: "2024-01-01"
-    end_time: "2024-12-31"
+    end_time: "2024-03-31"
 
 engine:
   trader_id: "BACKTESTER-CS-001"
@@ -177,6 +177,7 @@ engine:
       config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
       config:
         factor_config_path: "config/cs/factors_alpha101.yaml"
+        extra_data_path: "config/cs/extra_data.yaml"
         factor_cache_path: "data/factor_cache/cache_alpha101"
         interval: "4h"
         signal_prefix: "factor"
