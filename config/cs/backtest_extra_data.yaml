@@ -99,8 +99,8 @@ data:
       - "YFIUSDT.BINANCE"
       - "ZECUSDT.BINANCE"
       - "ZENUSDT.BINANCE"
-    start_time: "2025-01-01"
-    end_time: "2025-03-31"
+    start_time: "2022-01-01"
+    end_time: "2022-12-31"
 
 engine:
   trader_id: "BACKTESTER-EXTRA-DATA-001"
@@ -130,15 +130,15 @@ engine:
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        composite_factor: "beta_residual"
+        composite_factor: "composite"
         rebalance_interval: 2
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
-        position_value: 200
-        topk_long: 15
-        topk_short: 15
-        n_drop_long: 3
-        n_drop_short: 3
+        position_value: 400
+        topk_long: 20
+        topk_short: 20
+        n_drop_long: 2
+        n_drop_short: 2
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
