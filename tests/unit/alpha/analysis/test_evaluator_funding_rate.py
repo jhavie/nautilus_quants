@@ -1,11 +1,14 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
-"""Regression tests for _load_funding_rate_panel batch query bug.
+"""Regression tests for _load_catalog_field batch query bug.
 
 NautilusTrader catalog.funding_rates() batch query loses per-file
 instrument_id metadata when PyArrow merges parquet files — all records
 get the first instrument's ID.  These tests verify our per-instrument
 query workaround.
+
+Note: _load_funding_rate_panel was refactored into _load_catalog_field
+in the unified extra_data framework.
 """
 
 from __future__ import annotations
@@ -17,7 +20,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nautilus_quants.alpha.analysis.evaluator import FactorEvaluator
+from nautilus_quants.factors.engine.extra_data import (
+    ExtraDataConfig,
+    _load_catalog_field,
+)
 
 
 def _make_funding_rate_update(
@@ -100,16 +106,19 @@ class TestLoadFundingRatePanel:
         catalog.funding_rates = _funding_rates
         return catalog
 
+    def _make_cfg(self) -> ExtraDataConfig:
+        return ExtraDataConfig(name="funding_rate", source="catalog")
+
     def test_per_instrument_preserves_ids(self):
         """Each instrument gets its own FR data, not all labeled as first."""
         close_panel = _make_close_panel(self.INSTRUMENTS)
 
         with patch(
-            "nautilus_quants.alpha.analysis.evaluator.ParquetDataCatalog",
+            "nautilus_trader.persistence.catalog.ParquetDataCatalog",
             return_value=self._mock_catalog_per_instrument(),
         ):
-            result = FactorEvaluator._load_funding_rate_panel(
-                "/fake/path", self.INSTRUMENTS, close_panel,
+            result = _load_catalog_field(
+                self._make_cfg(), "/fake/path", self.INSTRUMENTS, close_panel,
             )
 
         assert result is not None
@@ -129,11 +138,11 @@ class TestLoadFundingRatePanel:
         close_panel = _make_close_panel(self.INSTRUMENTS)
 
         with patch(
-            "nautilus_quants.alpha.analysis.evaluator.ParquetDataCatalog",
+            "nautilus_trader.persistence.catalog.ParquetDataCatalog",
             return_value=self._mock_catalog_per_instrument(),
         ):
-            result = FactorEvaluator._load_funding_rate_panel(
-                "/fake/path", self.INSTRUMENTS, close_panel,
+            result = _load_catalog_field(
+                self._make_cfg(), "/fake/path", self.INSTRUMENTS, close_panel,
             )
 
         assert result is not None
@@ -150,11 +159,11 @@ class TestLoadFundingRatePanel:
         close_panel = _make_close_panel(instruments)
 
         with patch(
-            "nautilus_quants.alpha.analysis.evaluator.ParquetDataCatalog",
+            "nautilus_trader.persistence.catalog.ParquetDataCatalog",
             return_value=self._mock_catalog_per_instrument(),
         ):
-            result = FactorEvaluator._load_funding_rate_panel(
-                "/fake/path", instruments, close_panel,
+            result = _load_catalog_field(
+                self._make_cfg(), "/fake/path", instruments, close_panel,
             )
 
         assert result is not None
@@ -171,11 +180,11 @@ class TestLoadFundingRatePanel:
         catalog.funding_rates = MagicMock(return_value=[])
 
         with patch(
-            "nautilus_quants.alpha.analysis.evaluator.ParquetDataCatalog",
+            "nautilus_trader.persistence.catalog.ParquetDataCatalog",
             return_value=catalog,
         ):
-            result = FactorEvaluator._load_funding_rate_panel(
-                "/fake/path", ["XYZUSDT.BINANCE"], close_panel,
+            result = _load_catalog_field(
+                self._make_cfg(), "/fake/path", ["XYZUSDT.BINANCE"], close_panel,
             )
 
         assert result is None

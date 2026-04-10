@@ -1,0 +1,30 @@
+# Extra Data Sources — CS Analysis Environment
+# Referenced by alpha.yaml / backtest.yaml via extra_data_path
+#
+# Source types:
+#   catalog   — load from NautilusTrader ParquetDataCatalog
+#   parquet   — load from external parquet directory
+#   bar       — extract from Bar objects (e.g. BinanceBar quote_volume)
+#   broadcast — broadcast one instrument's close to all instruments
+
+funding_rate:
+  source: catalog
+  path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
+  instruments: []       # empty = all universe instruments
+
+open_interest:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
+  timeframe: "4h"
+  instruments: []
+
+quote_volume:
+  source: bar
+
+btc_close:
+  source: broadcast
+  instruments: ["BTC"]  # prefix match against panel columns
+
+eth_close:
+  source: broadcast
+  instruments: ["ETH"]

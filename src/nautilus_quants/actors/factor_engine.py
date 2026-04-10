@@ -34,6 +34,10 @@ from nautilus_quants.factors.config import (
     load_factor_config,
     validate_factor_config,
 )
+from nautilus_quants.factors.engine.extra_data import (
+    ExtraDataConfig,
+    load_extra_data_config,
+)
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
 
@@ -171,6 +175,8 @@ class FactorEngineActorConfig(ActorConfig, frozen=True):
     factor_cache_path: str = ""
     enable_hot_reload: bool = False
     hot_reload_interval_secs: int = 300
+    extra_data_path: str = ""
+    # Deprecated: kept for backward compat (use extra_data_path instead)
     subscribe_funding_rates: bool = False
     oi_data_path: str = ""
 
@@ -239,6 +245,10 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._latest_funding_rates: dict[str, float] = {}
         # Open interest: preloaded lookup {inst_id: {ts_ns: {field: val}}}
         self._oi_lookup: dict[str, dict[int, dict[str, float]]] = {}
+        # Broadcast configs for pre-flush injection (btc_close, eth_close, etc.)
+        self._broadcast_configs: list[ExtraDataConfig] = []
+        # Resolved broadcast instrument IDs (pattern → actual instrument_id)
+        self._broadcast_resolved: dict[str, str] = {}
 
     def on_start(self) -> None:
         """
@@ -295,57 +305,56 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             f"Tracking {len(self._expected_instruments)} instruments for flush sync"
         )
 
-        # Subscribe to FundingRateUpdate events if configured
-        if self._config.subscribe_funding_rates:
-            fr_extra = ["funding_rate"]
-            for inst_id_str in self._expected_instruments:
-                inst_id = InstrumentId.from_str(inst_id_str)
-                self.subscribe_funding_rates(inst_id)
-            self.log.info(
-                f"Subscribed to funding rates for "
-                f"{len(self._expected_instruments)} instruments"
-            )
-        else:
-            fr_extra = []
+        # ── Unified extra data setup ──
+        extra_configs = self._load_extra_data_configs(factor_config)
+        extra_buffer_fields: list[str] = []
+        self._broadcast_configs = []
 
-        # Load open interest lookup if configured
-        if self._config.oi_data_path:
-            from nautilus_quants.data.transform.open_interest import (
-                load_oi_lookup,
-            )
-
-            try:
-                bar_spec = self._config.bar_spec or "4h"
-                self._oi_lookup = load_oi_lookup(
-                    self._config.oi_data_path,
-                    list(self._expected_instruments),
-                    timeframe=bar_spec,
-                )
-                total_rows = sum(
-                    len(ts_map) for ts_map in self._oi_lookup.values()
-                )
+        for cfg in extra_configs:
+            if cfg.source == "catalog":
+                for inst_id_str in self._expected_instruments:
+                    self.subscribe_funding_rates(InstrumentId.from_str(inst_id_str))
+                extra_buffer_fields.append(cfg.name)
                 self.log.info(
-                    f"Loaded OI lookup: {len(self._oi_lookup)} instruments, "
-                    f"{total_rows} total data points"
+                    f"Extra data '{cfg.name}': subscribed to "
+                    f"{len(self._expected_instruments)} instruments"
                 )
-            except Exception as e:
-                self.log.warning(f"Failed to load OI data: {e}")
-                self._oi_lookup = {}
-            oi_extra = ["open_interest"]
-        else:
-            oi_extra = []
+            elif cfg.source == "parquet":
+                from nautilus_quants.data.transform.open_interest import (
+                    load_oi_lookup,
+                )
+                try:
+                    timeframe = cfg.timeframe or self._config.bar_spec or "4h"
+                    target = cfg.instruments or list(self._expected_instruments)
+                    self._oi_lookup = load_oi_lookup(cfg.path, target, timeframe)
+                    total = sum(len(m) for m in self._oi_lookup.values())
+                    self.log.info(
+                        f"Extra data '{cfg.name}': loaded {len(self._oi_lookup)} "
+                        f"instruments, {total} data points"
+                    )
+                except Exception as e:
+                    self.log.warning(f"Extra data '{cfg.name}' load failed: {e}")
+                    self._oi_lookup = {}
+                extra_buffer_fields.append(cfg.name)
+            elif cfg.source == "bar":
+                extra_buffer_fields.append(cfg.name)
+                self.log.info(f"Extra data '{cfg.name}': bar field auto-extract")
+            elif cfg.source == "broadcast":
+                self._broadcast_configs.append(cfg)
+                extra_buffer_fields.append(cfg.name)
+                self.log.info(
+                    f"Extra data '{cfg.name}': broadcast from "
+                    f"{cfg.instruments}"
+                )
 
-        # Register FR/OI as extra fields so Buffer initializes them
-        market_data_extra = fr_extra + oi_extra
-        if market_data_extra and self._engine is not None:
+        # Register all extra fields so Buffer tracks them
+        if extra_buffer_fields and self._engine is not None:
             existing = list(self._engine._buffer._extra_fields)
-            new_fields = [f for f in market_data_extra if f not in existing]
+            new_fields = [f for f in extra_buffer_fields if f not in existing]
             if new_fields:
                 all_extra = list(existing) + new_fields
                 self._engine.set_extra_fields(all_extra)
-                self.log.info(
-                    f"Registered market data extra fields: {new_fields}"
-                )
+                self.log.info(f"Registered extra data fields: {new_fields}")
 
         # Load pre-computed factor cache if configured
         # (after bar subscription so _expected_instruments is available for validation)
@@ -590,6 +599,35 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             # First instrument arrived → start one-shot timeout alert
             self._set_flush_alert(ts)
 
+    def _load_extra_data_configs(
+        self, factor_config: FactorConfig | None,
+    ) -> list[ExtraDataConfig]:
+        """Load extra data configs from file or legacy fields."""
+        if self._config.extra_data_path:
+            try:
+                configs = load_extra_data_config(self._config.extra_data_path)
+                self.log.info(
+                    f"Loaded {len(configs)} extra data configs from "
+                    f"{self._config.extra_data_path}"
+                )
+                return configs
+            except Exception as e:
+                self.log.warning(f"Failed to load extra_data config: {e}")
+                return []
+
+        # Backward compat: convert legacy fields
+        configs: list[ExtraDataConfig] = []
+        if self._config.subscribe_funding_rates:
+            configs.append(ExtraDataConfig(name="funding_rate", source="catalog"))
+        if self._config.oi_data_path:
+            configs.append(ExtraDataConfig(
+                name="open_interest",
+                source="parquet",
+                path=self._config.oi_data_path,
+                timeframe=self._config.bar_spec or "4h",
+            ))
+        return configs
+
     def on_funding_rate(self, funding_rate: FundingRateUpdate) -> None:
         """Cache latest funding rate for injection into bar_data.
 
@@ -604,6 +642,11 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         """Flush a timestamp, compute all factors, and publish results."""
         if self._engine is None:
             return
+
+        # Inject broadcast fields BEFORE flush
+        # (all bars received → BTC/ETH close is known and consistent)
+        if self._broadcast_configs:
+            self._inject_broadcast_staged(ts)
 
         # Use cached results if available, otherwise compute live
         if self._cached_results is not None and ts in self._cached_results:
@@ -642,6 +685,42 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             from nautilus_quants.utils.cache_keys import FACTOR_VALUES_CACHE_KEY
 
             self.cache.add(FACTOR_VALUES_CACHE_KEY, factor_values.to_json().encode())
+
+    def _inject_broadcast_staged(self, ts: int) -> None:
+        """Inject broadcast fields into Buffer staging before flush.
+
+        Called after all instruments have reported for ``ts``.
+        Resolves broadcast instrument patterns on first call.
+        """
+        if self._engine is None:
+            return
+
+        # Lazy-resolve broadcast patterns → actual instrument IDs
+        if not self._broadcast_resolved and self._broadcast_configs:
+            for cfg in self._broadcast_configs:
+                pattern = cfg.instruments[0] if cfg.instruments else ""
+                if not pattern:
+                    continue
+                pattern_upper = pattern.upper()
+                matched = next(
+                    (i for i in self._expected_instruments
+                     if pattern_upper in i.upper()),
+                    None,
+                )
+                if matched:
+                    self._broadcast_resolved[cfg.name] = matched
+                else:
+                    self.log.warning(
+                        f"Broadcast '{cfg.name}': instrument '{pattern}' "
+                        f"not found in universe"
+                    )
+
+        for cfg in self._broadcast_configs:
+            matched = self._broadcast_resolved.get(cfg.name)
+            if matched:
+                self._engine._buffer.inject_staged_field(
+                    ts, cfg.name, matched,
+                )
 
     # -------------------------------------------------------------------------
     # Flush timeout (one-shot time alert)
