@@ -720,7 +720,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 pattern_upper = pattern.upper()
                 matched = next(
                     (i for i in self._expected_instruments
-                     if pattern_upper in i.upper()),
+                     if i.upper().startswith(pattern_upper)),
                     None,
                 )
                 if matched:
