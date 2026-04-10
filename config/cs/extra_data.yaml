@@ -20,6 +20,8 @@ open_interest:
 
 quote_volume:
   source: bar
+  path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+  timeframe: "4h"
 
 btc_close:
   source: broadcast
