@@ -303,15 +303,17 @@ def _load_catalog_field(
     """Load FundingRateUpdate from catalog and build aligned panel.
 
     Refactored from ``FactorEvaluator._load_funding_rate_panel()``.
+    Uses ``cfg.path`` if set, otherwise falls back to ``catalog_path``.
     """
-    if not catalog_path:
-        logger.warning("Catalog field '%s': no catalog_path provided", cfg.name)
+    effective_path = cfg.path or catalog_path
+    if not effective_path:
+        logger.warning("Catalog field '%s': no path provided", cfg.name)
         return None
 
     try:
         from nautilus_trader.persistence.catalog import ParquetDataCatalog
 
-        catalog = ParquetDataCatalog(catalog_path)
+        catalog = ParquetDataCatalog(effective_path)
         fr_data: list = []
         target_instruments = cfg.instruments or instruments
         for inst in target_instruments:
