@@ -1,0 +1,178 @@
+# CS Strategy Backtest — Extra Data Sources E2E Test
+# Tests all 5 extra data sources: FR, OI, quote_volume, btc_close, eth_close
+#
+# 67 symbols with confirmed Bybit OI/FR data
+# 时间范围: 2025-01-01 ~ 2025-03-31
+# 初始资金: 10000 USDT
+# 持仓数量: 多空各15个
+# 单品种仓位: 200 USDT
+# 因子: factors_extra_data.yaml (13 factors using all 5 data sources)
+#
+# Usage:
+#   python -m nautilus_quants.backtest run config/cs/backtest_extra_data.yaml
+
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "4h"
+    # 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+    # (10 delisted/renamed on Bybit excluded)
+    instrument_ids: &instrument_ids
+      - "1INCHUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "ALGOUSDT.BINANCE"
+      - "ALICEUSDT.BINANCE"
+      - "ANKRUSDT.BINANCE"
+      - "ARUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "AXSUSDT.BINANCE"
+      - "BATUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "BTCUSDT.BINANCE"
+      - "C98USDT.BINANCE"
+      - "CHRUSDT.BINANCE"
+      - "CHZUSDT.BINANCE"
+      - "COMPUSDT.BINANCE"
+      - "COTIUSDT.BINANCE"
+      - "CRVUSDT.BINANCE"
+      - "DASHUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "DUSKUSDT.BINANCE"
+      - "DYDXUSDT.BINANCE"
+      - "EGLDUSDT.BINANCE"
+      - "ENJUSDT.BINANCE"
+      - "ENSUSDT.BINANCE"
+      - "ETCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "FILUSDT.BINANCE"
+      - "GALAUSDT.BINANCE"
+      - "GRTUSDT.BINANCE"
+      - "HBARUSDT.BINANCE"
+      - "IOSTUSDT.BINANCE"
+      - "IOTAUSDT.BINANCE"
+      - "IOTXUSDT.BINANCE"
+      - "KSMUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "LPTUSDT.BINANCE"
+      - "LRCUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "MANAUSDT.BINANCE"
+      - "MASKUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "ONEUSDT.BINANCE"
+      - "PEOPLEUSDT.BINANCE"
+      - "QTUMUSDT.BINANCE"
+      - "RSRUSDT.BINANCE"
+      - "RUNEUSDT.BINANCE"
+      - "SANDUSDT.BINANCE"
+      - "SFPUSDT.BINANCE"
+      - "SNXUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "STORJUSDT.BINANCE"
+      - "SUSHIUSDT.BINANCE"
+      - "SXPUSDT.BINANCE"
+      - "THETAUSDT.BINANCE"
+      - "TRXUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "VETUSDT.BINANCE"
+      - "XLMUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "XTZUSDT.BINANCE"
+      - "YFIUSDT.BINANCE"
+      - "ZECUSDT.BINANCE"
+      - "ZENUSDT.BINANCE"
+    start_time: "2025-01-01"
+    end_time: "2025-03-31"
+
+engine:
+  trader_id: "BACKTESTER-EXTRA-DATA-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true
+
+  actors:
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cs/factors_extra_data.yaml"
+        extra_data_path: "config/cs/extra_data.yaml"
+        interval: "4h"
+        signal_prefix: "factor"
+        max_history: 0
+        publish_signals: true
+
+    - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
+      config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
+      config:
+        interval: "4h"
+        venue_name: "BINANCE"
+        currency: "USDT"
+
+    - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
+      config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
+      config:
+        composite_factor: "beta_residual"
+        rebalance_interval: 2
+        selection_policy: "TopKDropoutSelectionPolicy"
+        position_mode: "fixed"
+        position_value: 200
+        topk_long: 15
+        topk_short: 15
+        n_drop_long: 3
+        n_drop_short: 3
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: *instrument_ids
+        execution_policy: "MarketExecutionPolicy"
+
+report:
+  output_dir: "logs/performance_extra_data"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "Extra Data Sources E2E Backtest (2025-Q1, 67 coins)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+  quantstats:
+    enabled: true
+    title: "Extra Data QuantStats Analysis"
+    output_format:
+      - html
+  position_viz:
+    enabled: true
+    title: "Extra Data Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "4h"
