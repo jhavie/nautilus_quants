@@ -263,6 +263,24 @@ def analyze(
             _env = resolve_env(env_name, config.registry_env)
             _db = RegistryDatabase.for_environment(_env, config.registry_db_dir)
             already: set[str] = set()
+
+            # Build hash → factor_id lookup from DB (Python-side matching,
+            # avoids dependency on expression_hash column in schema).
+            _existing_hashes: dict[str, str] = {}
+            try:
+                rows = _db.fetch_all(
+                    "SELECT f.factor_id, f.expression FROM factors f "
+                    "JOIN alpha_analysis_metrics m "
+                    "ON f.factor_id = m.factor_id"
+                )
+                for r in rows:
+                    try:
+                        _existing_hashes[_expr_hash(r[1])] = r[0]
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             for fname in list(factor_series.keys()):
                 fdef = factor_config.get_factor(fname)
                 if fdef is None:
@@ -271,14 +289,7 @@ def analyze(
                     h = _expr_hash(fdef.expression)
                 except Exception:
                     continue
-                row = _db.fetch_one(
-                    "SELECT f.factor_id FROM factors f "
-                    "JOIN alpha_analysis_metrics m "
-                    "ON f.factor_id = m.factor_id "
-                    "WHERE f.expression_hash = ? LIMIT 1",
-                    [h],
-                )
-                if row is not None:
+                if h in _existing_hashes:
                     already.add(fname)
             _db.close()
 
