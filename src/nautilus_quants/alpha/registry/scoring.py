@@ -619,6 +619,52 @@ def dedup_by_fingerprint(
     return df.drop(index=list(to_remove), errors="ignore")
 
 
+def _topo_sort_variables(variables: dict[str, str]) -> dict[str, str]:
+    """Sort variables so dependencies are evaluated first.
+
+    A variable V depends on another variable U if U's name appears as a
+    token in V's expression.  Simple word-boundary check is sufficient
+    because variable names are identifiers.
+    """
+    import re
+
+    names = set(variables)
+    # Build adjacency: var → set of vars it depends on
+    deps: dict[str, set[str]] = {}
+    for name, expr in variables.items():
+        tokens = set(re.findall(r"[A-Za-z_]\w*", expr))
+        deps[name] = tokens & names - {name}
+
+    # Kahn's algorithm
+    sorted_names: list[str] = []
+    in_degree = {n: 0 for n in names}
+    for n, d in deps.items():
+        for dep in d:
+            in_degree[n] += 1  # n depends on dep
+
+    # Reverse edges for traversal
+    dependents: dict[str, list[str]] = {n: [] for n in names}
+    for n, d in deps.items():
+        for dep in d:
+            dependents[dep].append(n)
+
+    queue = [n for n in names if in_degree[n] == 0]
+    while queue:
+        node = queue.pop(0)
+        sorted_names.append(node)
+        for dep in dependents[node]:
+            in_degree[dep] -= 1
+            if in_degree[dep] == 0:
+                queue.append(dep)
+
+    # Fallback: append any remaining (cyclic) variables
+    for n in names:
+        if n not in sorted_names:
+            sorted_names.append(n)
+
+    return {n: variables[n] for n in sorted_names}
+
+
 def compute_factor_correlation(
     factor_ids: list[str],
     config: ScoringConfig,
@@ -754,6 +800,10 @@ def compute_factor_correlation(
 
             loaded_count = 0
             for source, (variables, parameters, all_records) in merged.items():
+                # Topological sort: variables that reference other variables
+                # must be evaluated after their dependencies.
+                variables = _topo_sort_variables(variables)
+
                 # Split into chunks to limit memory
                 for chunk_idx in range(0, len(all_records), _CHUNK_SIZE):
                     chunk = all_records[chunk_idx:chunk_idx + _CHUNK_SIZE]
