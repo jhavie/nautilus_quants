@@ -787,6 +787,72 @@ class CsVectorNeut(CrossSectionalOperator):
         return residual
 
 
+@register_operator
+class TsMeanrank(CrossSectionalOperator):
+    """ts_meanrank(x, d): Cross-sectional rank then time-series rolling mean.
+
+    Equivalent to ts_mean(cs_rank(x), d) but as a single operator.
+    Useful for smoothing cross-sectional factor rankings over time.
+
+    Steps:
+      1. Cross-sectional rank (row-wise, popbo semantics: method='min', pct=True)
+      2. Time-series rolling mean (column-wise) with window d
+    """
+
+    name = "ts_meanrank"
+    min_args = 2
+    max_args = 2
+
+    def compute(
+        self,
+        values: dict[str, float],
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        """Scalar fallback: cross-sectional rank only (no time-series context).
+
+        In scalar mode we cannot perform time-series rolling, so we return
+        the cross-sectional rank as a best-effort approximation.
+        """
+        if not values:
+            return {}
+
+        valid_items = [(k, v) for k, v in values.items() if not np.isnan(v)]
+        if not valid_items:
+            return {k: float("nan") for k in values}
+
+        n = len(valid_items)
+        result: dict[str, float] = {}
+        for k, v in values.items():
+            if np.isnan(v):
+                result[k] = float("nan")
+            else:
+                count_less = sum(1 for _, val in valid_items if val < v)
+                result[k] = float((count_less + 1) / n)
+
+        return result
+
+    def compute_panel(
+        self,
+        data: pd.DataFrame,
+        window: int = 20,
+        **kwargs: Any,
+    ) -> pd.DataFrame:
+        """Panel compute: cs_rank (row-wise) then rolling mean (column-wise).
+
+        Args:
+            data: DataFrame[T x N] (rows=timestamps, cols=instruments).
+            window: Rolling window size for the time-series mean step.
+
+        Returns:
+            DataFrame[T x N] with smoothed cross-sectional ranks.
+        """
+        window = int(window) if window else 20
+        # Step 1: cross-sectional rank (row-wise, popbo semantics)
+        ranked = data.rank(axis=1, method="min", pct=True)
+        # Step 2: time-series rolling mean (column-wise)
+        return ranked.rolling(window, min_periods=1).mean()
+
+
 # ============================================================================
 # Aliases for WorldQuant BRAIN compatibility (无前缀版本)
 # ============================================================================
@@ -915,6 +981,14 @@ def vector_neut(
     return CsVectorNeut().compute(values, y_values=y_values)
 
 
+def ts_meanrank(
+    values: dict[str, float],
+    window: int = 20,
+) -> dict[str, float]:
+    """Cross-sectional rank then time-series mean."""
+    return TsMeanrank().compute(values, extra_0=window)
+
+
 # Export all function wrappers
 CROSS_SECTIONAL_OPERATORS = {
     # Original cs_ prefixed operators
@@ -932,6 +1006,8 @@ CROSS_SECTIONAL_OPERATORS = {
     "clip_quantile": clip_quantile,  # FMZ style
     # BRAIN operators
     "vector_neut": vector_neut,
+    # Mixed-domain operators (CS + TS)
+    "ts_meanrank": ts_meanrank,
     # Aliases for backward compatibility
     "rank": rank,
     "scale": scale,
@@ -959,4 +1035,5 @@ CS_OPERATOR_INSTANCES: dict[str, CrossSectionalOperator] = {
     "demean": CsDemeanAlias(),
     "vector_neut": CsVectorNeut(),
     "c_residual": CsVectorNeut(),
+    "ts_meanrank": TsMeanrank(),
 }

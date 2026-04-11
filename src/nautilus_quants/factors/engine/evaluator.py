@@ -227,6 +227,9 @@ class Evaluator(ASTVisitor):
                 # correlation(x, y, window) → data=x, data2=y, window=window
                 extra_kwargs["data2"] = args[1]
                 window = int(args[2]) if not isinstance(args[2], str) else 1
+                # Pass extra positional args (e.g., n for rolling_selmean_top)
+                for i in range(3, len(args)):
+                    extra_kwargs[f"extra_{i - 3}"] = args[i]
             elif len(args) > 1 and isinstance(args[1], (pd.DataFrame, pd.Series)):
                 # Element-wise operation: ts_min(df, df) → min(df, df)
                 _TS_ELEMENTWISE = {"ts_min": "min", "ts_max": "max"}
