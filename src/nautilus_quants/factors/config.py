@@ -42,10 +42,12 @@ class CompositeConfig:
     Attributes:
         name: Output factor name (default "composite")
         transform: Transform applied before weighting (normalize/cs_rank/cs_zscore/raw)
+        nan_policy: How to handle NaN in composite (strict/fill_neutral)
         weights: Factor name → weight mapping
     """
     name: str = "composite"
     transform: str = "normalize"
+    nan_policy: str = "strict"
     weights: dict[str, float] = field(default_factory=dict)
 
 
@@ -135,6 +137,13 @@ _TRANSFORM_SUFFIXES: dict[str, str] = {
     "cs_zscore": "_zscored",
 }
 
+_NEUTRAL_VALUES: dict[str, float] = {
+    "normalize": 0.0,
+    "cs_zscore": 0.0,
+    "cs_rank": 0.5,
+    "raw": 0.0,
+}
+
 
 def _build_composite_pipeline(
     raw: dict[str, Any],
@@ -145,6 +154,7 @@ def _build_composite_pipeline(
         return []
 
     transform = raw.get("transform", "normalize")
+    nan_policy = raw.get("nan_policy", "strict")
     comp_name = raw.get("name", "composite")
 
     pipeline: list[FactorDefinition] = []
@@ -153,7 +163,16 @@ def _build_composite_pipeline(
     if transform == "raw":
         # No intermediate factors
         for factor_name, weight in weights.items():
-            terms.append(f"{weight} * {factor_name}")
+            if nan_policy == "fill_neutral":
+                neutral = _NEUTRAL_VALUES.get(transform, 0.0)
+                filled_name = f"{factor_name}_filled"
+                pipeline.append(FactorDefinition(
+                    name=filled_name,
+                    expression=f"fill_nan({factor_name}, {neutral})",
+                ))
+                terms.append(f"{weight} * {filled_name}")
+            else:
+                terms.append(f"{weight} * {factor_name}")
     else:
         template = _TRANSFORM_TEMPLATES.get(transform)
         suffix = _TRANSFORM_SUFFIXES.get(transform, f"_{transform}")
@@ -166,7 +185,16 @@ def _build_composite_pipeline(
                 name=derived_name,
                 expression=template.format(factor=factor_name),
             ))
-            terms.append(f"{weight} * {derived_name}")
+            if nan_policy == "fill_neutral":
+                neutral = _NEUTRAL_VALUES.get(transform, 0.0)
+                filled_name = f"{factor_name}_filled"
+                pipeline.append(FactorDefinition(
+                    name=filled_name,
+                    expression=f"fill_nan({derived_name}, {neutral})",
+                ))
+                terms.append(f"{weight} * {filled_name}")
+            else:
+                terms.append(f"{weight} * {derived_name}")
 
     composite_expr = " + ".join(terms)
     pipeline.append(FactorDefinition(
