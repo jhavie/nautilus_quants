@@ -165,10 +165,14 @@ _CONSTRUCTION_RULES = """\
    - 24/7 market — no overnight gaps, no weekend effects
    - High volatility — use shorter windows (6-42 bars) for responsiveness
    - OHLCV + funding_rate + open_interest available
-   - funding_rate: settlement every 8h (00:00/08:00/16:00 UTC), positive=longs pay shorts
-   - open_interest: total open positions in base asset, 4h granularity
    - {window_guide}
-   - **CRITICAL:** With 4h bars, funding_rate only changes every 2 bars (forward-filled).
+   - **CRITICAL — FR/OI are 8h signals on a 4h grid:**
+     - funding_rate changes every 2 bars (8h settlement, forward-filled between)
+     - delta(funding_rate, 1) is 0 half the time — use delta(funding_rate, 2) instead
+     - When combining FR/OI with price data, use 8h-aligned variables:
+       ret_8h, vol_8h, volume_8h, range_8h, vwap_8h (defined in Available Variables)
+     - Use EVEN windows for FR/OI: ts_slope(funding_rate, 12), correlation(ret_8h, funding_rate, 12)
+     - Odd windows waste half the data: ts_slope(funding_rate, 5) has only 2-3 independent points
 
 6. **Market factor variables:**
    - btc_close/eth_close are broadcast (same value across all instruments)
@@ -192,7 +196,8 @@ _AVAILABLE_VARIABLES = (
     "close, open, high, low, volume, returns, "
     "funding_rate, open_interest, quote_volume, "
     "btc_close, eth_close, btc_returns, eth_returns, "
-    "btc_vol, eth_vol, btc_beta, eth_beta, vwap\n"
+    "btc_vol, eth_vol, btc_beta, eth_beta, vwap, "
+    "ret_8h, vol_8h, volume_8h, range_8h, vwap_8h\n"
     "- returns = delta(close,1)/delay(close,1), pre-computed\n"
     "- funding_rate = 8h perpetual funding rate (typically ±0.01%, forward-filled)\n"
     "- open_interest = total open interest in base asset units (4h granularity)\n"
@@ -205,7 +210,13 @@ _AVAILABLE_VARIABLES = (
     "- btc_vol = ts_std(btc_returns, 42), BTC 7-day realized volatility\n"
     "- eth_vol = ts_std(eth_returns, 42), ETH 7-day realized volatility\n"
     "- btc_beta = rolling beta to BTC (42 bars), measures sensitivity to BTC moves\n"
-    "- eth_beta = rolling beta to ETH (42 bars), measures sensitivity to ETH moves"
+    "- eth_beta = rolling beta to ETH (42 bars), measures sensitivity to ETH moves\n"
+    "### 8h-aligned variables (use when combining with funding_rate / open_interest):\n"
+    "- ret_8h = delta(close, 2) / delay(close, 2), 8h return matching FR cadence\n"
+    "- vol_8h = ts_std(returns, 2), 8h realized volatility (2-bar)\n"
+    "- volume_8h = ts_sum(volume, 2), aggregated 8h volume\n"
+    "- range_8h = (ts_max(high, 2) - ts_min(low, 2)) / replace_zero(delay(close, 2)), 8h range\n"
+    "- vwap_8h = ts_sum(quote_volume, 2) / replace_zero(ts_sum(volume, 2)), 8h VWAP"
 )
 
 
