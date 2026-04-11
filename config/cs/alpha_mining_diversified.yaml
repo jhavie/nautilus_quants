@@ -1,15 +1,15 @@
-# Alpha Factor Mining — Diversified 4-Direction Configuration
+# Alpha Factor Mining — Diversified 5-Direction Configuration
 # Uses extra data sources: quote_volume, btc_close/eth_close, funding_rate, open_interest
 #
 # Usage:
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining_diversified.yaml --rounds 3
 #
-# Directions:
+# Directions (theme-only, LLM uses all 47 operators + 18 variables freely):
 #   1. size       — 市值/成交额因子 (quote_volume)
 #   2. market     — 市场因子 (btc_beta, eth_beta)
-#   3. liquidity  — 流动性因子 (volume, quote_volume)
+#   3. liquidity  — 流动性因子 (volume, quote_volume, vwap)
 #   4. sentiment  — 情绪因子 (funding_rate, open_interest)
-#   5. volatility — 波动率因子 (high, low, close)
+#   5. volatility — 波动率因子 (high, low, range)
 
 registry:
   env: test
@@ -35,7 +35,7 @@ mining:
     max_window: 720
     max_numeric_ratio: 0.3
 
-  # ── 4 exploration directions ──
+  # ── 5 exploration directions (theme-only, all operators/variables available) ──
   directions:
     size:
       theme: >-
@@ -44,24 +44,6 @@ mining:
         relative changes predict cross-sectional returns.
         Key intuition: small-cap (low quote_volume) vs large-cap behavior,
         size momentum, turnover concentration.
-      operators:
-        - ts_mean
-        - ts_std
-        - ts_sum
-        - ts_rank
-        - delta
-        - delay
-        - cs_rank
-        - cs_zscore
-        - log
-        - abs
-        - sign
-        - replace_zero
-      variables:
-        - close
-        - volume
-        - quote_volume
-        - returns
       tags: [size, turnover, quote_volume]
       rounds: 3
 
@@ -72,26 +54,6 @@ mining:
         predicts returns. Use btc_beta, eth_beta, btc_returns,
         eth_returns to capture market exposure, beta momentum,
         beta dispersion, and idiosyncratic vs systematic risk.
-      operators:
-        - ts_mean
-        - ts_std
-        - ts_rank
-        - delta
-        - delay
-        - correlation
-        - covariance
-        - cs_rank
-        - cs_zscore
-        - abs
-        - sign
-        - replace_zero
-      variables:
-        - close
-        - returns
-        - btc_beta
-        - eth_beta
-        - btc_returns
-        - eth_returns
       tags: [market, beta, systematic]
       rounds: 3
 
@@ -101,27 +63,6 @@ mining:
         Explore how volume patterns, VWAP deviation, and turnover
         dynamics predict returns. Key patterns: volume surge/drought,
         VWAP premium/discount, relative volume shifts, liquidity shocks.
-      operators:
-        - ts_mean
-        - ts_std
-        - ts_sum
-        - ts_rank
-        - ts_argmax
-        - ts_argmin
-        - delta
-        - delay
-        - cs_rank
-        - cs_zscore
-        - log
-        - abs
-        - sign
-        - replace_zero
-      variables:
-        - close
-        - volume
-        - quote_volume
-        - vwap
-        - returns
       tags: [liquidity, volume, vwap]
       rounds: 3
 
@@ -134,23 +75,6 @@ mining:
         funding_rate: positive=longs pay shorts (bullish crowding),
         only updates every 2 bars (8h settlement).
         open_interest: total open positions in base asset.
-      operators:
-        - ts_mean
-        - ts_std
-        - ts_rank
-        - delta
-        - delay
-        - cs_rank
-        - cs_zscore
-        - correlation
-        - abs
-        - sign
-        - replace_zero
-      variables:
-        - close
-        - returns
-        - funding_rate
-        - open_interest
       tags: [sentiment, funding_rate, open_interest]
       rounds: 3
 
@@ -162,28 +86,6 @@ mining:
         Key patterns: volatility compression→expansion (breakout),
         high-low range relative to recent history, volatility rank
         reversal, intraday range vs close-to-close volatility.
-      operators:
-        - ts_std
-        - ts_mean
-        - ts_min
-        - ts_max
-        - ts_rank
-        - ts_argmax
-        - ts_argmin
-        - delta
-        - delay
-        - cs_rank
-        - cs_zscore
-        - log
-        - sqrt
-        - abs
-        - sign
-        - replace_zero
-      variables:
-        - close
-        - high
-        - low
-        - returns
       tags: [volatility, range, regime]
       rounds: 3
 
