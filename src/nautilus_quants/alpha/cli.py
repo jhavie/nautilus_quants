@@ -1385,6 +1385,8 @@ def promote(
     try:
         # 0. Load scoring config
         scoring_cfg = load_scoring_config(config_path)
+        # CLI flags override config values
+        competitive = competitive or scoring_cfg.dedup.competitive
         if max_factors is not None:
             # Override from CLI
             scoring_cfg = scoring_cfg.__class__(
