@@ -134,8 +134,7 @@ class DataConfig:
     bar_spec: str = "4h"
     factor_configs: list[str] = field(default_factory=list)
     instrument_ids: list[str] = field(default_factory=list)
-    funding_rate: bool = False
-    oi_data_path: str = ""
+    extra_data_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -251,8 +250,7 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             bar_spec=da.get("bar_spec", "4h"),
             factor_configs=da.get("factor_configs", []),
             instrument_ids=da.get("instrument_ids", []),
-            funding_rate=da.get("funding_rate", False),
-            oi_data_path=da.get("oi_data_path", ""),
+            extra_data_path=da.get("extra_data_path", ""),
         ),
     )
 
@@ -661,37 +659,18 @@ def compute_factor_correlation(
             "for correlation computation.",
         )
 
-    # Build analysis config for FR/OI data injection
+    # Build analysis config for extra data injection
     analysis_config = None
-    if data_cfg.funding_rate or data_cfg.oi_data_path:
+    if data_cfg.extra_data_path:
         from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
-        from nautilus_quants.factors.engine.extra_data import ExtraDataConfig
-
-        # Convert legacy fields to extra_data configs (same as load_analysis_config)
-        extra_data: list[ExtraDataConfig] = []
-        if data_cfg.funding_rate:
-            extra_data.append(ExtraDataConfig(
-                name="funding_rate",
-                source="catalog",
-                path=data_cfg.catalog_path,
-            ))
-        if data_cfg.oi_data_path:
-            extra_data.append(ExtraDataConfig(
-                name="open_interest",
-                source="parquet",
-                path=data_cfg.oi_data_path,
-                timeframe=data_cfg.bar_spec,
-            ))
+        from nautilus_quants.factors.engine.extra_data import load_extra_data_config
 
         analysis_config = AlphaAnalysisConfig(
             catalog_path=data_cfg.catalog_path,
             factor_config_path="",
             instrument_ids=data_cfg.instrument_ids,
             bar_spec=data_cfg.bar_spec,
-            extra_data=extra_data,
-            funding_rate=data_cfg.funding_rate,
-            oi_data_path=data_cfg.oi_data_path,
-            oi_timeframe=data_cfg.bar_spec,
+            extra_data=load_extra_data_config(data_cfg.extra_data_path),
         )
 
     # Load bar data
