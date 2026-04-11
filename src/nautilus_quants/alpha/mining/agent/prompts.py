@@ -93,6 +93,7 @@ _OPERATOR_REFERENCE = """\
 - if_else(cond, true_val, false_val) — Ternary selection
 - is_nan(x)                 — Returns 1.0 if NaN, else 0.0
 - replace_zero(x, eps=0.0001) — Replace exact zeros with epsilon
+- fill_nan(x, value)          — Replace NaN with a constant
 
 ### Ternary Operator (inline syntax)
 - condition ? true_expr : false_expr
@@ -129,12 +130,14 @@ _CONSTRUCTION_RULES = """\
    - GOOD: `delta(volume, 6) / replace_zero(delay(volume, 6))`
    - BAD:  `delta(volume, 6) / delay(volume, 6)`
 
-3. **Cross-sectional normalization.** Wrap final output in `cs_rank()` or `cs_zscore()`:
-   - This ensures factors are comparable across instruments with different scales
+3. **Cross-sectional normalization.** Ensure output is scale-invariant across instruments:
+   - Preferred: `winsorize(expr, 3)` — clips outliers at ±3σ, preserves distribution shape
+   - Acceptable: `cs_rank(expr)` — ordinal only, use when distribution is heavily skewed
+   - Do NOT wrap with `normalize()` — the composite pipeline handles normalization
 
-4. **Robust over precise.** Prefer rank-based measures over raw values:
+4. **Robust over precise.** Prefer rank-based measures for INTERMEDIATE steps:
    - `ts_rank(x, w)` over `ts_mean(x, w)` — resistant to outliers
-   - `cs_rank(x)` over raw `x` — removes scale differences
+   - For FINAL output, prefer `winsorize()` over `cs_rank()` to preserve distribution info
 
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects

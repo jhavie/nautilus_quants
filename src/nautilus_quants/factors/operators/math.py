@@ -302,6 +302,33 @@ def is_nan(value: float | np.ndarray) -> float | np.ndarray:
 
 
 @register_operator
+class FillNan(MathOperator):
+    """Replace NaN values with a constant.
+
+    Usage in expressions: ``fill_nan(x, 0)``
+    """
+
+    name = "fill_nan"
+    min_args = 2
+    max_args = 2
+
+    def compute(self, value: float | np.ndarray, fill_value: float = 0.0, **kwargs: Any) -> float | np.ndarray:
+        """Replace NaN with *fill_value*."""
+        if isinstance(value, (pd.DataFrame, pd.Series)):
+            return value.fillna(fill_value)
+        if isinstance(value, np.ndarray):
+            result = value.copy()
+            result[np.isnan(result)] = fill_value
+            return result
+        return fill_value if (isinstance(value, float) and np.isnan(value)) else value
+
+
+def fill_nan(value: float | np.ndarray, fill_value: float = 0.0) -> float | np.ndarray:
+    """Replace NaN with a constant."""
+    return FillNan().compute(value, fill_value)
+
+
+@register_operator
 class ReplaceZero(MathOperator):
     """Replace exact zero values with epsilon.
 
@@ -348,4 +375,5 @@ MATH_OPERATORS = {
     "if_else": if_else,
     "is_nan": is_nan,
     "replace_zero": replace_zero,
+    "fill_nan": fill_nan,
 }
