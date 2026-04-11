@@ -197,6 +197,8 @@ def _filter_operator_reference(subset: tuple[str, ...]) -> str:
     """Filter operator reference to only include *subset* operators.
 
     Always keeps the Ternary and Arithmetic sections.
+    Handles combined bullet lines like ``floor(x), ceil(x)`` and
+    ``max(a, b), min(a, b)`` by matching any name on the line.
     """
     names = frozenset(subset)
     lines = _OPERATOR_REFERENCE.strip().split("\n")
@@ -218,8 +220,9 @@ def _filter_operator_reference(subset: tuple[str, ...]) -> str:
 
         stripped = line.strip()
         if stripped.startswith("- "):
-            m = re.match(r"- (\w+)\(", stripped)
-            if m and m.group(1) in names:
+            # Extract ALL function names on this line: "floor(x), ceil(x)" → {floor, ceil}
+            line_names = set(re.findall(r"(\w+)\(", stripped))
+            if line_names & names:
                 if not header_emitted and current_header:
                     result.append(current_header)
                     header_emitted = True
@@ -313,10 +316,13 @@ def build_generation_prompt(
         sections.append(
             "## Hard Constraints (expressions violating ANY will be REJECTED)\n"
             f"- Maximum expression length: {constraints.max_char_length} characters\n"
+            f"- Maximum AST node count: {constraints.max_node_count} nodes\n"
             f"- Maximum AST depth: {constraints.max_depth} levels\n"
             f"- Maximum function nesting: {constraints.max_func_nesting} levels\n"
             f"- Maximum distinct variables: {constraints.max_variables}\n"
             f"- Maximum window parameter: {constraints.max_window} bars\n"
+            f"- Maximum numeric literal ratio: {constraints.max_numeric_ratio:.0%} "
+            f"of AST nodes\n"
             f"- Optimal expression length: 50-150 characters (best generalization)\n"
             f"- Expressions >150 chars almost ALWAYS overfit on crypto data.\n"
             f"  These are enforced by an AST validator. PREFER simpler expressions."

@@ -39,6 +39,17 @@ class TestFilterOperatorReference:
         assert "cs_rank" in result
         assert "abs" in result
 
+    def test_combined_bullet_line_floor_ceil(self):
+        # "- floor(x), ceil(x)" is a single line with two operators
+        result = _filter_operator_reference(("floor",))
+        assert "floor" in result
+        assert "ceil" in result  # same line, both included
+
+    def test_combined_bullet_line_max_min(self):
+        result = _filter_operator_reference(("min",))
+        assert "min" in result
+        assert "max" in result  # "- max(a, b), min(a, b)" is one line
+
 
 # ── build_generation_prompt with theme ───────────────────────────
 
@@ -151,6 +162,21 @@ class TestPromptConstraints:
         assert "Hard Constraints" in prompt
         assert "4 levels" in prompt
         assert "500 bars" in prompt
+
+    def test_constraints_lists_all_enforced_limits(self):
+        c = ComplexityConstraints()
+        prompt = build_generation_prompt(
+            round_num=1, num_factors=8, bar_spec="4h",
+            previous_factors=[], top_factors=[],
+            constraints=c,
+        )
+        assert f"{c.max_char_length} characters" in prompt
+        assert f"{c.max_node_count} nodes" in prompt
+        assert f"{c.max_depth} levels" in prompt
+        assert f"{c.max_func_nesting} levels" in prompt
+        assert f"{c.max_variables}" in prompt
+        assert f"{c.max_window} bars" in prompt
+        assert "30%" in prompt  # max_numeric_ratio=0.3
 
     def test_no_constraints_no_section(self):
         prompt = build_generation_prompt(

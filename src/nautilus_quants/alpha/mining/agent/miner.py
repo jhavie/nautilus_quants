@@ -225,7 +225,14 @@ class AlphaMiner:
     # ── Multi-direction mode ─────────────────────────────────────────
 
     def _run_diversified(self, default_rounds: int) -> None:
-        """Run mining across multiple exploration directions."""
+        """Run mining across multiple exploration directions.
+
+        All directions share a single expression dedup pool so that
+        identical factors are never generated twice, even across
+        different themes.  Direction-specific operator/variable
+        subsets guide the LLM toward different signal families while
+        the shared pool guarantees a globally unique factor set.
+        """
         directions = self._config.directions
 
         print(f"Diversified mining session: {self._session_dir}")
