@@ -131,22 +131,29 @@ _CONSTRUCTION_RULES = """\
 ## Factor Construction Rules (CRITICAL — follow strictly)
 
 1. **Never use raw prices directly.** Always use relative changes or rankings:
-   - GOOD: `delta(close, 1) / delay(close, 1)`, `winsorize(close, 3)`
+   - GOOD: `delta(close, 1) / delay(close, 1)`, `cs_rank(close)`, `(close - delay(close, 1)) / replace_zero(ts_std(close, 20))`
    - BAD:  `close`, `close - open`  (scale differs across instruments)
 
 2. **Prevent division by zero.** Add epsilon to denominators:
    - GOOD: `delta(volume, 6) / replace_zero(delay(volume, 6))`
    - BAD:  `delta(volume, 6) / delay(volume, 6)`
 
-3. **Final output normalization.** Wrap the FINAL expression in ONE of (pick based on context):
-   - `winsorize(expr, 3)` — clips outliers at ±3σ, preserves distribution shape
-   - `cs_rank(expr)` — pure ordinal, use when distribution is heavily skewed or has extreme outliers
-   - Pick ONE, NEVER nest them (`winsorize(cs_rank(...))` or `cs_rank(winsorize(...))` is wrong)
+3. **Cross-sectional processing** — choose based on signal characteristics:
+   | Signal type | Operator | When to use |
+   |-------------|----------|-------------|
+   | Heavy tails / extreme outliers | `cs_rank(expr)` | volume ratios, OI spikes |
+   | Moderate outliers | `winsorize(expr, 3)` | returns, correlation values |
+   | Need market-neutral | `vector_neut(expr, btc_returns)` | any signal with BTC exposure |
+   | Isolate extremes only | `clip_quantile(expr, 0.1, 0.9)` | signals where middle is noise |
+   | Already bounded (e.g. corr) | no wrapper needed | correlation [-1,1], ts_rank [0,1] |
+   - Pick ONE outer wrapper. NEVER nest: `winsorize(cs_rank(...))` is wrong
    - Do NOT wrap with `normalize()` — the composite pipeline handles that
 
-4. **Robust over precise.** Prefer rank-based measures for intermediate steps:
-   - `ts_rank(x, w)` over `ts_mean(x, w)` — resistant to outliers in time-series
-   - `cs_rank(x)` is fine INSIDE an expression (e.g. `correlation(high, cs_rank(volume), 5)`)
+4. **Use diverse operators** in intermediate steps:
+   - `ts_rank(x, w)` — rank in time, resistant to outliers
+   - `cs_demean(x)` — remove cross-sectional average (isolate relative signal)
+   - `cs_rank(x)` — fine as intermediate input (e.g. `correlation(high, cs_rank(volume), 5)`)
+   - `scale_down(x, 0.5)` — map to [-0.5, 0.5] range, useful for interaction terms
 
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects
@@ -312,7 +319,29 @@ def build_generation_prompt(
         "conditions (high volume, high volatility, positive funding)\n"
         "- The subtraction acts as implicit standardization — "
         "the low-regime baseline removes noise\n"
-        "- Combine with cs_rank: `cs_rank(rolling_selmean_diff(...))`"
+        "- The output is already cross-sectionally comparable — "
+        "additional wrapping is optional"
+    )
+
+    # ── Cross-Sectional Processing Cookbook ──
+    sections.append(
+        "## Cross-Sectional Processing Cookbook\n\n"
+        "### Market neutralization (remove BTC/ETH beta exposure):\n"
+        "- `vector_neut(ts_slope(close, 20), btc_returns)` — BTC-neutral trend\n"
+        "- `vector_neut(returns, btc_returns)` — idiosyncratic return\n\n"
+        "### Interaction terms (combine two signals):\n"
+        "- `cs_demean(returns) * cs_rank(volume)` — volume-weighted relative return\n"
+        "- `cs_rank(funding_rate) * cs_rank(open_interest)` — FR × OI interaction\n\n"
+        "### Tail signal extraction:\n"
+        "- `clip_quantile(correlation(returns, volume, 20), 0.1, 0.9)` "
+        "— focus on extreme correlations\n"
+        "- `scale_down(ts_std(returns, 20), 0.5)` — bounded volatility signal\n\n"
+        "### Regime conditioning (from cutting operators):\n"
+        "- `rolling_selmean_diff(returns, volume, 20, 5)` "
+        "— high-volume vs low-volume return\n"
+        "- `if_else(funding_rate > 0, returns, 0) - "
+        "if_else(funding_rate < 0, returns, 0)` — FR regime split\n\n"
+        "Use these patterns as building blocks. Combine and vary them creatively."
     )
 
     # ── Output instructions ──
