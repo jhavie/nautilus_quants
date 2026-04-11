@@ -171,12 +171,33 @@ class FactorEvaluator:
                 )
 
         # --- Step 4: Convert to alphalens format ---
+        # Apply min_observations / min_coverage filter (like max_loss, pre-analysis)
+        acfg = self._analysis_config
+        min_obs = acfg.min_observations if acfg else 100
+        min_cov = acfg.min_coverage if acfg else 0.1
+
         factor_series: dict[str, pd.Series] = {}
         for fname, panel_df in factor_panels.items():
             stacked = panel_df.stack(future_stack=True).dropna()
             stacked.index.names = ["date", "asset"]
-            if len(stacked) > 0:
-                factor_series[fname] = stacked.astype(float)
+            n_obs = len(stacked)
+            if n_obs == 0:
+                continue
+            total_possible = panel_df.shape[0] * panel_df.shape[1]
+            coverage = n_obs / total_possible if total_possible > 0 else 0.0
+            if n_obs < min_obs:
+                logger.warning(
+                    "Factor '%s' skipped: n_observations=%d < min_observations=%d",
+                    fname, n_obs, min_obs,
+                )
+                continue
+            if coverage < min_cov:
+                logger.warning(
+                    "Factor '%s' skipped: coverage=%.1f%% < min_coverage=%.1f%%",
+                    fname, coverage * 100, min_cov * 100,
+                )
+                continue
+            factor_series[fname] = stacked.astype(float)
 
         return factor_series, pricing
 

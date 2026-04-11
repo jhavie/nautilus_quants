@@ -92,6 +92,8 @@ class AlphaAnalysisConfig:
         quantiles: Number of quantiles for grouping
         max_loss: Maximum allowed loss ratio for alphalens
         filter_zscore: Z-score threshold for outlier filtering (None to disable)
+        min_observations: Minimum factor-return observations to run analysis
+        min_coverage: Minimum coverage ratio (valid obs / total possible) to run analysis
         charts: List of chart types to generate
         output_dir: Base output directory
         output_format: Output file formats
@@ -108,6 +110,8 @@ class AlphaAnalysisConfig:
     quantiles: int = 5
     max_loss: float = 0.35
     filter_zscore: float | None = 20.0
+    min_observations: int = 100
+    min_coverage: float = 0.1
 
     charts: list[str] = field(default_factory=lambda: [
         "quantile_returns_bar",
@@ -208,6 +212,8 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         quantiles=raw.get("quantiles", 5),
         max_loss=raw.get("max_loss", 0.35),
         filter_zscore=raw.get("filter_zscore", 20.0),
+        min_observations=raw.get("min_observations", 100),
+        min_coverage=raw.get("min_coverage", 0.1),
         charts=raw.get("charts", []),
         output_dir=raw.get("output_dir", "logs/alpha_analysis"),
         output_format=tuple(output_format),
