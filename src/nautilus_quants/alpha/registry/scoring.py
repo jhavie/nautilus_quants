@@ -665,12 +665,30 @@ def compute_factor_correlation(
     analysis_config = None
     if data_cfg.funding_rate or data_cfg.oi_data_path:
         from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
+        from nautilus_quants.factors.engine.extra_data import ExtraDataConfig
+
+        # Convert legacy fields to extra_data configs (same as load_analysis_config)
+        extra_data: list[ExtraDataConfig] = []
+        if data_cfg.funding_rate:
+            extra_data.append(ExtraDataConfig(
+                name="funding_rate",
+                source="catalog",
+                path=data_cfg.catalog_path,
+            ))
+        if data_cfg.oi_data_path:
+            extra_data.append(ExtraDataConfig(
+                name="open_interest",
+                source="parquet",
+                path=data_cfg.oi_data_path,
+                timeframe=data_cfg.bar_spec,
+            ))
 
         analysis_config = AlphaAnalysisConfig(
             catalog_path=data_cfg.catalog_path,
             factor_config_path="",
             instrument_ids=data_cfg.instrument_ids,
             bar_spec=data_cfg.bar_spec,
+            extra_data=extra_data,
             funding_rate=data_cfg.funding_rate,
             oi_data_path=data_cfg.oi_data_path,
             oi_timeframe=data_cfg.bar_spec,
