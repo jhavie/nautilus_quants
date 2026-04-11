@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS factors (
     factor_id    VARCHAR PRIMARY KEY,
     prototype    VARCHAR DEFAULT '',
     expression   VARCHAR NOT NULL,
+    expression_hash VARCHAR DEFAULT '',
     description  VARCHAR DEFAULT '',
     source       VARCHAR DEFAULT '',
     status       VARCHAR DEFAULT 'candidate',
@@ -166,6 +167,23 @@ class RegistryDatabase:
             statement = statement.strip()
             if statement:
                 self._conn.execute(statement)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        """Apply incremental schema migrations for existing databases."""
+        # v1 → v2: add expression_hash column to factors
+        cols = {
+            r[0]
+            for r in self._conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'factors'"
+            ).fetchall()
+        }
+        if "expression_hash" not in cols:
+            self._conn.execute(
+                "ALTER TABLE factors ADD COLUMN "
+                "expression_hash VARCHAR DEFAULT ''"
+            )
 
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:

@@ -452,14 +452,17 @@ def analyze(
                 )
 
                 # Register only factors that have analysis results
-                repo.register_factors_from_config(
+                reg_result = repo.register_factors_from_config(
                     factor_config, only_names=set(ic_results.keys()),
                 )
 
                 # Save analysis metrics
                 all_metrics = []
                 for fname, ic_df in ic_results.items():
-                    fid = generate_factor_id(factor_config.source, fname)
+                    fid = reg_result.name_map.get(
+                        fname,
+                        generate_factor_id(factor_config.source, fname),
+                    )
                     ic_summary = compute_ic_summary(ic_df)
                     fm = (
                         factor_metrics_results.get(fname)
@@ -571,10 +574,10 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
 
     repo, db = _open_repo(env_name, db_dir)
     try:
-        new, updated, unchanged, duplicate = repo.register_factors_from_config(
-            config,
+        result = repo.register_factors_from_config(config)
+        print_register_result(
+            result.new, result.updated, result.unchanged, result.renamed,
         )
-        print_register_result(new, updated, unchanged, duplicate)
     finally:
         db.close()
 
@@ -1786,6 +1789,84 @@ def dedup(
             repo, keep_source=keep_source, dry_run=actual_dry_run,
         )
         print_dedup_result(removed, actual_dry_run)
+    finally:
+        db.close()
+
+
+@cli.command()
+@click.option("--execute", is_flag=True, default=False, help="Actually apply.")
+@_ENV_OPTION
+@_DB_DIR_OPTION
+def repair(
+    execute: bool,
+    env_name: str | None,
+    db_dir: str,
+) -> None:
+    """Repair factors with metrics from conflicting expressions.
+
+    Detects factors whose metrics span multiple different expressions
+    (caused by LLM mining name collisions) and either splits them into
+    separate factors or deletes orphaned metrics.
+    """
+    from nautilus_quants.alpha.registry.audit import (
+        find_conflicting_factors,
+        repair_factors,
+    )
+
+    dry_run = not execute
+    repo, db = _open_repo(env_name, db_dir)
+    try:
+        conflicts = find_conflicting_factors(repo)
+        if not conflicts:
+            click.echo("No conflicting factors found.")
+            return
+
+        # Print conflict report
+        click.echo(
+            f"Found {len(conflicts)} factors with conflicting metrics:\n"
+        )
+        total_orphan_runs = 0
+        for c in conflicts:
+            n_orphans = sum(len(g.run_ids) for g in c.orphan_groups)
+            total_orphan_runs += n_orphans
+            click.echo(
+                f"  {c.factor_id} — "
+                f"{len(c.orphan_groups)} orphan group(s), "
+                f"{n_orphans} orphan run(s)"
+            )
+            for g in c.orphan_groups:
+                click.echo(
+                    f"    hash={g.expression_hash[:8]}  "
+                    f"runs={len(g.run_ids)}  "
+                    f"metrics={g.metric_count}"
+                )
+                click.echo(f"    expr: {g.expression[:90]}")
+
+        click.echo(
+            f"\nTotal: {len(conflicts)} factors, "
+            f"{total_orphan_runs} orphan runs"
+        )
+
+        actions = repair_factors(repo, dry_run=dry_run)
+
+        if dry_run:
+            click.echo(f"\n[DRY RUN] {len(actions)} actions planned:")
+        else:
+            click.echo(f"\n[EXECUTED] {len(actions)} actions applied:")
+
+        for a in actions:
+            if a.action in ("split", "merge"):
+                click.echo(
+                    f"  {a.action}: {a.factor_id} → {a.new_factor_id} "
+                    f"({len(a.run_ids)} runs)"
+                )
+            else:
+                click.echo(
+                    f"  {a.action}: {a.factor_id} — {a.detail}"
+                )
+
+        if dry_run:
+            click.echo("\nRe-run with --execute to apply.")
     finally:
         db.close()
 

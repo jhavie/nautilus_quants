@@ -104,28 +104,31 @@ gh run watch <id>
 | `audit` | 审计重复和 prototype 问题 | `audit --env test` |
 | `backfill` | 回填 hash/prototype/参数 | `backfill --execute --env test` |
 | `dedup` | 删除重复因子 | `dedup --execute --env test` |
+| `repair` | 修复重名碰撞导致的 metrics 混乱 | `repair --execute --env test` |
+| `regime` | Regime 条件 IC 分析（JM vs EMA） | `regime config/cs/regime_llm_claude.yaml -v` |
+
 - 共享工具在 `utils/`（cache_keys, protocols, equity, registry, bar_spec）
 - live 核心代码零 backtest 依赖
 
-### Alpha CLI (`python -m nautilus_quants.alpha`)
+#### 因子注册碰撞检测
 
-| 命令 | 功能 | 示例 |
-|------|------|------|
-| `analyze` | 因子分析 + 自动入库 | `analyze config/cs/alpha_101.yaml` |
-| `mine` | LLM 驱动因子挖掘（Claude CLI） | `mine config/cs/alpha_mining.yaml --rounds 3` |
-| `metrics` | 查看因子指标（IC, ICIR, t(NW)...） | `metrics alpha101_alpha044_8h` |
-| `list` | 列出已注册因子 | `list --prototype alpha044 --source alpha101` |
-| `inspect` | 因子/prototype 详情 + 指标 + 回测 | `inspect alpha101_alpha044_8h` |
-| `backtests` | 列出回测记录（含 started_at） | `backtests --factor-id alpha101_alpha044_8h` |
-| `config` | 查看回测关联的配置快照 | `config <backtest_id> --type all` |
-| `status` | 修改因子状态 | `status alpha101_alpha044_8h active` |
-| `register` | 从 YAML 注册因子（不跑分析） | `register config/cs/factors.yaml` |
-| `export-factors` | 导出 active 因子到 YAML | `export-factors -o output.yaml --method icir_weight` |
-| `promote` | 跨环境晋升（评分+去重+去相关） | `promote --config config/examples/scoring.yaml` |
-| `audit` | 审计重复和 prototype 问题 | `audit --env test` |
-| `backfill` | 回填 hash/prototype/参数 | `backfill --execute --env test` |
-| `dedup` | 删除重复因子 | `dedup --execute --env test` |
-| `regime` | Regime 条件 IC 分析（JM vs EMA） | `regime config/cs/regime_llm_claude.yaml -v` |
+`register`/`analyze` 入库时自动检测 factor_id 碰撞：
+- **同名同表达式** → unchanged（跳过）
+- **同名不同表达式** → 自动重命名为 `{name}_{expr_hash[:8]}`，避免覆写
+- **不同名同表达式** → skip（表达式已注册，不重复入库）
+
+#### `repair` 命令
+
+修复因 LLM mining 重名碰撞导致的 metrics 数据混乱（同一 factor_id 下存在来自不同表达式的 metrics）。
+
+以当前 `factors` 表存的表达式为基准，将不匹配的 metrics 剥离：若库中已有同表达式因子 → merge metrics 到该因子；否则创建新因子 `{name}_{hash[:8]}`。
+
+```bash
+alpha repair            # dry-run：检测冲突，不修改
+alpha repair --execute  # 执行修复
+```
+
+推荐维护流程：`repair` → `backfill` → `audit` → `dedup`
 
 ## 代码规范
 

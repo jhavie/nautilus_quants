@@ -1034,6 +1034,7 @@ def migrate_factors(
         promoted = FactorRecord(
             factor_id=factor.factor_id,
             expression=factor.expression,
+            expression_hash=factor.expression_hash,
             prototype=factor.prototype,
             description=factor.description,
             source=factor.source,

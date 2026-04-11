@@ -40,6 +40,7 @@ class FactorRecord:
 
     factor_id: str
     expression: str
+    expression_hash: str = ""
     prototype: str = ""
     description: str = ""
     source: str = ""
@@ -49,6 +50,25 @@ class FactorRecord:
     variables: dict[str, str] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
+
+
+# ── Registration result ──
+
+
+@dataclass(frozen=True)
+class RegistrationResult:
+    """Result of ``register_factors_from_config()``.
+
+    ``name_map`` maps original YAML keys to actual factor_ids
+    (which may differ if auto-rename triggered on collision).
+    """
+
+    new: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    renamed: int = 0
+    skipped: int = 0
+    name_map: dict[str, str] = field(default_factory=dict)
 
 
 # ── Config snapshots ──

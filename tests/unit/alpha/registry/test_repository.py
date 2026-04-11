@@ -302,10 +302,10 @@ class TestRegisterFromConfig:
             variables={"returns": "delta(close, 1) / delay(close, 1)"},
             parameters={"window": 24},
         )
-        new, updated, unchanged = repo.register_factors_from_config(config)
-        assert new == 2
-        assert updated == 0
-        assert unchanged == 0
+        result = repo.register_factors_from_config(config)
+        assert result.new == 2
+        assert result.updated == 0
+        assert result.unchanged == 0
 
     def test_register_preserves_source(self, repo: FactorRepository) -> None:
         config = FactorConfig(
@@ -363,6 +363,33 @@ class TestRegisterFromConfig:
         assert f.variables == {"ret": "delta(close, 1)"}
 
     def test_register_detects_update(self, repo: FactorRepository) -> None:
+        """Non-expression field change → updated (not renamed)."""
+        config1 = FactorConfig(
+            source="s",
+            factors=[FactorDefinition("f1", "rank(close)")],
+        )
+        repo.register_factors_from_config(config1)
+
+        config2 = FactorConfig(
+            source="s",
+            factors=[FactorDefinition("f1", "rank(close)", description="new desc")],
+        )
+        result = repo.register_factors_from_config(config2)
+        assert result.new == 0
+        assert result.updated == 1
+        assert result.unchanged == 0
+
+    def test_register_detects_unchanged(self, repo: FactorRepository) -> None:
+        config = FactorConfig(
+            source="s",
+            factors=[FactorDefinition("f1", "rank(close)")],
+        )
+        repo.register_factors_from_config(config)
+        result = repo.register_factors_from_config(config)
+        assert result.unchanged == 1
+
+    def test_collision_auto_renames(self, repo: FactorRepository) -> None:
+        """Same name, different expression → auto-rename with hash suffix."""
         config1 = FactorConfig(
             source="s",
             factors=[FactorDefinition("f1", "rank(close)")],
@@ -373,19 +400,68 @@ class TestRegisterFromConfig:
             source="s",
             factors=[FactorDefinition("f1", "rank(open)")],
         )
-        new, updated, unchanged = repo.register_factors_from_config(config2)
-        assert new == 0
-        assert updated == 1
-        assert unchanged == 0
+        result = repo.register_factors_from_config(config2)
+        assert result.renamed == 1
+        assert result.new == 1
+        # Both factors should exist
+        assert repo.get_factor("s_f1") is not None
+        assert repo.get_factor("s_f1").expression == "rank(close)"
+        renamed_fid = result.name_map["f1"]
+        assert renamed_fid != "s_f1"
+        assert renamed_fid.startswith("s_f1_")
+        assert repo.get_factor(renamed_fid).expression == "rank(open)"
 
-    def test_register_detects_unchanged(self, repo: FactorRepository) -> None:
-        config = FactorConfig(
+    def test_same_expression_different_name_skips(
+        self, repo: FactorRepository,
+    ) -> None:
+        """Same expression under different name → skip (already registered)."""
+        config1 = FactorConfig(
             source="s",
             factors=[FactorDefinition("f1", "rank(close)")],
         )
-        repo.register_factors_from_config(config)
-        new, updated, unchanged = repo.register_factors_from_config(config)
-        assert unchanged == 1
+        repo.register_factors_from_config(config1)
+
+        config2 = FactorConfig(
+            source="s",
+            factors=[FactorDefinition("f2", "rank(close)")],
+        )
+        result = repo.register_factors_from_config(config2)
+        assert result.skipped == 1
+        assert result.name_map["f2"] == "s_f1"
+
+    def test_collision_detected_when_existing_hash_empty(
+        self, repo: FactorRepository,
+    ) -> None:
+        """Collision detected even if stored expression_hash is empty."""
+        # Manually insert factor with empty hash (simulates legacy data)
+        repo._db.execute(
+            "INSERT INTO factors "
+            "(factor_id, expression, expression_hash, source, status, "
+            " tags, parameters, variables, created_at, updated_at) "
+            "VALUES (?, ?, '', 's', 'candidate', '[]', '{}', '{}', "
+            " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            ["s_f1", "rank(close)"],
+        )
+
+        config = FactorConfig(
+            source="s",
+            factors=[FactorDefinition("f1", "rank(open)")],
+        )
+        result = repo.register_factors_from_config(config)
+        assert result.renamed == 1
+        # Original factor untouched
+        assert repo.get_factor("s_f1").expression == "rank(close)"
+
+    def test_name_map_correct(self, repo: FactorRepository) -> None:
+        config = FactorConfig(
+            source="src",
+            factors=[
+                FactorDefinition("a", "rank(close)"),
+                FactorDefinition("b", "ts_std(close, 24)"),
+            ],
+        )
+        result = repo.register_factors_from_config(config)
+        assert result.name_map == {"a": "src_a", "b": "src_b"}
 
     def test_register_no_source_prefix(self, repo: FactorRepository) -> None:
         """When source is empty, factor_id = key only."""
