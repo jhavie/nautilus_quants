@@ -123,21 +123,23 @@ _CONSTRUCTION_RULES = """\
 ## Factor Construction Rules (CRITICAL — follow strictly)
 
 1. **Never use raw prices directly.** Always use relative changes or rankings:
-   - GOOD: `delta(close, 1) / delay(close, 1)`, `cs_rank(close)`
+   - GOOD: `delta(close, 1) / delay(close, 1)`, `winsorize(close, 3)`
    - BAD:  `close`, `close - open`  (scale differs across instruments)
 
 2. **Prevent division by zero.** Add epsilon to denominators:
    - GOOD: `delta(volume, 6) / replace_zero(delay(volume, 6))`
    - BAD:  `delta(volume, 6) / delay(volume, 6)`
 
-3. **Cross-sectional normalization.** Ensure output is scale-invariant across instruments:
-   - Preferred: `winsorize(expr, 3)` — clips outliers at ±3σ, preserves distribution shape
-   - Acceptable: `cs_rank(expr)` — ordinal only, use when distribution is heavily skewed
-   - Do NOT wrap with `normalize()` — the composite pipeline handles normalization
+3. **Final output normalization.** Wrap the FINAL expression in ONE of:
+   - `winsorize(expr, 3)` — PREFERRED, clips outliers at ±3σ, preserves distribution
+   - `cs_rank(expr)` — acceptable when distribution is heavily skewed
+   - Pick ONE, NEVER nest them (e.g. `winsorize(cs_rank(...))` is wrong)
+   - Do NOT wrap with `normalize()` — the composite pipeline handles that
 
-4. **Robust over precise.** Prefer rank-based measures for INTERMEDIATE steps:
-   - `ts_rank(x, w)` over `ts_mean(x, w)` — resistant to outliers
-   - For FINAL output, prefer `winsorize()` over `cs_rank()` to preserve distribution info
+4. **Robust over precise.** Use rank-based operators for INTERMEDIATE steps only:
+   - `ts_rank(x, w)` over `ts_mean(x, w)` — resistant to outliers in time-series
+   - `cs_rank(x)` is fine INSIDE an expression (e.g. `correlation(high, cs_rank(volume), 5)`)
+   - But do NOT use `cs_rank()` as the outermost wrapper — use `winsorize()` instead
 
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects
@@ -152,7 +154,7 @@ _CONSTRUCTION_RULES = """\
    - btc_close/eth_close are broadcast (same value across all instruments)
    - btc_beta measures how much an altcoin moves with BTC; high beta = high BTC sensitivity
    - Use btc_beta for market-neutral strategies: `vector_neut(returns, btc_returns)`
-   - Combine beta with momentum: `cs_rank(btc_beta * returns)` (beta-weighted momentum)
+   - Combine beta with momentum: `winsorize(btc_beta * returns, 3)` (beta-weighted momentum)
    - vwap deviation: `(close - vwap) / replace_zero(vwap)` (intraday mean reversion)
 
 7. **Avoid strict equalities.** Use ranges instead of `==`:
@@ -160,7 +162,7 @@ _CONSTRUCTION_RULES = """\
    - GOOD: `abs(ts_min(low, 10) - delay(ts_min(low, 10), 1)) < ts_std(low, 20) * 0.1`
 
 8. **Expression complexity.** Aim for 2-4 operator nesting levels.
-   - Too simple: `cs_rank(close)` (trivial, unlikely to have alpha)
+   - Too simple: `winsorize(close, 3)` (trivial, unlikely to have alpha)
    - Too complex: 6+ nested calls (overfitting risk, slow to compute)
 
 9. **Each factor must be independent.** Do not reference other factor names."""
