@@ -501,14 +501,14 @@ def print_audit_template_groups(groups: dict[str, list]) -> None:
 
 
 def print_register_result(
-    new: int, updated: int, unchanged: int, duplicate: int = 0,
+    new: int, updated: int, unchanged: int, renamed: int = 0,
 ) -> None:
     """Print register command result."""
-    total = new + updated + unchanged + duplicate
+    total = new + updated + unchanged + renamed
     parts = [f"[green]{new} new[/green]", f"[yellow]{updated} updated[/yellow]",
              f"[dim]{unchanged} unchanged[/dim]"]
-    if duplicate:
-        parts.append(f"[red]{duplicate} duplicate skipped[/red]")
+    if renamed:
+        parts.append(f"[cyan]{renamed} renamed (collision)[/cyan]")
     console.print(f"Registered {total} factors ({', '.join(parts)})")
 
 

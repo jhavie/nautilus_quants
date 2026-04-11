@@ -11,12 +11,49 @@ import json
 import logging
 import re
 
+from dataclasses import dataclass, field
+
 from nautilus_quants.alpha.registry.models import FactorRecord
 from nautilus_quants.alpha.registry.repository import FactorRepository
 from nautilus_quants.factors.expression.normalize import (
     expression_hash,
     expression_template,
 )
+
+
+# ── Repair data models ──
+
+
+@dataclass(frozen=True)
+class OrphanGroup:
+    """A group of metrics that used a different expression than the current one."""
+
+    expression: str
+    expression_hash: str
+    run_ids: list[str] = field(default_factory=list)
+    metric_count: int = 0
+
+
+@dataclass(frozen=True)
+class ConflictReport:
+    """Report for a factor with metrics from conflicting expressions."""
+
+    factor_id: str
+    current_expression: str
+    current_hash: str
+    source: str
+    orphan_groups: list[OrphanGroup] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RepairAction:
+    """A single repair action taken or planned."""
+
+    action: str  # "split" | "delete"
+    factor_id: str
+    new_factor_id: str
+    run_ids: list[str] = field(default_factory=list)
+    detail: str = ""
 
 logger = logging.getLogger(__name__)
 
@@ -277,3 +314,174 @@ def _export_num(v: float) -> int | float:
     if v == int(v) and abs(v) < 1e15:
         return int(v)
     return v
+
+
+# ── Conflict detection and repair ────────────────────────────────────────
+
+
+def find_conflicting_factors(
+    repo: FactorRepository,
+) -> list[ConflictReport]:
+    """Find factors with metrics from conflicting expressions.
+
+    For each factor, checks whether all metrics' ``factor_config_id``
+    reference config snapshots that contain the same expression.
+    Returns a report for each factor with orphaned metrics.
+    """
+    # Find factors that have metrics from multiple factor_config_ids
+    rows = repo._db.fetch_all(
+        "SELECT factor_id, COUNT(DISTINCT factor_config_id) AS n "
+        "FROM alpha_analysis_metrics "
+        "GROUP BY factor_id "
+        "HAVING n > 1"
+    )
+    if not rows:
+        return []
+
+    reports: list[ConflictReport] = []
+    for fid, _ in rows:
+        factor = repo.get_factor(fid)
+        if factor is None:
+            continue
+
+        current_hash = factor.expression_hash
+        if not current_hash:
+            try:
+                current_hash = expression_hash(factor.expression)
+            except Exception:
+                continue
+
+        # Get all (run_id, factor_config_id) pairs
+        metrics_rows = repo._db.fetch_all(
+            "SELECT DISTINCT run_id, factor_config_id "
+            "FROM alpha_analysis_metrics WHERE factor_id = ?",
+            [fid],
+        )
+
+        # Strip source prefix to get the bare name
+        bare_name = fid
+        if factor.source and bare_name.startswith(f"{factor.source}_"):
+            bare_name = bare_name[len(factor.source) + 1:]
+
+        # Group by expression hash
+        orphan_by_hash: dict[str, list[str]] = defaultdict(list)
+        for run_id, cfg_id in metrics_rows:
+            cfg = repo.get_config_snapshot(cfg_id)
+            if cfg is None:
+                continue
+            factors_dict = cfg.config_json.get("factors", {})
+            if bare_name not in factors_dict:
+                continue
+            expr = factors_dict[bare_name].get("expression", "")
+            try:
+                h = expression_hash(expr)
+            except Exception:
+                continue
+            if h != current_hash:
+                orphan_by_hash[h].append(run_id)
+
+        if not orphan_by_hash:
+            continue
+
+        orphan_groups = []
+        for h, run_ids in orphan_by_hash.items():
+            # Get expression from any config
+            sample_run = run_ids[0]
+            sample_cfg_id = next(
+                cfg_id for rid, cfg_id in metrics_rows if rid == sample_run
+            )
+            cfg = repo.get_config_snapshot(sample_cfg_id)
+            expr = cfg.config_json["factors"][bare_name]["expression"]
+            n_metrics = repo._db.fetch_one(
+                "SELECT COUNT(*) FROM alpha_analysis_metrics "
+                "WHERE factor_id = ? AND run_id IN "
+                f"({','.join('?' for _ in run_ids)})",
+                [fid, *run_ids],
+            )[0]
+            orphan_groups.append(OrphanGroup(
+                expression=expr,
+                expression_hash=h,
+                run_ids=run_ids,
+                metric_count=n_metrics,
+            ))
+
+        reports.append(ConflictReport(
+            factor_id=fid,
+            current_expression=factor.expression,
+            current_hash=current_hash,
+            source=factor.source,
+            orphan_groups=orphan_groups,
+        ))
+
+    return reports
+
+
+def repair_factors(
+    repo: FactorRepository,
+    dry_run: bool = True,
+) -> list[RepairAction]:
+    """Repair factors with metrics from conflicting expressions.
+
+    For each orphaned expression group:
+    - If a factor with the same expression already exists → merge metrics
+      into that factor.
+    - Otherwise → create a new factor ``{name}_{hash[:8]}`` and reassign
+      metrics to it.
+
+    Returns a list of actions taken (or planned if dry_run).
+    """
+    conflicts = find_conflicting_factors(repo)
+    actions: list[RepairAction] = []
+
+    for report in conflicts:
+        for orphan in report.orphan_groups:
+            # Prefer existing factor with the same expression
+            existing_match = repo.find_by_expression_hash(
+                orphan.expression_hash,
+            )
+            if (
+                existing_match is not None
+                and existing_match.factor_id != report.factor_id
+            ):
+                target_fid = existing_match.factor_id
+                action_type = "merge"
+            else:
+                target_fid = (
+                    f"{report.factor_id}"
+                    f"_{orphan.expression_hash[:8]}"
+                )
+                action_type = "split"
+
+            actions.append(RepairAction(
+                action=action_type,
+                factor_id=report.factor_id,
+                new_factor_id=target_fid,
+                run_ids=orphan.run_ids,
+                detail=orphan.expression[:80],
+            ))
+            if not dry_run:
+                if action_type == "split":
+                    # Create new factor for orphaned expression
+                    existing = repo.get_factor(report.factor_id)
+                    new_record = FactorRecord(
+                        factor_id=target_fid,
+                        expression=orphan.expression,
+                        expression_hash=orphan.expression_hash,
+                        source=existing.source if existing else "",
+                        status="candidate",
+                        tags=existing.tags if existing else [],
+                        variables=(
+                            existing.variables if existing else {}
+                        ),
+                    )
+                    repo.upsert_factor(new_record)
+                # Reassign metrics to target (new or existing)
+                for run_id in orphan.run_ids:
+                    repo._db.execute(
+                        "UPDATE alpha_analysis_metrics "
+                        "SET factor_id = ? "
+                        "WHERE factor_id = ? AND run_id = ?",
+                        [target_fid, report.factor_id, run_id],
+                    )
+
+    return actions

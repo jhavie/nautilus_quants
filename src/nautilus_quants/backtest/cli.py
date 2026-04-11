@@ -188,9 +188,12 @@ def run(
                             file_path=fcp,
                         )
                         fc = load_factor_config(fcp)
-                        repo.register_factors_from_config(fc)
+                        reg_result = repo.register_factors_from_config(fc)
                         for fdef in fc.factors:
-                            fid = generate_factor_id(fc.source, fdef.name)
+                            fid = reg_result.name_map.get(
+                                fdef.name,
+                                generate_factor_id(fc.source, fdef.name),
+                            )
                             factor_ids.append(fid)
                     # composite_factor may be on a different actor
                     cf = actor_cfg.get("composite_factor")

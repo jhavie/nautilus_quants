@@ -55,7 +55,8 @@ class TestSchemaCreation:
         )
         col_names = [r[0] for r in cols]
         expected = [
-            "factor_id", "prototype", "expression", "description",
+            "factor_id", "prototype", "expression", "expression_hash",
+            "description",
             "source", "status", "tags", "parameters", "variables",
             "created_at", "updated_at",
         ]

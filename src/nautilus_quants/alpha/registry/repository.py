@@ -10,14 +10,22 @@ from datetime import datetime, timezone
 from typing import Any
 
 from nautilus_quants.alpha.registry.database import RegistryDatabase
+import logging
+
 from nautilus_quants.alpha.registry.models import (
     STATUS_TRANSITIONS,
     VALID_STATUSES,
     AnalysisMetrics,
     ConfigSnapshot,
     FactorRecord,
+    RegistrationResult,
 )
+
+logger = logging.getLogger(__name__)
 from nautilus_quants.factors.config import FactorConfig, generate_factor_id
+from nautilus_quants.factors.expression.normalize import (
+    expression_hash as _expr_hash,
+)
 
 
 def _now_iso() -> str:
@@ -41,18 +49,24 @@ class FactorRepository:
     def upsert_factor(self, record: FactorRecord) -> str:
         """Insert or update a factor. Returns "new" / "updated" / "unchanged"."""
         now = _now_iso()
+        try:
+            expr_hash = _expr_hash(record.expression)
+        except Exception:
+            expr_hash = record.expression_hash or ""
         existing = self.get_factor(record.factor_id)
 
         if existing is None:
             self._db.execute(
                 "INSERT INTO factors "
-                "(factor_id, prototype, expression, description, source, "
+                "(factor_id, prototype, expression, expression_hash, "
+                " description, source, "
                 " status, tags, parameters, variables, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     record.factor_id,
                     record.prototype,
                     record.expression,
+                    expr_hash,
                     record.description,
                     record.source,
                     record.status,
@@ -77,12 +91,14 @@ class FactorRepository:
             return "unchanged"
 
         self._db.execute(
-            "UPDATE factors SET prototype = ?, expression = ?, description = ?, "
+            "UPDATE factors SET prototype = ?, expression = ?, expression_hash = ?, "
+            "description = ?, "
             "tags = ?, parameters = ?, variables = ?, updated_at = ? "
             "WHERE factor_id = ?",
             [
                 record.prototype,
                 record.expression,
+                expr_hash,
                 record.description,
                 json.dumps(record.tags),
                 json.dumps(record.parameters),
@@ -95,7 +111,8 @@ class FactorRepository:
 
     def get_factor(self, factor_id: str) -> FactorRecord | None:
         row = self._db.fetch_one(
-            "SELECT factor_id, expression, prototype, description, source, "
+            "SELECT factor_id, expression, expression_hash, "
+            "prototype, description, source, "
             "status, tags, parameters, variables, created_at, updated_at "
             "FROM factors WHERE factor_id = ?",
             [factor_id],
@@ -105,15 +122,16 @@ class FactorRepository:
         return FactorRecord(
             factor_id=row[0],
             expression=row[1],
-            prototype=row[2] or "",
-            description=row[3] or "",
-            source=row[4] or "",
-            status=row[5] or "candidate",
-            tags=json.loads(row[6]) if row[6] else [],
-            parameters=json.loads(row[7]) if row[7] else {},
-            variables=json.loads(row[8]) if row[8] else {},
-            created_at=str(row[9]) if row[9] else "",
-            updated_at=str(row[10]) if row[10] else "",
+            expression_hash=row[2] or "",
+            prototype=row[3] or "",
+            description=row[4] or "",
+            source=row[5] or "",
+            status=row[6] or "candidate",
+            tags=json.loads(row[7]) if row[7] else [],
+            parameters=json.loads(row[8]) if row[8] else {},
+            variables=json.loads(row[9]) if row[9] else {},
+            created_at=str(row[10]) if row[10] else "",
+            updated_at=str(row[11]) if row[11] else "",
         )
 
     def delete_factor(self, factor_id: str) -> None:
@@ -163,7 +181,8 @@ class FactorRepository:
         direction = "DESC" if descending else "ASC"
 
         sql = (
-            "SELECT factor_id, expression, prototype, description, source, "
+            "SELECT factor_id, expression, expression_hash, "
+            "prototype, description, source, "
             "status, tags, parameters, variables, created_at, updated_at "
             f"FROM factors{where} ORDER BY {sort_by} {direction}"
         )
@@ -175,15 +194,16 @@ class FactorRepository:
             FactorRecord(
                 factor_id=r[0],
                 expression=r[1],
-                prototype=r[2] or "",
-                description=r[3] or "",
-                source=r[4] or "",
-                status=r[5] or "candidate",
-                tags=json.loads(r[6]) if r[6] else [],
-                parameters=json.loads(r[7]) if r[7] else {},
-                variables=json.loads(r[8]) if r[8] else {},
-                created_at=str(r[9]) if r[9] else "",
-                updated_at=str(r[10]) if r[10] else "",
+                expression_hash=r[2] or "",
+                prototype=r[3] or "",
+                description=r[4] or "",
+                source=r[5] or "",
+                status=r[6] or "candidate",
+                tags=json.loads(r[7]) if r[7] else [],
+                parameters=json.loads(r[8]) if r[8] else {},
+                variables=json.loads(r[9]) if r[9] else {},
+                created_at=str(r[10]) if r[10] else "",
+                updated_at=str(r[11]) if r[11] else "",
             )
             for r in rows
         ]
@@ -207,29 +227,101 @@ class FactorRepository:
             [new_status, _now_iso(), factor_id],
         )
 
+    def find_by_expression_hash(
+        self, expr_hash: str,
+    ) -> FactorRecord | None:
+        """Find a factor by its expression hash."""
+        row = self._db.fetch_one(
+            "SELECT factor_id, expression, expression_hash, "
+            "prototype, description, source, "
+            "status, tags, parameters, variables, created_at, updated_at "
+            "FROM factors WHERE expression_hash = ? LIMIT 1",
+            [expr_hash],
+        )
+        if row is None:
+            return None
+        return FactorRecord(
+            factor_id=row[0],
+            expression=row[1],
+            expression_hash=row[2] or "",
+            prototype=row[3] or "",
+            description=row[4] or "",
+            source=row[5] or "",
+            status=row[6] or "candidate",
+            tags=json.loads(row[7]) if row[7] else [],
+            parameters=json.loads(row[8]) if row[8] else {},
+            variables=json.loads(row[9]) if row[9] else {},
+            created_at=str(row[10]) if row[10] else "",
+            updated_at=str(row[11]) if row[11] else "",
+        )
+
     # ── Register from FactorConfig ──
 
     def register_factors_from_config(
         self, config: FactorConfig,
         only_names: set[str] | None = None,
-    ) -> tuple[int, int, int]:
-        """Batch-register factors from a FactorConfig.
+    ) -> RegistrationResult:
+        """Batch-register factors from a FactorConfig with collision detection.
 
-        Args:
-            config: Factor configuration to register.
-            only_names: If provided, only register factors whose name is in this set.
+        When a factor_id already exists with a different expression:
+        - Auto-renames by appending ``_{expr_hash[:8]}`` suffix.
+        - Skips if the same expression is already registered under any factor_id.
 
-        Returns (new, updated, unchanged).
+        Returns a ``RegistrationResult`` with counts and a name_map
+        mapping original YAML keys to actual factor_ids.
         """
-        new = updated = unchanged = 0
+        new = updated = unchanged = renamed = skipped = 0
+        name_map: dict[str, str] = {}
         source = config.source
+
         for fdef in config.factors:
             if only_names is not None and fdef.name not in only_names:
                 continue
-            fid = generate_factor_id(source, fdef.name)
+
+            try:
+                expr_hash = _expr_hash(fdef.expression)
+            except Exception:
+                expr_hash = ""
+
+            base_fid = generate_factor_id(source, fdef.name)
+            fid = base_fid
+
+            # 1. Check if expression already registered under a DIFFERENT factor_id
+            if expr_hash:
+                existing_by_hash = self.find_by_expression_hash(expr_hash)
+                if (
+                    existing_by_hash is not None
+                    and existing_by_hash.factor_id != base_fid
+                ):
+                    name_map[fdef.name] = existing_by_hash.factor_id
+                    skipped += 1
+                    continue
+
+            # 2. Check for name collision with different expression
+            existing = self.get_factor(base_fid)
+            if (
+                existing is not None
+                and expr_hash
+                and existing.expression_hash
+                and existing.expression_hash != expr_hash
+            ):
+                fid = f"{base_fid}_{expr_hash[:8]}"
+                # Safety: check the suffixed id doesn't also collide
+                if self.get_factor(fid) is not None:
+                    fid = f"{base_fid}_{expr_hash}"
+                logger.warning(
+                    "Factor name collision: '%s' exists with different "
+                    "expression. Registered as '%s'",
+                    base_fid, fid,
+                )
+                renamed += 1
+
+            name_map[fdef.name] = fid
+
             record = FactorRecord(
                 factor_id=fid,
                 expression=fdef.expression,
+                expression_hash=expr_hash,
                 prototype=fdef.prototype,
                 description=fdef.description,
                 source=source,
@@ -244,7 +336,15 @@ class FactorRepository:
                 updated += 1
             else:
                 unchanged += 1
-        return new, updated, unchanged
+
+        return RegistrationResult(
+            new=new,
+            updated=updated,
+            unchanged=unchanged,
+            renamed=renamed,
+            skipped=skipped,
+            name_map=name_map,
+        )
 
     # ── Config snapshots ──
 
