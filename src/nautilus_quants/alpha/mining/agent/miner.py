@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Derived variables written into every generated factors.yaml so that
 # the analyzer can resolve names like btc_beta, vwap, etc.
 _DERIVED_VARIABLES: dict[str, str] = {
-    "returns": "delta(close, 1) / replace_zero(delay(close, 1))",
+    "returns": "delta(close, 1) / delay(close, 1)",
     "vwap": "quote_volume / replace_zero(volume)",
     "btc_returns": "delta(btc_close, 1) / delay(btc_close, 1)",
     "eth_returns": "delta(eth_close, 1) / delay(eth_close, 1)",
