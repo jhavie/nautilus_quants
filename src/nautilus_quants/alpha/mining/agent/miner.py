@@ -196,6 +196,38 @@ class AlphaMiner:
             "rounds": [],
             "all_expressions": [],
         }
+        self._preload_registry_expressions()
+
+    # ── Registry pre-load ────────────────────────────────────────────
+
+    def _preload_registry_expressions(self) -> None:
+        """Pre-load expressions from DuckDB to avoid regenerating known factors."""
+        try:
+            from nautilus_quants.alpha.registry.database import RegistryDatabase
+            from nautilus_quants.alpha.registry.environment import resolve_env
+
+            with open(self._config.analysis_config_path, encoding="utf-8") as f:
+                raw = yaml.safe_load(f)
+            reg_cfg = raw.get("registry", {})
+            if not reg_cfg.get("enabled", True):
+                return
+            env = resolve_env(reg_cfg.get("env", "test"))
+            db_dir = reg_cfg.get("db_dir", "logs/registry")
+
+            db = RegistryDatabase.for_environment(env, db_dir)
+            rows = db.fetch_all(
+                "SELECT expression FROM factors WHERE expression IS NOT NULL"
+            )
+            db.close()
+
+            if rows:
+                existing = [r[0] for r in rows]
+                self._state["all_expressions"].extend(existing)
+                logger.info(
+                    "Pre-loaded %d expressions from registry", len(existing),
+                )
+        except Exception as e:
+            logger.debug("Could not pre-load registry expressions: %s", e)
 
     # ── Public API ────────────────────────────────────────────────────
 
