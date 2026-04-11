@@ -17,8 +17,41 @@ mining:
   factors_per_round: 8
   model: "sonnet"                        # sonnet / opus
   proxy: "http://127.0.0.1:8888"        # SSH tunnel proxy for claude CLI
-  parallel: 3                         # concurrent claude requests per batch
+  parallel: 3                            # concurrent claude requests per batch
   output_dir: "logs/alpha_mining"
+
+  # ── Complexity constraints (all optional, shown are defaults) ──
+  # Expressions violating any constraint are rejected before IC analysis.
+  # constraints:
+  #   max_char_length: 200
+  #   max_node_count: 30
+  #   max_depth: 6
+  #   max_func_nesting: 4
+  #   max_variables: 5
+  #   max_window: 720
+  #   max_numeric_ratio: 0.3
+
+  # ── Exploration directions (uncomment to enable multi-direction mode) ──
+  # When present, --hypothesis is disabled. Each direction runs independently.
+  # LLM auto-generates hypotheses per factor based on the theme.
+  # directions:
+  #   price_volume:
+  #     theme: "量价因子"
+  #     operators: [ts_mean, ts_std, delta, delay, cs_rank, cs_zscore, correlation, abs, sign]
+  #     variables: [close, volume, returns]
+  #     tags: [price, volume]
+  #     rounds: 3
+  #   volatility:
+  #     theme: "波动率因子"
+  #     operators: [ts_std, ts_min, ts_max, ts_rank, cs_rank, log, sqrt, abs]
+  #     variables: [close, high, low]
+  #     tags: [volatility]
+  #     rounds: 3
+  #   onchain:
+  #     theme: "链上因子"
+  #     variables: [close, volume, open_interest, funding_rate]
+  #     tags: [onchain]
+  #     rounds: 3
 
 # Charts (only these 6; empty list = no charts)
 charts:

@@ -9,6 +9,12 @@ hypothesis-driven approach with crypto-specific guidelines.
 
 from __future__ import annotations
 
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nautilus_quants.factors.expression.complexity import ComplexityConstraints
+
 
 # ── JSON Schema for --json-schema flag ────────────────────────────────────
 
@@ -206,6 +212,47 @@ _AVAILABLE_VARIABLES = (
 # ── Public API ────────────────────────────────────────────────────────────
 
 
+def _filter_operator_reference(subset: tuple[str, ...]) -> str:
+    """Filter operator reference to only include *subset* operators.
+
+    Always keeps the Ternary and Arithmetic sections.
+    Handles combined bullet lines like ``floor(x), ceil(x)`` and
+    ``max(a, b), min(a, b)`` by matching any name on the line.
+    """
+    names = frozenset(subset)
+    lines = _OPERATOR_REFERENCE.strip().split("\n")
+    result: list[str] = []
+    current_header: str | None = None
+    header_emitted = False
+
+    for line in lines:
+        if line.startswith("###"):
+            # Always include Ternary / Arithmetic sections.
+            if "Ternary" in line or "Arithmetic" in line:
+                result.append(line)
+                current_header = line
+                header_emitted = True
+                continue
+            current_header = line
+            header_emitted = False
+            continue
+
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            # Extract ALL function names on this line: "floor(x), ceil(x)" → {floor, ceil}
+            line_names = set(re.findall(r"(\w+)\(", stripped))
+            if line_names & names:
+                if not header_emitted and current_header:
+                    result.append(current_header)
+                    header_emitted = True
+                result.append(line)
+        elif header_emitted:
+            # Non-operator lines under an emitted section.
+            result.append(line)
+
+    return "\n".join(result)
+
+
 def build_generation_prompt(
     round_num: int,
     num_factors: int,
@@ -213,6 +260,11 @@ def build_generation_prompt(
     previous_factors: list[dict],
     top_factors: list[dict],
     hypothesis: str | None = None,
+    *,
+    theme: str | None = None,
+    operator_subset: tuple[str, ...] | None = None,
+    variable_subset: tuple[str, ...] | None = None,
+    constraints: ComplexityConstraints | None = None,
 ) -> str:
     """Build the factor generation prompt for ``claude -p``.
 
@@ -224,6 +276,11 @@ def build_generation_prompt(
             ``[{name, expression, ic_mean, icir}]``.
         top_factors: Best factors so far (by ICIR), same schema.
         hypothesis: Optional user-provided hypothesis direction.
+        theme: Broad theme for diversified mode (e.g. "量价因子").
+            Takes priority over *hypothesis*.
+        operator_subset: Restrict prompt to these operators only.
+        variable_subset: Restrict prompt to these variables only.
+        constraints: Complexity constraints to advertise in prompt.
 
     Returns:
         Complete prompt string for ``claude -p``.
@@ -239,10 +296,33 @@ def build_generation_prompt(
     )
 
     # ── DSL reference ──
-    sections.append("## Available Operators\n" + _OPERATOR_REFERENCE)
+    if operator_subset:
+        sections.append(
+            "## Available Operators\n" + _filter_operator_reference(operator_subset)
+        )
+    else:
+        sections.append("## Available Operators\n" + _OPERATOR_REFERENCE)
 
     # ── Available variables ──
-    sections.append(f"## Available Variables\n{_AVAILABLE_VARIABLES}")
+    if variable_subset:
+        vars_str = ", ".join(variable_subset)
+        extras: list[str] = []
+        if "returns" in variable_subset:
+            extras.append("- returns = delta(close,1)/delay(close,1), pre-computed")
+        if "funding_rate" in variable_subset:
+            extras.append(
+                "- funding_rate = 8-hour perpetual funding rate from Bybit "
+                "(typically ±0.01%, forward-filled across bars)"
+            )
+        if "open_interest" in variable_subset:
+            extras.append(
+                "- open_interest = total open interest in base asset units from Bybit "
+                "(e.g. BTC quantity, 4h granularity)"
+            )
+        var_block = vars_str + ("\n" + "\n".join(extras) if extras else "")
+        sections.append(f"## Available Variables\n{var_block}")
+    else:
+        sections.append(f"## Available Variables\n{_AVAILABLE_VARIABLES}")
 
     # ── Construction rules ──
     rules = _CONSTRUCTION_RULES.replace(
@@ -250,8 +330,35 @@ def build_generation_prompt(
     )
     sections.append(rules)
 
-    # ── Hypothesis direction ──
-    if hypothesis:
+    # ── Hard complexity constraints ──
+    if constraints:
+        sections.append(
+            "## Hard Constraints (expressions violating ANY will be REJECTED)\n"
+            f"- Maximum expression length: {constraints.max_char_length} characters\n"
+            f"- Maximum AST node count: {constraints.max_node_count} nodes\n"
+            f"- Maximum AST depth: {constraints.max_depth} levels\n"
+            f"- Maximum function nesting: {constraints.max_func_nesting} levels\n"
+            f"- Maximum distinct variables: {constraints.max_variables}\n"
+            f"- Maximum window parameter: {constraints.max_window} bars\n"
+            f"- Maximum numeric literal ratio: {constraints.max_numeric_ratio:.0%} "
+            f"of AST nodes\n"
+            f"- Optimal expression length: 50-150 characters (best generalization)\n"
+            f"- Expressions >150 chars almost ALWAYS overfit on crypto data.\n"
+            f"  These are enforced by an AST validator. PREFER simpler expressions."
+        )
+
+    # ── Research direction: theme > hypothesis > default ──
+    if theme:
+        sections.append(
+            f"## Research Direction\n"
+            f"Theme: {theme}\n"
+            f"Explore diverse hypotheses within this theme.\n"
+            f"For each factor, propose a specific, testable hypothesis "
+            f"explaining why it should predict short-term relative returns.\n"
+            f"Ensure different factors explore different sub-patterns "
+            f"within the theme."
+        )
+    elif hypothesis:
         sections.append(
             f"## Research Direction\n"
             f"Focus on this hypothesis: {hypothesis}\n"

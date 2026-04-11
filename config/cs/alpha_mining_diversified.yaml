@@ -1,0 +1,189 @@
+# Alpha Factor Mining — Diversified 5-Direction Configuration
+# Uses extra data sources: quote_volume, btc_close/eth_close, funding_rate, open_interest
+#
+# Usage:
+#   python -m nautilus_quants.alpha mine config/cs/alpha_mining_diversified.yaml --rounds 3
+#
+# Directions (theme-only, LLM uses all 47 operators + 18 variables freely):
+#   1. size       — 市值/成交额因子 (quote_volume)
+#   2. market     — 市场因子 (btc_beta, eth_beta)
+#   3. liquidity  — 流动性因子 (volume, quote_volume, vwap)
+#   4. sentiment  — 情绪因子 (funding_rate, open_interest)
+#   5. volatility — 波动率因子 (high, low, range)
+
+registry:
+  env: test
+  db_dir: /Users/joe/Sync/nautilus_quants/logs/registry
+  enabled: true
+
+# ── Mining settings ──
+mining:
+  source: "llm_diversified"
+  factors_per_round: 8
+  model: "sonnet"
+  proxy: "http://127.0.0.1:8888"
+  parallel: 3
+  output_dir: "logs/alpha_mining_diversified"
+
+  # ── Complexity constraints ──
+  constraints:
+    max_char_length: 200
+    max_node_count: 30
+    max_depth: 6
+    max_func_nesting: 4
+    max_variables: 5
+    max_window: 720
+    max_numeric_ratio: 0.3
+
+  # ── 5 exploration directions (theme-only, all operators/variables available) ──
+  directions:
+    size:
+      theme: >-
+        市值/成交额因子 (Size factors).
+        Explore how traded value (quote_volume) ranks, trends, and
+        relative changes predict cross-sectional returns.
+        Key intuition: small-cap (low quote_volume) vs large-cap behavior,
+        size momentum, turnover concentration.
+      tags: [size, turnover, quote_volume]
+      rounds: 3
+
+    market:
+      theme: >-
+        市场因子 (Market/Beta factors).
+        Explore how individual coins' sensitivity to BTC and ETH
+        predicts returns. Use btc_beta, eth_beta, btc_returns,
+        eth_returns to capture market exposure, beta momentum,
+        beta dispersion, and idiosyncratic vs systematic risk.
+      tags: [market, beta, systematic]
+      rounds: 3
+
+    liquidity:
+      theme: >-
+        流动性因子 (Liquidity factors).
+        Explore how volume patterns, VWAP deviation, and turnover
+        dynamics predict returns. Key patterns: volume surge/drought,
+        VWAP premium/discount, relative volume shifts, liquidity shocks.
+      tags: [liquidity, volume, vwap]
+      rounds: 3
+
+    sentiment:
+      theme: >-
+        情绪因子 (Sentiment factors via derivatives data).
+        Explore how funding rate and open interest predict returns.
+        Key patterns: FR extreme reversal, FR momentum, OI expansion/contraction,
+        OI-price divergence, crowded positioning signals.
+        funding_rate: positive=longs pay shorts (bullish crowding),
+        only updates every 2 bars (8h settlement).
+        open_interest: total open positions in base asset.
+      tags: [sentiment, funding_rate, open_interest]
+      rounds: 3
+
+    volatility:
+      theme: >-
+        波动率因子 (Volatility factors).
+        Explore how realized volatility, volatility regime changes,
+        and range patterns predict cross-sectional returns.
+        Key patterns: volatility compression→expansion (breakout),
+        high-low range relative to recent history, volatility rank
+        reversal, intraday range vs close-to-close volatility.
+      tags: [volatility, range, regime]
+      rounds: 3
+
+# ── Charts ──
+charts:
+  - quantile_returns_bar
+  - monthly_ic_heatmap
+  - cumulative_returns
+  - cumulative_returns_long_short
+  - ic_histogram
+  - turnover
+
+# ── Data source ──
+catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+# Unified extra data
+extra_data_path: "config/cs/extra_data.yaml"
+
+# 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
+instrument_ids:
+  - "1INCHUSDT.BINANCE"
+  - "AAVEUSDT.BINANCE"
+  - "ADAUSDT.BINANCE"
+  - "ALGOUSDT.BINANCE"
+  - "ALICEUSDT.BINANCE"
+  - "ANKRUSDT.BINANCE"
+  - "ARUSDT.BINANCE"
+  - "ATOMUSDT.BINANCE"
+  - "AVAXUSDT.BINANCE"
+  - "AXSUSDT.BINANCE"
+  - "BATUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "BTCUSDT.BINANCE"
+  - "C98USDT.BINANCE"
+  - "CHRUSDT.BINANCE"
+  - "CHZUSDT.BINANCE"
+  - "COMPUSDT.BINANCE"
+  - "COTIUSDT.BINANCE"
+  - "CRVUSDT.BINANCE"
+  - "DASHUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "DUSKUSDT.BINANCE"
+  - "DYDXUSDT.BINANCE"
+  - "EGLDUSDT.BINANCE"
+  - "ENJUSDT.BINANCE"
+  - "ENSUSDT.BINANCE"
+  - "ETCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "FILUSDT.BINANCE"
+  - "GALAUSDT.BINANCE"
+  - "GRTUSDT.BINANCE"
+  - "HBARUSDT.BINANCE"
+  - "IOSTUSDT.BINANCE"
+  - "IOTAUSDT.BINANCE"
+  - "IOTXUSDT.BINANCE"
+  - "KSMUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "LPTUSDT.BINANCE"
+  - "LRCUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "MANAUSDT.BINANCE"
+  - "MASKUSDT.BINANCE"
+  - "NEARUSDT.BINANCE"
+  - "ONEUSDT.BINANCE"
+  - "PEOPLEUSDT.BINANCE"
+  - "QTUMUSDT.BINANCE"
+  - "RSRUSDT.BINANCE"
+  - "RUNEUSDT.BINANCE"
+  - "SANDUSDT.BINANCE"
+  - "SFPUSDT.BINANCE"
+  - "SNXUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "STORJUSDT.BINANCE"
+  - "SUSHIUSDT.BINANCE"
+  - "SXPUSDT.BINANCE"
+  - "THETAUSDT.BINANCE"
+  - "TRXUSDT.BINANCE"
+  - "UNIUSDT.BINANCE"
+  - "VETUSDT.BINANCE"
+  - "XLMUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "XTZUSDT.BINANCE"
+  - "YFIUSDT.BINANCE"
+  - "ZECUSDT.BINANCE"
+  - "ZENUSDT.BINANCE"
+
+# Alphalens parameters (4h bars)
+periods: [1, 2, 3, 6]    # 4h, 8h, 12h, 24h
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
+
+output_dir: "logs/alpha_mining_diversified"
+output_format:
+  - png
