@@ -958,6 +958,244 @@ class WqTsArgmin(TimeSeriesOperator):
 
 
 # ---------------------------------------------------------------------------
+# Factor-cutting operators — selection-based rolling statistics
+# ---------------------------------------------------------------------------
+
+
+def _rolling_selmean_col(
+    x: np.ndarray,
+    y: np.ndarray,
+    window: int,
+    n: int,
+    *,
+    top: bool = True,
+) -> np.ndarray:
+    """Per-column rolling selection mean. Used by RollingSelmeanTop/Btm."""
+    out = np.full(len(x), np.nan)
+    for i in range(window - 1, len(x)):
+        x_w = x[i - window + 1 : i + 1]
+        y_w = y[i - window + 1 : i + 1]
+        valid = ~(np.isnan(x_w) | np.isnan(y_w))
+        n_valid = valid.sum()
+        if n_valid < n:
+            continue
+        x_v = x_w[valid]
+        y_v = y_w[valid]
+        if top:
+            sel_idx = np.argpartition(y_v, -n)[-n:]
+        else:
+            sel_idx = np.argpartition(y_v, n)[:n]
+        out[i] = np.mean(x_v[sel_idx])
+    return out
+
+
+@register_operator
+class RollingSelmeanTop(TimeSeriesOperator):
+    """rolling_selmean_top(x, y, d, n): Mean of x for top-n y values in window."""
+
+    name = "rolling_selmean_top"
+    min_args = 4
+    max_args = 4
+
+    def compute(
+        self,
+        data: np.ndarray,
+        window: int,
+        data2: np.ndarray | None = None,
+        extra_0: int = 5,
+        **kwargs: Any,
+    ) -> float | np.ndarray:
+        """Mean of x values corresponding to top-n y values in window."""
+        n = int(extra_0)
+        if data2 is None or len(data) < window or len(data2) < window:
+            return float("nan")
+        x = data[-window:]
+        y = data2[-window:]
+        valid = ~(np.isnan(x) | np.isnan(y))
+        if valid.sum() < n:
+            return float("nan")
+        x_v, y_v = x[valid], y[valid]
+        top_idx = np.argpartition(y_v, -n)[-n:]
+        return float(np.mean(x_v[top_idx]))
+
+    def compute_panel(
+        self,
+        data: pd.DataFrame,
+        window: int,
+        data2: pd.DataFrame | None = None,
+        extra_0: int = 5,
+        **kwargs: Any,
+    ) -> pd.DataFrame:
+        """Panel rolling selmean top."""
+        n = int(extra_0)
+        if data2 is None:
+            return pd.DataFrame(
+                np.nan, index=data.index, columns=data.columns
+            )
+        result = pd.DataFrame(
+            np.nan, index=data.index, columns=data.columns
+        )
+        for col in data.columns:
+            if col not in data2.columns:
+                continue
+            result[col] = _rolling_selmean_col(
+                data[col].values, data2[col].values, window, n, top=True
+            )
+        return result
+
+
+@register_operator
+class RollingSelmeanBtm(TimeSeriesOperator):
+    """rolling_selmean_btm(x, y, d, n): Mean of x for bottom-n y values in window."""
+
+    name = "rolling_selmean_btm"
+    min_args = 4
+    max_args = 4
+
+    def compute(
+        self,
+        data: np.ndarray,
+        window: int,
+        data2: np.ndarray | None = None,
+        extra_0: int = 5,
+        **kwargs: Any,
+    ) -> float | np.ndarray:
+        """Mean of x values corresponding to bottom-n y values in window."""
+        n = int(extra_0)
+        if data2 is None or len(data) < window or len(data2) < window:
+            return float("nan")
+        x = data[-window:]
+        y = data2[-window:]
+        valid = ~(np.isnan(x) | np.isnan(y))
+        if valid.sum() < n:
+            return float("nan")
+        x_v, y_v = x[valid], y[valid]
+        btm_idx = np.argpartition(y_v, n)[:n]
+        return float(np.mean(x_v[btm_idx]))
+
+    def compute_panel(
+        self,
+        data: pd.DataFrame,
+        window: int,
+        data2: pd.DataFrame | None = None,
+        extra_0: int = 5,
+        **kwargs: Any,
+    ) -> pd.DataFrame:
+        """Panel rolling selmean bottom."""
+        n = int(extra_0)
+        if data2 is None:
+            return pd.DataFrame(
+                np.nan, index=data.index, columns=data.columns
+            )
+        result = pd.DataFrame(
+            np.nan, index=data.index, columns=data.columns
+        )
+        for col in data.columns:
+            if col not in data2.columns:
+                continue
+            result[col] = _rolling_selmean_col(
+                data[col].values, data2[col].values, window, n, top=False
+            )
+        return result
+
+
+@register_operator
+class RollingSelmeanDiff(TimeSeriesOperator):
+    """rolling_selmean_diff(x, y, d, n): top selmean minus bottom selmean."""
+
+    name = "rolling_selmean_diff"
+    min_args = 4
+    max_args = 4
+
+    _top = RollingSelmeanTop()
+    _btm = RollingSelmeanBtm()
+
+    def compute(
+        self,
+        data: np.ndarray,
+        window: int,
+        data2: np.ndarray | None = None,
+        extra_0: int = 5,
+        **kwargs: Any,
+    ) -> float | np.ndarray:
+        """Difference between top and bottom selection means."""
+        top_val = self._top.compute(
+            data, window, data2=data2, extra_0=extra_0
+        )
+        btm_val = self._btm.compute(
+            data, window, data2=data2, extra_0=extra_0
+        )
+        return float(top_val - btm_val)  # type: ignore[operator]
+
+    def compute_panel(
+        self,
+        data: pd.DataFrame,
+        window: int,
+        data2: pd.DataFrame | None = None,
+        extra_0: int = 5,
+        **kwargs: Any,
+    ) -> pd.DataFrame:
+        """Panel rolling selmean diff (top - bottom)."""
+        top_df = self._top.compute_panel(
+            data, window, data2=data2, extra_0=extra_0
+        )
+        btm_df = self._btm.compute_panel(
+            data, window, data2=data2, extra_0=extra_0
+        )
+        return top_df - btm_df
+
+
+@register_operator
+class TsMaxToMin(TimeSeriesOperator):
+    """ts_max_to_min(x, d): Rolling amplitude (max - min) over window."""
+
+    name = "ts_max_to_min"
+    min_args = 2
+    max_args = 2
+
+    def compute(
+        self, data: np.ndarray, window: int, **kwargs: Any
+    ) -> float | np.ndarray:
+        """Compute ts_max(x, d) - ts_min(x, d)."""
+        if len(data) < window:
+            return float("nan")
+        w = data[-window:]
+        return float(np.nanmax(w) - np.nanmin(w))
+
+    def compute_panel(
+        self, data: pd.DataFrame, window: int, **kwargs: Any
+    ) -> pd.DataFrame:
+        """Panel rolling amplitude."""
+        w = int(window)
+        return data.rolling(w).max() - data.rolling(w).min()
+
+
+@register_operator
+class DiffSign(TimeSeriesOperator):
+    """diff_sign(x, d): sign(x - ts_mean(x, d)) — deviation direction."""
+
+    name = "diff_sign"
+    min_args = 2
+    max_args = 2
+
+    def compute(
+        self, data: np.ndarray, window: int, **kwargs: Any
+    ) -> float | np.ndarray:
+        """Compute sign(x[-1] - mean(x[-d:]))."""
+        if len(data) < window:
+            return float("nan")
+        mean_val = np.mean(data[-window:])
+        return float(np.sign(data[-1] - mean_val))
+
+    def compute_panel(
+        self, data: pd.DataFrame, window: int, **kwargs: Any
+    ) -> pd.DataFrame:
+        """Panel deviation direction."""
+        w = int(window)
+        return np.sign(data - data.rolling(w).mean())
+
+
+# ---------------------------------------------------------------------------
 # Incremental (O(1) per bar) operator implementations
 # ---------------------------------------------------------------------------
 
@@ -1260,6 +1498,43 @@ def wq_ts_argmin(data: np.ndarray, window: int) -> float:
     return WqTsArgmin().compute(data, int(window))  # type: ignore
 
 
+def rolling_selmean_top(
+    data: np.ndarray, data2: np.ndarray, window: int, n: int = 5
+) -> float:
+    """Wrapper for RollingSelmeanTop operator."""
+    return RollingSelmeanTop().compute(  # type: ignore
+        data, int(window), data2=data2, extra_0=n
+    )
+
+
+def rolling_selmean_btm(
+    data: np.ndarray, data2: np.ndarray, window: int, n: int = 5
+) -> float:
+    """Wrapper for RollingSelmeanBtm operator."""
+    return RollingSelmeanBtm().compute(  # type: ignore
+        data, int(window), data2=data2, extra_0=n
+    )
+
+
+def rolling_selmean_diff(
+    data: np.ndarray, data2: np.ndarray, window: int, n: int = 5
+) -> float:
+    """Wrapper for RollingSelmeanDiff operator."""
+    return RollingSelmeanDiff().compute(  # type: ignore
+        data, int(window), data2=data2, extra_0=n
+    )
+
+
+def ts_max_to_min(data: np.ndarray, window: int) -> float:
+    """Wrapper for TsMaxToMin operator."""
+    return TsMaxToMin().compute(data, int(window))  # type: ignore
+
+
+def diff_sign(data: np.ndarray, window: int) -> float:
+    """Wrapper for DiffSign operator."""
+    return DiffSign().compute(data, int(window))  # type: ignore
+
+
 # Export all function wrappers
 TIME_SERIES_OPERATORS = {
     "ts_mean": ts_mean,
@@ -1300,6 +1575,12 @@ TIME_SERIES_OPERATORS = {
     "wq_ts_rank": wq_ts_rank,
     "wq_ts_argmax": wq_ts_argmax,
     "wq_ts_argmin": wq_ts_argmin,
+    # Factor-cutting operators
+    "rolling_selmean_top": rolling_selmean_top,
+    "rolling_selmean_btm": rolling_selmean_btm,
+    "rolling_selmean_diff": rolling_selmean_diff,
+    "ts_max_to_min": ts_max_to_min,
+    "diff_sign": diff_sign,
 }
 
 # Instance registry for vectorized evaluator (lookup by operator name)
@@ -1342,4 +1623,10 @@ TS_OPERATOR_INSTANCES: dict[str, TimeSeriesOperator] = {
     "wq_ts_rank": WqTsRank(),
     "wq_ts_argmax": WqTsArgmax(),
     "wq_ts_argmin": WqTsArgmin(),
+    # Factor-cutting operators
+    "rolling_selmean_top": RollingSelmeanTop(),
+    "rolling_selmean_btm": RollingSelmeanBtm(),
+    "rolling_selmean_diff": RollingSelmeanDiff(),
+    "ts_max_to_min": TsMaxToMin(),
+    "diff_sign": DiffSign(),
 }

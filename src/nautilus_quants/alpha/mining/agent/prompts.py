@@ -71,6 +71,14 @@ _OPERATOR_REFERENCE = """\
 - ts_residual(x, window)    — Deviation of last value from regression line
 - ts_percentile(x, window, q) — Rolling q-th quantile (e.g. q=0.5 for median)
 
+### Factor Cutting Operators (research-driven signal purification)
+- rolling_selmean_top(x, y, d, n)  — Mean of x for top-n y values in d-bar window
+- rolling_selmean_btm(x, y, d, n)  — Mean of x for bottom-n y values in d-bar window
+- rolling_selmean_diff(x, y, d, n) — Top mean minus bottom mean (core cutting operator)
+- ts_max_to_min(x, d)              — Rolling amplitude: ts_max(x,d) - ts_min(x,d)
+- diff_sign(x, d)                  — Deviation direction: sign(x - ts_mean(x,d))
+- ts_meanrank(x, d)                — Cross-sectional rank → time-series mean
+
 ### Cross-Sectional Operators (row-wise, across all instruments at each timestamp)
 - cs_rank(x)                — Percentile rank across instruments [1/n, 1]
 - rank(x)                   — Alias for cs_rank
@@ -388,6 +396,31 @@ def build_generation_prompt(
             "## Best Factors So Far (generate variations of these)\n"
             + "\n".join(feedback_lines)
         )
+
+    # ── Factor Cutting Techniques ──
+    sections.append(
+        "## Factor Cutting Techniques (因子切割论)\n\n"
+        "You can refine factors by conditioning on market microstructure "
+        "dimensions. This isolates the regime where the factor works best, "
+        "improving signal purity.\n\n"
+        "### Native cutting operators (preferred — precise, no zero-dilution):\n"
+        "- `rolling_selmean_diff(returns, volume, 20, 5)` — "
+        "High-volume days return minus low-volume days return\n"
+        "- `rolling_selmean_diff(returns, ts_std(returns, 6), 20, 5)` — "
+        "High-volatility return minus low-volatility return\n"
+        "- `rolling_selmean_diff(returns, funding_rate, 20, 5)` — "
+        "Regime split by funding rate level\n\n"
+        "### if_else cutting (alternative — more flexible conditions):\n"
+        "- Conditional: `if_else(cs_rank(ts_mean(volume, 6)) > 0.5, F, 0)`\n"
+        "- Differential: `if_else(C, F, 0) - if_else(!C, F, 0)` "
+        "(high regime minus low regime)\n\n"
+        "### When to use cutting:\n"
+        "- When you believe a factor works better in specific market "
+        "conditions (high volume, high volatility, positive funding)\n"
+        "- The subtraction acts as implicit standardization — "
+        "the low-regime baseline removes noise\n"
+        "- Combine with cs_rank: `cs_rank(rolling_selmean_diff(...))`"
+    )
 
     # ── Output instructions ──
     sections.append(
