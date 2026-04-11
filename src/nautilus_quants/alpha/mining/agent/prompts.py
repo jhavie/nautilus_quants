@@ -130,16 +130,15 @@ _CONSTRUCTION_RULES = """\
    - GOOD: `delta(volume, 6) / replace_zero(delay(volume, 6))`
    - BAD:  `delta(volume, 6) / delay(volume, 6)`
 
-3. **Final output normalization.** Wrap the FINAL expression in ONE of:
-   - `winsorize(expr, 3)` — PREFERRED, clips outliers at ±3σ, preserves distribution
-   - `cs_rank(expr)` — acceptable when distribution is heavily skewed
-   - Pick ONE, NEVER nest them (e.g. `winsorize(cs_rank(...))` is wrong)
+3. **Final output normalization.** Wrap the FINAL expression in ONE of (pick based on context):
+   - `winsorize(expr, 3)` — clips outliers at ±3σ, preserves distribution shape
+   - `cs_rank(expr)` — pure ordinal, use when distribution is heavily skewed or has extreme outliers
+   - Pick ONE, NEVER nest them (`winsorize(cs_rank(...))` or `cs_rank(winsorize(...))` is wrong)
    - Do NOT wrap with `normalize()` — the composite pipeline handles that
 
-4. **Robust over precise.** Use rank-based operators for INTERMEDIATE steps only:
+4. **Robust over precise.** Prefer rank-based measures for intermediate steps:
    - `ts_rank(x, w)` over `ts_mean(x, w)` — resistant to outliers in time-series
    - `cs_rank(x)` is fine INSIDE an expression (e.g. `correlation(high, cs_rank(volume), 5)`)
-   - But do NOT use `cs_rank()` as the outermost wrapper — use `winsorize()` instead
 
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects
