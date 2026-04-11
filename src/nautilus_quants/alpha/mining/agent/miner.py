@@ -35,6 +35,26 @@ from nautilus_quants.factors.expression.complexity import ComplexityConstraints
 logger = logging.getLogger(__name__)
 
 
+# Derived variables written into every generated factors.yaml so that
+# the analyzer can resolve names like btc_beta, vwap, etc.
+_DERIVED_VARIABLES: dict[str, str] = {
+    "returns": "delta(close, 1) / replace_zero(delay(close, 1))",
+    "vwap": "quote_volume / replace_zero(volume)",
+    "btc_returns": "delta(btc_close, 1) / delay(btc_close, 1)",
+    "eth_returns": "delta(eth_close, 1) / delay(eth_close, 1)",
+    "btc_vol": "ts_std(btc_returns, 42)",
+    "eth_vol": "ts_std(eth_returns, 42)",
+    "btc_beta": (
+        "covariance(returns, btc_returns, 42)"
+        " / replace_zero(power(btc_vol, 2))"
+    ),
+    "eth_beta": (
+        "covariance(returns, eth_returns, 42)"
+        " / replace_zero(power(eth_vol, 2))"
+    ),
+}
+
+
 # ── Data structures ───────────────────────────────────────────────────────
 
 
@@ -622,9 +642,7 @@ class AlphaMiner:
                 "source": self._config.source,
                 "description": f"LLM-generated factors ({len(factors)} factors)",
             },
-            "variables": {
-                "returns": "delta(close, 1) / replace_zero(delay(close, 1))",
-            },
+            "variables": _DERIVED_VARIABLES,
             "factors": factors_section,
         }
 
