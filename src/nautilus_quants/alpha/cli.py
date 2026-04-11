@@ -329,6 +329,7 @@ def analyze(
         report_gen = AnalysisReportGenerator(config)
         ic_results: dict[str, pd.DataFrame] = {}
         al_results: dict[str, dict] = {}
+        skipped_factors: dict[str, str] = {}  # name → reason
 
         # Phase 1: Parallel alphalens analysis (CPU-bound, no matplotlib)
         n_workers = workers if workers is not None else min(len(factor_series), 4)
@@ -352,6 +353,7 @@ def analyze(
                 name, result = future.result()
                 if isinstance(result, str):
                     click.echo(f"  Warning: {name} failed: {result}", err=True)
+                    skipped_factors[name] = result
                 else:
                     al_results[name] = result
                     ic_results[name] = result["ic"]
@@ -388,8 +390,12 @@ def analyze(
                 click.echo(f"  Charts generated in {time.time() - t2:.2f}s")
 
         # 9. Generate summary
-        if ic_results:
-            report_gen.generate_summary(ic_results, output_dir, factor_series=factor_series)
+        if ic_results or skipped_factors:
+            report_gen.generate_summary(
+                ic_results, output_dir,
+                factor_series=factor_series,
+                skipped_factors=skipped_factors,
+            )
 
         # 9a. Extended factor signal quality metrics
         factor_metrics_results = None
