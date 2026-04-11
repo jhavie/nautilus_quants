@@ -248,3 +248,144 @@ class TestCompositeNanTolerance:
         # So it should be purely driven by f1
         inst0_f1 = panel["f1_norm"].iloc[-1]["INST_0"]
         assert last_row["INST_0"] == pytest.approx(0.6 * inst0_f1, abs=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Real expression: alpha044 = correlation(high, rank(volume), 5)
+# ---------------------------------------------------------------------------
+
+
+class TestAlpha044CompositeNan:
+    """Verify NaN tolerance using real alpha044 expression with corr(5).
+
+    Scenario: 10 instruments, INST_0 has NaN in volume for 1 bar.
+    alpha044 = correlation(high, rank(volume), 5) → INST_0 is NaN for 5 bars.
+    Composite of alpha044 + another factor: INST_0 should survive with fill_neutral.
+    """
+
+    @staticmethod
+    def _make_ohlcv_panel(
+        n_ts: int = 20, n_inst: int = 10, seed: int = 77,
+    ) -> dict[str, pd.DataFrame]:
+        rng = np.random.RandomState(seed)
+        instruments = [f"INST_{i}" for i in range(n_inst)]
+
+        close = pd.DataFrame(
+            rng.randn(n_ts, n_inst).cumsum(axis=0) + 100,
+            columns=instruments,
+        )
+        high = close + np.abs(rng.randn(n_ts, n_inst))
+        low = close - np.abs(rng.randn(n_ts, n_inst))
+        volume = pd.DataFrame(
+            np.abs(rng.randn(n_ts, n_inst)) * 1000 + 500,
+            columns=instruments,
+        )
+        # Inject NaN: INST_0 volume missing at bar index 10
+        volume.iloc[10, 0] = np.nan
+
+        returns = close.pct_change()
+
+        return {
+            "close": close,
+            "high": high,
+            "low": low,
+            "volume": volume,
+            "returns": returns,
+        }
+
+    def test_alpha044_nan_propagation_window(self) -> None:
+        """1 NaN bar in volume → alpha044 NaN for 5 consecutive bars (window=5)."""
+        panel = self._make_ohlcv_panel()
+        evaluator = Evaluator(
+            panel_fields=panel,
+            ts_ops=TS_OPERATOR_INSTANCES,
+            cs_ops=CS_OPERATOR_INSTANCES,
+            math_ops=MATH_OPERATORS,
+        )
+        result = evaluator.evaluate(
+            parse_expression("correlation(high, rank(volume), 5)"),
+        )
+        # INST_0: NaN injected at bar 10, corr window=5
+        # Bars 10-14 should be NaN for INST_0 (window slides over the NaN)
+        inst0 = result["INST_0"]
+        for bar in range(10, 15):
+            assert math.isnan(inst0.iloc[bar]), f"Bar {bar} should be NaN"
+        # Bar 15 should recover (NaN has slid out of window)
+        assert not math.isnan(inst0.iloc[15]), "Bar 15 should recover"
+
+    def test_alpha044_composite_strict_excludes(self) -> None:
+        """Strict composite: INST_0 excluded at last bar if still in NaN tail."""
+        panel = self._make_ohlcv_panel(n_ts=15)  # last bar = 14, still NaN
+        evaluator = Evaluator(
+            panel_fields=panel,
+            ts_ops=TS_OPERATOR_INSTANCES,
+            cs_ops=CS_OPERATOR_INSTANCES,
+            math_ops=MATH_OPERATORS,
+        )
+        # alpha044
+        panel["alpha044"] = evaluator.evaluate(
+            parse_expression("correlation(high, rank(volume), 5)"),
+        )
+        # A second factor with no NaN issues
+        panel["momentum"] = evaluator.evaluate(
+            parse_expression("delta(close, 3) / delay(close, 3)"),
+        )
+        # Strict composite pipeline
+        panel["alpha044_norm"] = evaluator.evaluate(
+            parse_expression("normalize(alpha044, true, 0)"),
+        )
+        panel["momentum_norm"] = evaluator.evaluate(
+            parse_expression("normalize(momentum, true, 0)"),
+        )
+        result = evaluator.evaluate(
+            parse_expression("0.6 * alpha044_norm + 0.4 * momentum_norm"),
+        )
+        last_row = result.iloc[-1]
+        # INST_0 should be NaN (poisoned by alpha044)
+        assert math.isnan(last_row["INST_0"])
+        # Others valid
+        assert last_row.iloc[1:].notna().sum() >= 8
+
+    def test_alpha044_composite_fill_neutral_includes(self) -> None:
+        """fill_neutral composite: INST_0 survives with momentum-only signal."""
+        panel = self._make_ohlcv_panel(n_ts=15)
+        evaluator = Evaluator(
+            panel_fields=panel,
+            ts_ops=TS_OPERATOR_INSTANCES,
+            cs_ops=CS_OPERATOR_INSTANCES,
+            math_ops=MATH_OPERATORS,
+        )
+        panel["alpha044"] = evaluator.evaluate(
+            parse_expression("correlation(high, rank(volume), 5)"),
+        )
+        panel["momentum"] = evaluator.evaluate(
+            parse_expression("delta(close, 3) / delay(close, 3)"),
+        )
+        # fill_neutral pipeline: normalize → fill_nan → weighted sum
+        panel["alpha044_norm"] = evaluator.evaluate(
+            parse_expression("normalize(alpha044, true, 0)"),
+        )
+        panel["momentum_norm"] = evaluator.evaluate(
+            parse_expression("normalize(momentum, true, 0)"),
+        )
+        panel["alpha044_filled"] = evaluator.evaluate(
+            parse_expression("fill_nan(alpha044_norm, 0)"),
+        )
+        panel["momentum_filled"] = evaluator.evaluate(
+            parse_expression("fill_nan(momentum_norm, 0)"),
+        )
+        result = evaluator.evaluate(
+            parse_expression(
+                "0.6 * alpha044_filled + 0.4 * momentum_filled",
+            ),
+        )
+        last_row = result.iloc[-1]
+        # ALL instruments valid — INST_0 included
+        assert last_row.notna().all(), (
+            f"NaN found: {last_row[last_row.isna()].index.tolist()}"
+        )
+        # INST_0 composite = 0.6 * 0 (neutral) + 0.4 * momentum_norm
+        # Pure momentum signal — no alpha044 contribution
+        inst0_mom = panel["momentum_norm"].iloc[-1]["INST_0"]
+        expected = 0.4 * inst0_mom
+        assert last_row["INST_0"] == pytest.approx(expected, abs=1e-10)
