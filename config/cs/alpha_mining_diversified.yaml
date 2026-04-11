@@ -19,21 +19,21 @@ registry:
 # ── Mining settings ──
 mining:
   source: "llm_diversified"
-  factors_per_round: 5
+  factors_per_round: 8
   model: "sonnet"
   proxy: "http://127.0.0.1:8888"
-  parallel: 5
+  parallel: 3
   output_dir: "logs/alpha_mining_diversified"
 
   # ── Complexity constraints ──
   constraints:
     max_char_length: 200
     max_node_count: 30
-    max_depth: 8
-    max_func_nesting: 5
+    max_depth: 6
+    max_func_nesting: 4
     max_variables: 5
     max_window: 720
-    max_numeric_ratio: 0.4
+    max_numeric_ratio: 0.3
 
   # ── 5 exploration directions (theme-only, all operators/variables available) ──
   directions:
@@ -45,7 +45,7 @@ mining:
         Key intuition: small-cap (low quote_volume) vs large-cap behavior,
         size momentum, turnover concentration.
       tags: [size, turnover, quote_volume]
-      rounds: 5
+      rounds: 3
 
     market:
       theme: >-
@@ -55,7 +55,7 @@ mining:
         eth_returns to capture market exposure, beta momentum,
         beta dispersion, and idiosyncratic vs systematic risk.
       tags: [market, beta, systematic]
-      rounds: 5
+      rounds: 3
 
     liquidity:
       theme: >-
@@ -64,7 +64,7 @@ mining:
         dynamics predict returns. Key patterns: volume surge/drought,
         VWAP premium/discount, relative volume shifts, liquidity shocks.
       tags: [liquidity, volume, vwap]
-      rounds: 5
+      rounds: 3
 
     sentiment:
       theme: >-
@@ -76,7 +76,7 @@ mining:
         only updates every 2 bars (8h settlement).
         open_interest: total open positions in base asset.
       tags: [sentiment, funding_rate, open_interest]
-      rounds: 5
+      rounds: 3
 
     volatility:
       theme: >-
@@ -87,7 +87,7 @@ mining:
         high-low range relative to recent history, volatility rank
         reversal, intraday range vs close-to-close volatility.
       tags: [volatility, range, regime]
-      rounds: 5
+      rounds: 3
 
 # ── Charts ──
 charts:
@@ -97,14 +97,6 @@ charts:
   - cumulative_returns_long_short
   - ic_histogram
   - turnover
-
-# ── 8h-aligned variables (match FR/OI cadence on 4h grid) ──
-variables:
-  ret_8h: "delta(close, 2) / replace_zero(delay(close, 2))"
-  vol_8h: "ts_std(returns, 2)"
-  volume_8h: "ts_sum(volume, 2)"
-  range_8h: "(ts_max(high, 2) - ts_min(low, 2)) / replace_zero(delay(close, 2))"
-  vwap_8h: "ts_sum(quote_volume, 2) / replace_zero(ts_sum(volume, 2))"
 
 # ── Data source ──
 catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
