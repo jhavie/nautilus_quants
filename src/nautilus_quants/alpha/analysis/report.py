@@ -773,6 +773,7 @@ class AnalysisReportGenerator:
         ic_results: dict[str, pd.DataFrame],
         output_dir: Path,
         factor_series: dict[str, pd.Series] | None = None,
+        skipped_factors: dict[str, str] | None = None,
     ) -> Path:
         """Generate IC/ICIR summary text file.
 
@@ -785,6 +786,7 @@ class AnalysisReportGenerator:
             ic_results: {factor_name: IC DataFrame}
             output_dir: Run output directory
             factor_series: {factor_name: Series(MultiIndex[date, asset])} for correlation
+            skipped_factors: {factor_name: reason} for factors that failed analysis
 
         Returns:
             Path to summary file
@@ -809,6 +811,14 @@ class AnalysisReportGenerator:
                     f"N={n}, N_eff={n_eff}"
                 )
 
+            lines.append("")
+
+        # Skipped factors section
+        if skipped_factors:
+            lines.append("Skipped Factors (analysis failed)")
+            lines.append("=" * 60)
+            for factor_name, reason in skipped_factors.items():
+                lines.append(f"  {factor_name}: {reason}")
             lines.append("")
 
         # Factor correlation matrix
