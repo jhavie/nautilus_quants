@@ -477,6 +477,14 @@ def repair_factors(
                     repo.upsert_factor(new_record)
                 # Reassign metrics to target (new or existing)
                 for run_id in orphan.run_ids:
+                    # Delete conflicting rows in target to avoid PK violation
+                    repo._db.execute(
+                        "DELETE FROM alpha_analysis_metrics "
+                        "WHERE factor_id = ? AND run_id = ? AND period IN "
+                        "(SELECT period FROM alpha_analysis_metrics "
+                        " WHERE factor_id = ? AND run_id = ?)",
+                        [target_fid, run_id, report.factor_id, run_id],
+                    )
                     repo._db.execute(
                         "UPDATE alpha_analysis_metrics "
                         "SET factor_id = ? "

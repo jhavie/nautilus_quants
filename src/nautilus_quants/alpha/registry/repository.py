@@ -299,12 +299,17 @@ class FactorRepository:
 
             # 2. Check for name collision with different expression
             existing = self.get_factor(base_fid)
-            if (
-                existing is not None
-                and expr_hash
-                and existing.expression_hash
-                and existing.expression_hash != expr_hash
-            ):
+            if existing is not None and expr_hash:
+                try:
+                    existing_hash = (
+                        existing.expression_hash
+                        or _expr_hash(existing.expression)
+                    )
+                except Exception:
+                    existing_hash = ""
+            else:
+                existing_hash = ""
+            if existing_hash and existing_hash != expr_hash:
                 fid = f"{base_fid}_{expr_hash[:8]}"
                 # Safety: check the suffixed id doesn't also collide
                 if self.get_factor(fid) is not None:

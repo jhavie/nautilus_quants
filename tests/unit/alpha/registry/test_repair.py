@@ -163,6 +163,33 @@ class TestRepairMerge:
         assert len(hash_suffixed) == 0
 
 
+    def test_merge_with_pk_conflict_no_crash(
+        self, repo: FactorRepository,
+    ) -> None:
+        """Merge succeeds even if target already has same run_id+period."""
+        _setup_conflict(repo)
+        # Create alias factor with same expression as orphan
+        repo.upsert_factor(FactorRecord(
+            factor_id="src_alias", expression="rank(close)", source="src",
+        ))
+        # Pre-populate target with conflicting metrics (same run_id+period)
+        repo.save_metrics([
+            AnalysisMetrics(
+                run_id="run_a", factor_id="src_alias", period="1d",
+                ic_mean=0.99, icir=0.99,
+                factor_config_id="dummy",
+            ),
+        ])
+
+        actions = repair_factors(repo, dry_run=False)
+
+        assert len(actions) == 1
+        assert actions[0].action == "merge"
+        # Should not crash; metrics reassigned
+        metrics = repo.get_metrics("src_alias")
+        assert any(m.run_id == "run_a" for m in metrics)
+
+
 class TestRepairDryRun:
     def test_no_changes(self, repo: FactorRepository) -> None:
         _setup_conflict(repo)

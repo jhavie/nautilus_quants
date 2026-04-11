@@ -429,6 +429,29 @@ class TestRegisterFromConfig:
         assert result.skipped == 1
         assert result.name_map["f2"] == "s_f1"
 
+    def test_collision_detected_when_existing_hash_empty(
+        self, repo: FactorRepository,
+    ) -> None:
+        """Collision detected even if stored expression_hash is empty."""
+        # Manually insert factor with empty hash (simulates legacy data)
+        repo._db.execute(
+            "INSERT INTO factors "
+            "(factor_id, expression, expression_hash, source, status, "
+            " tags, parameters, variables, created_at, updated_at) "
+            "VALUES (?, ?, '', 's', 'candidate', '[]', '{}', '{}', "
+            " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            ["s_f1", "rank(close)"],
+        )
+
+        config = FactorConfig(
+            source="s",
+            factors=[FactorDefinition("f1", "rank(open)")],
+        )
+        result = repo.register_factors_from_config(config)
+        assert result.renamed == 1
+        # Original factor untouched
+        assert repo.get_factor("s_f1").expression == "rank(close)"
+
     def test_name_map_correct(self, repo: FactorRepository) -> None:
         config = FactorConfig(
             source="src",
