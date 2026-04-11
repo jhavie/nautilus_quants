@@ -1908,6 +1908,13 @@ def mine(
         hypothesis=hypothesis,
         auto_analyze=not no_analyze,
     )
+
+    if config.directions and config.hypothesis:
+        raise click.UsageError(
+            "--hypothesis and mining.directions are mutually exclusive. "
+            "Remove --hypothesis or remove the directions section from config."
+        )
+
     miner = AlphaMiner(config)
     miner.run(rounds=rounds)
 

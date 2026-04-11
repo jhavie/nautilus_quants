@@ -35,6 +35,12 @@ from nautilus_quants.factors.expression.evaluator import (
     VectorizedEvaluator,
     evaluate_expression,
 )
+from nautilus_quants.factors.expression.complexity import (
+    ComplexityConstraints,
+    ComplexityMetrics,
+    analyze_complexity,
+    check_constraints,
+)
 from nautilus_quants.factors.expression.parser import (
     ExpressionParser,
     parse_expression,
@@ -60,4 +66,9 @@ __all__ = [
     "EvaluationContext",
     "EvaluationError",
     "evaluate_expression",
+    # Complexity analysis
+    "ComplexityConstraints",
+    "ComplexityMetrics",
+    "analyze_complexity",
+    "check_constraints",
 ]
