@@ -26,7 +26,7 @@ hard_filters:
   win_rate_upper: 0.55
   ic_linearity_min: 0.85
   coverage_min: 0.50
-  n_samples_min: 3000
+  n_samples_min: 1000
   min_valid_periods: 2
 
 # ── [scoring] ──
@@ -73,7 +73,7 @@ clustering:
 # ── [orthogonalization] ──
 # Optimize composite weights to eliminate redundant exposure.
 orthogonalization:
-  enabled: true                  # false = skip, use original weights
+  enabled: false                  # false = skip, use original weights
   method: "lowdin"
   min_eigenvalue: 1.0e-6
   max_condition_number: 1.0e+6
@@ -110,14 +110,25 @@ data:
     # - "config/alpha_batch/factors_alpha158.yaml"
     # - "config/alpha_batch/factors_alpha191.yaml"
     # - "config/alpha_batch/factors_ta.yaml"
-  # 67 symbols with confirmed Bybit OI/FR data from 2022-01-01
-  # (10 delisted/renamed on Bybit excluded)
+  # 53 symbols: intersection of
+  #   - scoring catalog (data_4years_4h_fr_oi, 67 coins with 4yr OHLCV+FR+OI)
+  #   - alpha_mining_sanapi.yaml (78 coins with complete SanAPI FR+OI)
+  # Ensures every coin has BOTH 4yr OHLCV history AND SanAPI san_fr/san_oi
+  # coverage, so cross-sectional correlation for san-related factors is
+  # meaningful (no all-NaN columns for missing san data).
+  #
+  # Excluded from prior 67 (no SanAPI data):
+  #   ADA, ALICE, C98, CRV, EGLD, FIL, GALA, PEOPLE, SFP, SNX, SUSHI,
+  #   THETA, UNI, ZEN  (14 coins)
+  #
+  # Not added from mining.yaml (no OHLCV in scoring catalog):
+  #   ARPA, AUDIO, BAKE, BAND, BEL, CELO, CELR, CTSI, DENT, HOT, ICX,
+  #   KAVA, MATIC, MTL, NEO, OGN, ONT, ROSE, RVN, SHIB, TRB, WAVES,
+  #   XMR, ZIL, ZRX  (25 coins) — would require extending scoring catalog
   instrument_ids:
     - "1INCHUSDT.BINANCE"
     - "AAVEUSDT.BINANCE"
-    - "ADAUSDT.BINANCE"
     - "ALGOUSDT.BINANCE"
-    - "ALICEUSDT.BINANCE"
     - "ANKRUSDT.BINANCE"
     - "ARUSDT.BINANCE"
     - "ATOMUSDT.BINANCE"
@@ -127,24 +138,19 @@ data:
     - "BCHUSDT.BINANCE"
     - "BNBUSDT.BINANCE"
     - "BTCUSDT.BINANCE"
-    - "C98USDT.BINANCE"
     - "CHRUSDT.BINANCE"
     - "CHZUSDT.BINANCE"
     - "COMPUSDT.BINANCE"
     - "COTIUSDT.BINANCE"
-    - "CRVUSDT.BINANCE"
     - "DASHUSDT.BINANCE"
     - "DOGEUSDT.BINANCE"
     - "DOTUSDT.BINANCE"
     - "DUSKUSDT.BINANCE"
     - "DYDXUSDT.BINANCE"
-    - "EGLDUSDT.BINANCE"
     - "ENJUSDT.BINANCE"
     - "ENSUSDT.BINANCE"
     - "ETCUSDT.BINANCE"
     - "ETHUSDT.BINANCE"
-    - "FILUSDT.BINANCE"
-    - "GALAUSDT.BINANCE"
     - "GRTUSDT.BINANCE"
     - "HBARUSDT.BINANCE"
     - "IOSTUSDT.BINANCE"
@@ -159,24 +165,17 @@ data:
     - "MASKUSDT.BINANCE"
     - "NEARUSDT.BINANCE"
     - "ONEUSDT.BINANCE"
-    - "PEOPLEUSDT.BINANCE"
     - "QTUMUSDT.BINANCE"
     - "RSRUSDT.BINANCE"
     - "RUNEUSDT.BINANCE"
     - "SANDUSDT.BINANCE"
-    - "SFPUSDT.BINANCE"
-    - "SNXUSDT.BINANCE"
     - "SOLUSDT.BINANCE"
     - "STORJUSDT.BINANCE"
-    - "SUSHIUSDT.BINANCE"
     - "SXPUSDT.BINANCE"
-    - "THETAUSDT.BINANCE"
     - "TRXUSDT.BINANCE"
-    - "UNIUSDT.BINANCE"
     - "VETUSDT.BINANCE"
     - "XLMUSDT.BINANCE"
     - "XRPUSDT.BINANCE"
     - "XTZUSDT.BINANCE"
     - "YFIUSDT.BINANCE"
     - "ZECUSDT.BINANCE"
-    - "ZENUSDT.BINANCE"
