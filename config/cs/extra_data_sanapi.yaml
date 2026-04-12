@@ -10,7 +10,7 @@
 
 san_funding_rate:
   source: parquet
-  path: "data/catalog_sanapi"
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
   field_name: "san_funding_rate"
   file_suffix: "san_fr"
   timeframe: "4h"
@@ -18,7 +18,7 @@ san_funding_rate:
 
 san_open_interest:
   source: parquet
-  path: "data/catalog_sanapi"
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
   field_name: "san_open_interest"
   file_suffix: "san_oi"
   timeframe: "4h"

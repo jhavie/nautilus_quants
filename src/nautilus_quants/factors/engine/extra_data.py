@@ -379,7 +379,11 @@ def _load_parquet_field(
         target_instruments = cfg.instruments or instruments
         timeframe = cfg.timeframe or "4h"
         effective_field = cfg.field_name or cfg.name
-        effective_suffix = cfg.file_suffix or cfg.name
+        # Backward compat: "open_interest" historically uses "oi" file suffix
+        if cfg.name == "open_interest" and not cfg.file_suffix:
+            effective_suffix = "oi"
+        else:
+            effective_suffix = cfg.file_suffix or cfg.name
 
         lookup = load_parquet_field_lookup(
             catalog_path=cfg.path,
@@ -493,7 +497,11 @@ def load_parquet_field_lookup(
     target = cfg.instruments or instruments
     timeframe = cfg.timeframe or "4h"
     effective_field = cfg.field_name or cfg.name
-    effective_suffix = cfg.file_suffix or cfg.name
+    # Backward compat: "open_interest" historically uses "oi" file suffix
+    if cfg.name == "open_interest" and not cfg.file_suffix:
+        effective_suffix = "oi"
+    else:
+        effective_suffix = cfg.file_suffix or cfg.name
 
     return _load_pfl(
         catalog_path=cfg.path,
