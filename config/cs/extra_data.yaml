@@ -30,3 +30,23 @@ btc_close:
 eth_close:
   source: broadcast
   instruments: ["ETH"]
+
+# ── SanAPI: cross-exchange aggregated derivatives data ──
+# Downloaded via: python -m nautilus_quants.data santiment-download
+# Transformed via: python -m nautilus_quants.data santiment-transform
+
+san_funding_rate:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_funding_rate"
+  file_suffix: "san_fr"
+  timeframe: "4h"
+  fill: ffill
+
+san_open_interest:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_open_interest"
+  file_suffix: "san_oi"
+  timeframe: "4h"
+  fill: ffill

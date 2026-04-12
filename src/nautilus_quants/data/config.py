@@ -180,12 +180,8 @@ def _parse_download(data: dict) -> DownloadConfig:
         timeframes=data.get("timeframes", ["1h", "4h"]),
         start_date=data.get("start_date", "2024-01-01"),
         end_date=data.get("end_date", "2024-12-31"),
-        funding_rate=data.get(
-            "funding_rate", False
-        ),
-        open_interest=data.get(
-            "open_interest", False
-        ),
+        funding_rate=data.get("funding_rate", False),
+        open_interest=data.get("open_interest", False),
         oi_period=data.get("oi_period", ""),
         rate_limit=_parse_rate_limit(data.get("rate_limit", {})),
         checkpoint=_parse_checkpoint(data.get("checkpoint", {})),
@@ -437,6 +433,189 @@ def config_to_dict(config: PipelineConfig) -> dict:
         "paths": {
             "raw_data": config.paths.raw_data,
             "processed_data": config.paths.processed_data,
+            "catalog": config.paths.catalog,
+            "logs": config.paths.logs,
+        },
+    }
+
+
+# ── Santiment Pipeline Config ─────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class SantimentRateLimitConfig:
+    """Rate limiting for SanAPI."""
+
+    delay_seconds: float = 1.2
+    max_retries: int = 3
+    backoff_multiplier: float = 2.0
+
+
+@dataclass(frozen=True)
+class SantimentDownloadConfig:
+    """Download configuration for Santiment data."""
+
+    source: str = "santiment"
+    api_key: str = ""  # plaintext key (takes precedence over api_key_env)
+    api_key_env: str = "SAN_API_KEY"
+    metrics: tuple[str, ...] = ("funding_rate", "total_open_interest")
+    interval: str = "4h"
+    start_date: str = "2025-04-12"
+    end_date: str = "2026-04-12"
+    symbols: tuple[str, ...] = ()
+    rate_limit: SantimentRateLimitConfig = SantimentRateLimitConfig()
+    checkpoint_enabled: bool = True
+
+
+@dataclass(frozen=True)
+class SantimentTransformConfig:
+    """Transform configuration for Santiment data."""
+
+    field_mapping: dict[str, str] = field(
+        default_factory=lambda: {
+            "funding_rate": "san_funding_rate",
+            "total_open_interest": "san_open_interest",
+        }
+    )
+    file_suffix_mapping: dict[str, str] = field(
+        default_factory=lambda: {
+            "funding_rate": "san_fr",
+            "total_open_interest": "san_oi",
+        }
+    )
+    venue: str = "BINANCE"
+    timeframe: str = "4h"
+
+
+@dataclass(frozen=True)
+class SantimentPathsConfig:
+    """Paths configuration for Santiment data."""
+
+    raw_data: str = "data/raw/santiment"
+    catalog: str = "data/catalog_sanapi"
+    logs: str = "logs/santiment_pipeline"
+
+
+@dataclass(frozen=True)
+class SantimentPipelineConfig:
+    """Complete Santiment pipeline configuration."""
+
+    download: SantimentDownloadConfig = SantimentDownloadConfig()
+    transform: SantimentTransformConfig = SantimentTransformConfig()
+    paths: SantimentPathsConfig = SantimentPathsConfig()
+
+
+def _parse_santiment_download(data: dict) -> SantimentDownloadConfig:
+    """Parse Santiment download configuration from dict."""
+    rl = data.get("rate_limit", {})
+    metrics = data.get("metrics", ["funding_rate", "total_open_interest"])
+    symbols = data.get("symbols", [])
+    return SantimentDownloadConfig(
+        source=data.get("source", "santiment"),
+        api_key=data.get("api_key", ""),
+        api_key_env=data.get("api_key_env", "SAN_API_KEY"),
+        metrics=tuple(metrics),
+        interval=data.get("interval", "4h"),
+        start_date=data.get("start_date", "2025-04-12"),
+        end_date=data.get("end_date", "2026-04-12"),
+        symbols=tuple(symbols),
+        rate_limit=SantimentRateLimitConfig(
+            delay_seconds=rl.get("delay_seconds", 1.2),
+            max_retries=rl.get("max_retries", 3),
+            backoff_multiplier=rl.get("backoff_multiplier", 2.0),
+        ),
+        checkpoint_enabled=data.get("checkpoint", {}).get("enabled", True),
+    )
+
+
+def _parse_santiment_transform(data: dict) -> SantimentTransformConfig:
+    """Parse Santiment transform configuration from dict."""
+    return SantimentTransformConfig(
+        field_mapping=data.get(
+            "field_mapping",
+            {
+                "funding_rate": "san_funding_rate",
+                "total_open_interest": "san_open_interest",
+            },
+        ),
+        file_suffix_mapping=data.get(
+            "file_suffix_mapping",
+            {
+                "funding_rate": "san_fr",
+                "total_open_interest": "san_oi",
+            },
+        ),
+        venue=data.get("venue", "BINANCE"),
+        timeframe=data.get("timeframe", "4h"),
+    )
+
+
+def _parse_santiment_paths(data: dict) -> SantimentPathsConfig:
+    """Parse Santiment paths configuration from dict."""
+    return SantimentPathsConfig(
+        raw_data=data.get("raw_data", "data/raw/santiment"),
+        catalog=data.get("catalog", "data/catalog_sanapi"),
+        logs=data.get("logs", "logs/santiment_pipeline"),
+    )
+
+
+def load_santiment_config(
+    config_path: Path | str = "config/examples/data_santiment.yaml",
+    overrides: Optional[dict[str, Any]] = None,
+) -> SantimentPipelineConfig:
+    """Load Santiment configuration from YAML file with CLI overrides.
+
+    Args:
+        config_path: Path to the YAML configuration file.
+        overrides: Optional dictionary of CLI overrides.
+
+    Returns:
+        SantimentPipelineConfig with merged configuration.
+
+    Raises:
+        ConfigurationError: If configuration file is invalid or not found.
+    """
+    config_path = Path(config_path)
+
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                data = yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            raise ConfigurationError(f"Invalid YAML in {config_path}: {e}")
+    else:
+        data = {}
+
+    if overrides:
+        data = _merge_overrides(data, overrides)
+
+    return SantimentPipelineConfig(
+        download=_parse_santiment_download(data.get("download", {})),
+        transform=_parse_santiment_transform(data.get("transform", {})),
+        paths=_parse_santiment_paths(data.get("paths", {})),
+    )
+
+
+def santiment_config_to_dict(config: SantimentPipelineConfig) -> dict:
+    """Convert SantimentPipelineConfig to dictionary for serialization."""
+    return {
+        "download": {
+            "source": config.download.source,
+            "metrics": list(config.download.metrics),
+            "interval": config.download.interval,
+            "start_date": config.download.start_date,
+            "end_date": config.download.end_date,
+            "symbols": list(config.download.symbols),
+            "checkpoint_enabled": config.download.checkpoint_enabled,
+        },
+        "transform": {
+            "field_mapping": config.transform.field_mapping,
+            "file_suffix_mapping": config.transform.file_suffix_mapping,
+            "venue": config.transform.venue,
+            "timeframe": config.transform.timeframe,
+        },
+        "paths": {
+            "raw_data": config.paths.raw_data,
             "catalog": config.paths.catalog,
             "logs": config.paths.logs,
         },

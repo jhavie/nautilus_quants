@@ -926,16 +926,27 @@ def compute_factor_correlation(
         )
         return pd.DataFrame()
 
-    # Align all panels to common timestamps
+    # UNION of all panel timestamps (not intersection).
+    #
+    # Each factor pair is correlated on its own time-axis overlap via
+    # per-step factor subsetting + pairwise complete observations:
+    #   - OHLCV × OHLCV:   accumulate the full 4-year window
+    #   - OHLCV × san_*:   accumulate only the ~8-12 months san has data
+    #   - san × san:       accumulate only the san window
+    # A single short-history factor (e.g. san_oi with 11mo) must NOT drag
+    # OHLCV × OHLCV down to its window — that was the old `intersection`
+    # behaviour. `n_valid` tracks per-pair sample count so `avg_corr =
+    # corr_sum / n_valid` normalizes each pair on its actual overlap.
     common_idx = None
     for panel in all_factor_panels.values():
-        if common_idx is None:
-            common_idx = panel.index
-        else:
-            common_idx = common_idx.intersection(panel.index)
+        common_idx = (
+            panel.index if common_idx is None
+            else common_idx.union(panel.index)
+        )
 
     if common_idx is None or len(common_idx) == 0:
         return pd.DataFrame()
+    common_idx = common_idx.sort_values()
 
     matched_ids = [fid for fid in factor_ids if fid in all_factor_panels]
     n_factors = len(matched_ids)
@@ -944,7 +955,12 @@ def compute_factor_correlation(
     cached_corr: pd.DataFrame | None = None
     corr_cache_file: Path | None = None
     if cache_dir:
-        corr_cache_file = cache_dir / "_correlation_matrix.parquet"
+        # v2: union-based common_idx + per-t factor subsetting.
+        # Old "_correlation_matrix.parquet" was computed on the global
+        # intersection (short-history factors truncated all pairs) and is
+        # not comparable — keep the filename distinct so stale caches are
+        # auto-ignored.
+        corr_cache_file = cache_dir / "_correlation_matrix_v2.parquet"
         if corr_cache_file.exists():
             try:
                 cached_corr = pd.read_parquet(corr_cache_file)
@@ -952,11 +968,35 @@ def compute_factor_correlation(
                 logger.warning("Corr cache read failed: %s", e)
                 cached_corr = None
 
-    # Determine which factor pairs need computation
+    # Determine which factor pairs need computation.
+    # Treat "present but all-zero row" as stale: a factor can appear in the cached
+    # corr matrix with zeros everywhere (incl. diagonal) if a previous run wrote
+    # the matrix before that factor's panel was computable. Reusing such rows
+    # causes the greedy dedup to see ρ=0 with everything and wrongly admit highly
+    # correlated factors. Fall back to recomputing those rows.
     if cached_corr is not None:
         cached_set = set(cached_corr.index) & set(cached_corr.columns)
-        new_ids = [fid for fid in matched_ids if fid not in cached_set]
-        existing_ids_in_cache = [fid for fid in matched_ids if fid in cached_set]
+        stale_ids: list[str] = []
+        existing_ids_in_cache = []
+        for fid in matched_ids:
+            if fid not in cached_set:
+                continue
+            if (cached_corr.loc[fid] != 0).any():
+                existing_ids_in_cache.append(fid)
+            else:
+                stale_ids.append(fid)
+        new_ids = [
+            fid for fid in matched_ids
+            if fid not in cached_set or fid in stale_ids
+        ]
+        if stale_ids:
+            msg = (
+                f"Corr cache: {len(stale_ids)} stale rows (all-zero) will be "
+                f"recomputed: {stale_ids[:5]}"
+                f"{'...' if len(stale_ids) > 5 else ''}"
+            )
+            logger.warning(msg)
+            print(f"  ⚠ {msg}")
     else:
         new_ids = matched_ids
         existing_ids_in_cache = []
@@ -981,68 +1021,74 @@ def compute_factor_correlation(
         logger.info(msg)
         print(f"  {msg}")
 
-    from scipy.stats import spearmanr
-
-    # Full computation for new factors vs all factors
-    compute_ids = matched_ids  # need all for cross-section alignment
+    # Vectorized pairwise cross-sectional Spearman with per-t subsetting.
+    #
+    # Outer loop iterates the UNION of panel timestamps. At each t we
+    # restrict to factors whose panel.index contains t (factor_mask_2d),
+    # compute one pandas C-level `DataFrame.corr('spearman')` on that
+    # subset, and scatter the (sub_ids × sub_ids) result back into the
+    # full (n_compute × n_compute) accumulator. This gives each pair
+    # its own time-axis overlap — long-history pairs accumulate ~4yr of
+    # t-steps, short-history pairs only their ~8-12mo.
+    #
+    # `DataFrame.corr(method='spearman', min_periods=5)` already does
+    # pairwise complete observations on the asset axis (per-pair NaN
+    # intersection) in C, so this single call replaces the old inner
+    # double loop over scipy.stats.spearmanr.
+    compute_ids = matched_ids
     n_compute = len(compute_ids)
 
     corr_sum = np.zeros((n_compute, n_compute))
     n_valid = np.zeros((n_compute, n_compute))
 
-    for t in common_idx:
-        cs_data = {}
-        for fid in compute_ids:
-            row = all_factor_panels[fid].loc[t].dropna()
-            cs_data[fid] = row
+    id_to_idx = {fid: i for i, fid in enumerate(compute_ids)}
 
-        common_assets = None
-        for fid, row in cs_data.items():
-            if common_assets is None:
-                common_assets = set(row.index)
-            else:
-                common_assets &= set(row.index)
+    # Per-factor membership mask over common_idx (shape (n_compute, T)).
+    # ~O(n_compute * T) bits — for 735 factors × 8766 steps ≈ 6.4M bits ≈ 800KB.
+    factor_mask_2d = np.stack([
+        common_idx.isin(all_factor_panels[fid].index) for fid in compute_ids
+    ])
 
-        if common_assets is None or len(common_assets) < 5:
+    incremental = bool(new_ids) and cached_corr is not None
+    if incremental:
+        new_idx_arr = np.fromiter(
+            (id_to_idx[fid] for fid in new_ids), dtype=np.int64,
+        )
+        update_mask = np.zeros((n_compute, n_compute), dtype=bool)
+        update_mask[new_idx_arr, :] = True
+        update_mask[:, new_idx_arr] = True
+    else:
+        update_mask = None
+
+    for i, t in enumerate(common_idx):
+        mask_i = factor_mask_2d[:, i]
+        if mask_i.sum() < 2:
+            continue
+        sub_idx_arr = np.nonzero(mask_i)[0]
+        sub_ids = [compute_ids[k] for k in sub_idx_arr]
+
+        cs_df = pd.DataFrame(
+            {fid: all_factor_panels[fid].loc[t] for fid in sub_ids}
+        )
+        cs_df = cs_df.dropna(how="all")
+        if len(cs_df) < 5:
             continue
 
-        common_assets_list = sorted(common_assets)
+        rho_sub = cs_df.corr(
+            method="spearman", min_periods=5,
+        ).to_numpy(copy=False)
+        valid_sub = ~np.isnan(rho_sub)
+        if update_mask is not None:
+            # Only update rows/cols that involve a new factor.
+            valid_sub &= update_mask[np.ix_(sub_idx_arr, sub_idx_arr)]
 
-        if new_ids and cached_corr is not None:
-            # Incremental: only compute new factor columns
-            new_indices = [compute_ids.index(fid) for fid in new_ids]
-            all_vectors = {
-                fid: cs_data[fid].loc[common_assets_list].values
-                for fid in compute_ids
-            }
-            for ni in new_indices:
-                new_fid = compute_ids[ni]
-                new_vec = all_vectors[new_fid]
-                for j, other_fid in enumerate(compute_ids):
-                    if j == ni:
-                        corr_sum[ni, j] += 1.0
-                        n_valid[ni, j] += 1
-                        continue
-                    other_vec = all_vectors[other_fid]
-                    rho_val, _ = spearmanr(new_vec, other_vec)
-                    if not np.isnan(rho_val):
-                        corr_sum[ni, j] += rho_val
-                        corr_sum[j, ni] += rho_val
-                        n_valid[ni, j] += 1
-                        n_valid[j, ni] += 1
-        else:
-            # Full computation
-            cs_matrix = np.column_stack([
-                cs_data[fid].loc[common_assets_list].values
-                for fid in compute_ids
-            ])
-            rho, _ = spearmanr(cs_matrix)
-            if rho.ndim == 0:
-                rho = np.array([[1.0, float(rho)], [float(rho), 1.0]])
-
-            valid_mask = ~np.isnan(rho)
-            corr_sum[valid_mask] += rho[valid_mask]
-            n_valid[valid_mask] += 1
+        rows, cols = np.nonzero(valid_sub)
+        if len(rows) == 0:
+            continue
+        global_rows = sub_idx_arr[rows]
+        global_cols = sub_idx_arr[cols]
+        corr_sum[global_rows, global_cols] += rho_sub[rows, cols]
+        n_valid[global_rows, global_cols] += 1
 
     with np.errstate(invalid="ignore"):
         avg_corr = np.where(n_valid > 0, corr_sum / n_valid, 0.0)

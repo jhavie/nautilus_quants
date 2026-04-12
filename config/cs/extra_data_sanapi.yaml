@@ -1,0 +1,38 @@
+# Extra Data Sources — SanAPI Only (cross-exchange aggregated FR/OI)
+# Referenced by alpha_mining_sanapi.yaml via extra_data_path
+#
+# Variables available in factor expressions:
+#   san_funding_rate  — aggregated funding rate (decimal, ~0.0001 = 0.01%)
+#   san_open_interest — aggregated open interest (USD)
+#   quote_volume      — from OHLCV bars
+#   btc_close         — BTC price broadcast to all instruments
+#   eth_close         — ETH price broadcast to all instruments
+
+san_funding_rate:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_funding_rate"
+  file_suffix: "san_fr"
+  timeframe: "4h"
+  fill: ffill
+
+san_open_interest:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_open_interest"
+  file_suffix: "san_oi"
+  timeframe: "4h"
+  fill: ffill
+
+quote_volume:
+  source: bar
+  path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+  timeframe: "4h"
+
+btc_close:
+  source: broadcast
+  instruments: ["BTC"]
+
+eth_close:
+  source: broadcast
+  instruments: ["ETH"]

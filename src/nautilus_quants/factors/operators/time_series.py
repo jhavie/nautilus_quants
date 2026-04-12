@@ -981,10 +981,13 @@ def _rolling_selmean_col(
             continue
         x_v = x_w[valid]
         y_v = y_w[valid]
+        # Edge case: when n_valid == n, all valid values are selected.
+        # np.argpartition requires kth in [0, len-1], so clamp n to n-1.
+        k = min(n, n_valid - 1)
         if top:
             sel_idx = np.argpartition(y_v, -n)[-n:]
         else:
-            sel_idx = np.argpartition(y_v, n)[:n]
+            sel_idx = np.argpartition(y_v, k)[:n]
         out[i] = np.mean(x_v[sel_idx])
     return out
 

@@ -1,0 +1,162 @@
+# Alpha Factor Mining — SanAPI Sentiment (cross-exchange aggregated FR/OI)
+#
+# Usage:
+#   python -m nautilus_quants.alpha mine config/cs/alpha_mining_sanapi.yaml --rounds 3
+#
+# Data: 78 coins with complete FR + OI (>=2000 4h bars, 2025-04 ~ 2026-03)
+# Variables: san_funding_rate, san_open_interest + OHLCV + quote_volume + btc/eth_close
+# Focus: sentiment factors only (FR/OI derivatives signals)
+
+registry:
+  env: test
+  db_dir: /Users/joe/Sync/nautilus_quants/logs/registry
+  enabled: true
+
+# ── Mining settings ──
+mining:
+  source: "llm_sanapi_sentiment"
+  factors_per_round: 8
+  model: "sonnet"
+  proxy: "http://127.0.0.1:8888"
+  parallel: 3
+  output_dir: "logs/alpha_mining_sanapi"
+
+  # ── Complexity constraints ──
+  constraints:
+    max_char_length: 200
+    max_node_count: 30
+    max_depth: 6
+    max_func_nesting: 4
+    max_variables: 5
+    max_window: 720
+    max_numeric_ratio: 0.3
+
+  # ── Sentiment only (san_funding_rate + san_open_interest) ──
+  directions:
+    sentiment:
+      theme: >-
+        Sentiment factors via cross-exchange aggregated derivatives data.
+        Explore how san_funding_rate and san_open_interest predict returns.
+        Key patterns: FR extreme reversal, FR momentum, OI expansion/contraction,
+        OI-price divergence, crowded positioning signals.
+        san_funding_rate: aggregated across all exchanges (decimal, 0.0001=0.01%),
+        updates every 4h bar (may repeat within 8h settlement windows).
+        san_open_interest: total open positions across all exchanges (USD).
+        Can combine with OHLCV (close, volume, high, low) and
+        quote_volume, btc_close, eth_close for cross-signal factors.
+      tags: [sentiment, san_funding_rate, san_open_interest]
+      rounds: 3
+
+# ── Charts ──
+charts:
+  - quantile_returns_bar
+  - monthly_ic_heatmap
+  - cumulative_returns
+  - cumulative_returns_long_short
+  - ic_histogram
+  - turnover
+
+# ── Data source ──
+catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+bar_spec: "4h"
+
+# Time range: align with SanAPI data availability
+start_date: "2025-04-12"
+end_date: "2026-03-12"
+
+# SanAPI-only extra data
+extra_data_path: "config/cs/extra_data_sanapi.yaml"
+
+# 78 coins with complete FR + OI data (verified 2026-04-12)
+instrument_ids:
+  - "1INCHUSDT.BINANCE"
+  - "AAVEUSDT.BINANCE"
+  - "ALGOUSDT.BINANCE"
+  - "ANKRUSDT.BINANCE"
+  - "ARPAUSDT.BINANCE"
+  - "ARUSDT.BINANCE"
+  - "ATOMUSDT.BINANCE"
+  - "AUDIOUSDT.BINANCE"
+  - "AVAXUSDT.BINANCE"
+  - "AXSUSDT.BINANCE"
+  - "BAKEUSDT.BINANCE"
+  - "BANDUSDT.BINANCE"
+  - "BATUSDT.BINANCE"
+  - "BCHUSDT.BINANCE"
+  - "BELUSDT.BINANCE"
+  - "BNBUSDT.BINANCE"
+  - "BTCUSDT.BINANCE"
+  - "CELOUSDT.BINANCE"
+  - "CELRUSDT.BINANCE"
+  - "CHRUSDT.BINANCE"
+  - "CHZUSDT.BINANCE"
+  - "COMPUSDT.BINANCE"
+  - "COTIUSDT.BINANCE"
+  - "CTSIUSDT.BINANCE"
+  - "DASHUSDT.BINANCE"
+  - "DENTUSDT.BINANCE"
+  - "DOGEUSDT.BINANCE"
+  - "DOTUSDT.BINANCE"
+  - "DUSKUSDT.BINANCE"
+  - "DYDXUSDT.BINANCE"
+  - "ENJUSDT.BINANCE"
+  - "ENSUSDT.BINANCE"
+  - "ETCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+  - "GRTUSDT.BINANCE"
+  - "HBARUSDT.BINANCE"
+  - "HOTUSDT.BINANCE"
+  - "ICXUSDT.BINANCE"
+  - "IOSTUSDT.BINANCE"
+  - "IOTAUSDT.BINANCE"
+  - "IOTXUSDT.BINANCE"
+  - "KAVAUSDT.BINANCE"
+  - "KSMUSDT.BINANCE"
+  - "LINKUSDT.BINANCE"
+  - "LPTUSDT.BINANCE"
+  - "LRCUSDT.BINANCE"
+  - "LTCUSDT.BINANCE"
+  - "MANAUSDT.BINANCE"
+  - "MASKUSDT.BINANCE"
+  - "MATICUSDT.BINANCE"
+  - "MTLUSDT.BINANCE"
+  - "NEARUSDT.BINANCE"
+  - "NEOUSDT.BINANCE"
+  - "OGNUSDT.BINANCE"
+  - "ONEUSDT.BINANCE"
+  - "ONTUSDT.BINANCE"
+  - "QTUMUSDT.BINANCE"
+  - "ROSEUSDT.BINANCE"
+  - "RSRUSDT.BINANCE"
+  - "RUNEUSDT.BINANCE"
+  - "RVNUSDT.BINANCE"
+  - "SANDUSDT.BINANCE"
+  - "SHIBUSDT.BINANCE"
+  - "SOLUSDT.BINANCE"
+  - "STORJUSDT.BINANCE"
+  - "SXPUSDT.BINANCE"
+  - "TRBUSDT.BINANCE"
+  - "TRXUSDT.BINANCE"
+  - "VETUSDT.BINANCE"
+  - "WAVESUSDT.BINANCE"
+  - "XLMUSDT.BINANCE"
+  - "XMRUSDT.BINANCE"
+  - "XRPUSDT.BINANCE"
+  - "XTZUSDT.BINANCE"
+  - "YFIUSDT.BINANCE"
+  - "ZECUSDT.BINANCE"
+  - "ZILUSDT.BINANCE"
+  - "ZRXUSDT.BINANCE"
+
+# Alphalens parameters (4h bars)
+periods: [1, 2, 3, 6]    # 4h, 8h, 12h, 24h
+quantiles: 5
+max_loss: 0.3
+filter_zscore: 20.0
+
+metrics:
+  factor_metrics: true
+
+output_dir: "logs/alpha_mining_sanapi"
+output_format:
+  - png

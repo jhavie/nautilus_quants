@@ -170,9 +170,19 @@ class TestBufferInjectStagedField:
         buf = Buffer(max_history=10, extra_fields=("btc_close",))
 
         ts = 1000
-        buf.append("BTCUSDT.BINANCE", ts, {"open": 40000, "high": 40100, "low": 39900, "close": 40050, "volume": 100})
-        buf.append("ETHUSDT.BINANCE", ts, {"open": 2200, "high": 2210, "low": 2190, "close": 2205, "volume": 50})
-        buf.append("SOLUSDT.BINANCE", ts, {"open": 90, "high": 91, "low": 89, "close": 90.5, "volume": 30})
+        buf.append(
+            "BTCUSDT.BINANCE",
+            ts,
+            {"open": 40000, "high": 40100, "low": 39900, "close": 40050, "volume": 100},
+        )
+        buf.append(
+            "ETHUSDT.BINANCE",
+            ts,
+            {"open": 2200, "high": 2210, "low": 2190, "close": 2205, "volume": 50},
+        )
+        buf.append(
+            "SOLUSDT.BINANCE", ts, {"open": 90, "high": 91, "low": 89, "close": 90.5, "volume": 30}
+        )
 
         # Inject BTC close to all instruments BEFORE flush
         buf.inject_staged_field(ts, "btc_close", "BTCUSDT.BINANCE")
@@ -193,7 +203,11 @@ class TestBufferInjectStagedField:
 
     def test_inject_missing_instrument(self) -> None:
         buf = Buffer(max_history=10, extra_fields=("btc_close",))
-        buf.append("ETHUSDT.BINANCE", 1000, {"close": 2200, "open": 2200, "high": 2200, "low": 2200, "volume": 10})
+        buf.append(
+            "ETHUSDT.BINANCE",
+            1000,
+            {"close": 2200, "open": 2200, "high": 2200, "low": 2200, "volume": 10},
+        )
         # Source instrument not in staging — should not raise
         buf.inject_staged_field(1000, "btc_close", "BTCUSDT.BINANCE")
 
@@ -201,8 +215,14 @@ class TestBufferInjectStagedField:
         buf = Buffer(max_history=10, extra_fields=("btc_close",))
 
         for ts, btc_close in [(1000, 40000.0), (2000, 41000.0)]:
-            buf.append("BTCUSDT.BINANCE", ts, {"open": 0, "high": 0, "low": 0, "close": btc_close, "volume": 0})
-            buf.append("ETHUSDT.BINANCE", ts, {"open": 0, "high": 0, "low": 0, "close": 2200, "volume": 0})
+            buf.append(
+                "BTCUSDT.BINANCE",
+                ts,
+                {"open": 0, "high": 0, "low": 0, "close": btc_close, "volume": 0},
+            )
+            buf.append(
+                "ETHUSDT.BINANCE", ts, {"open": 0, "high": 0, "low": 0, "close": 2200, "volume": 0}
+            )
             buf.inject_staged_field(ts, "btc_close", "BTCUSDT.BINANCE")
             buf.flush_timestamp(ts)
 
@@ -267,14 +287,17 @@ class TestBackwardCompat:
         from nautilus_quants.alpha.analysis.config import load_analysis_config
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump({
-                "catalog_path": "/tmp/catalog",
-                "factor_config_path": "config/factors.yaml",
-                "instrument_ids": ["BTCUSDT.BINANCE"],
-                "funding_rate": True,
-                "oi_data_path": "/tmp/oi",
-                "oi_timeframe": "4h",
-            }, f)
+            yaml.dump(
+                {
+                    "catalog_path": "/tmp/catalog",
+                    "factor_config_path": "config/factors.yaml",
+                    "instrument_ids": ["BTCUSDT.BINANCE"],
+                    "funding_rate": True,
+                    "oi_data_path": "/tmp/oi",
+                    "oi_timeframe": "4h",
+                },
+                f,
+            )
             f.flush()
 
             config = load_analysis_config(f.name)
@@ -296,19 +319,27 @@ class TestBackwardCompat:
 
         # Write extra_data YAML
         ed_file = tmp_path / "extra_data.yaml"
-        ed_file.write_text(yaml.dump({
-            "btc_close": {"source": "broadcast", "instruments": ["BTC"]},
-        }))
+        ed_file.write_text(
+            yaml.dump(
+                {
+                    "btc_close": {"source": "broadcast", "instruments": ["BTC"]},
+                }
+            )
+        )
 
         # Write analysis YAML with BOTH extra_data_path and legacy fields
         analysis_file = tmp_path / "analysis.yaml"
-        analysis_file.write_text(yaml.dump({
-            "catalog_path": "/tmp/catalog",
-            "factor_config_path": "config/factors.yaml",
-            "instrument_ids": ["BTCUSDT.BINANCE"],
-            "extra_data_path": str(ed_file),
-            "funding_rate": True,  # should be ignored
-        }))
+        analysis_file.write_text(
+            yaml.dump(
+                {
+                    "catalog_path": "/tmp/catalog",
+                    "factor_config_path": "config/factors.yaml",
+                    "instrument_ids": ["BTCUSDT.BINANCE"],
+                    "extra_data_path": str(ed_file),
+                    "funding_rate": True,  # should be ignored
+                }
+            )
+        )
 
         config = load_analysis_config(analysis_file)
 
@@ -329,18 +360,24 @@ class TestE2EAnalyzePath:
     def panel_fields(self) -> dict[str, pd.DataFrame | float]:
         """Build OHLCV panel fields with 10 timestamps."""
         idx = pd.date_range("2024-01-01", periods=10, freq="4h")
-        close = pd.DataFrame({
-            "BTCUSDT.BINANCE": np.linspace(40000, 41000, 10),
-            "ETHUSDT.BINANCE": np.linspace(2200, 2300, 10),
-            "SOLUSDT.BINANCE": np.linspace(90, 100, 10),
-        }, index=idx)
+        close = pd.DataFrame(
+            {
+                "BTCUSDT.BINANCE": np.linspace(40000, 41000, 10),
+                "ETHUSDT.BINANCE": np.linspace(2200, 2300, 10),
+                "SOLUSDT.BINANCE": np.linspace(90, 100, 10),
+            },
+            index=idx,
+        )
         high = close * 1.01
         low = close * 0.99
-        volume = pd.DataFrame({
-            "BTCUSDT.BINANCE": np.full(10, 1000.0),
-            "ETHUSDT.BINANCE": np.full(10, 5000.0),
-            "SOLUSDT.BINANCE": np.full(10, 20000.0),
-        }, index=idx)
+        volume = pd.DataFrame(
+            {
+                "BTCUSDT.BINANCE": np.full(10, 1000.0),
+                "ETHUSDT.BINANCE": np.full(10, 5000.0),
+                "SOLUSDT.BINANCE": np.full(10, 20000.0),
+            },
+            index=idx,
+        )
         return {
             "open": close * 0.999,
             "high": high,
@@ -409,35 +446,40 @@ class TestE2EAnalyzePath:
         return catalog
 
     def test_all_5_sources_injected(
-        self, panel_fields, mock_bars, mock_fr_catalog,
+        self,
+        panel_fields,
+        mock_bars,
+        mock_fr_catalog,
     ) -> None:
         """All 5 extra data fields appear in panel_fields after injection."""
         configs = [
             ExtraDataConfig(name="funding_rate", source="catalog"),
-            ExtraDataConfig(name="open_interest", source="parquet",
-                            path="/fake/oi", timeframe="4h"),
+            ExtraDataConfig(
+                name="open_interest", source="parquet", path="/fake/oi", timeframe="4h"
+            ),
             ExtraDataConfig(name="quote_volume", source="bar"),
-            ExtraDataConfig(name="btc_close", source="broadcast",
-                            instruments=["BTC"]),
-            ExtraDataConfig(name="eth_close", source="broadcast",
-                            instruments=["ETH"]),
+            ExtraDataConfig(name="btc_close", source="broadcast", instruments=["BTC"]),
+            ExtraDataConfig(name="eth_close", source="broadcast", instruments=["ETH"]),
         ]
 
         manager = ExtraDataManager(configs)
 
-        with patch(
-            "nautilus_trader.persistence.catalog.ParquetDataCatalog",
-            return_value=mock_fr_catalog,
-        ), patch(
-            "nautilus_quants.data.transform.open_interest.load_oi_lookup",
-            return_value={
-                "BTCUSDT.BINANCE": {
-                    int(pd.Timestamp("2024-01-01").value): {"open_interest": 50000.0},
+        with (
+            patch(
+                "nautilus_trader.persistence.catalog.ParquetDataCatalog",
+                return_value=mock_fr_catalog,
+            ),
+            patch(
+                "nautilus_quants.data.transform.open_interest.load_parquet_field_lookup",
+                return_value={
+                    "BTCUSDT.BINANCE": {
+                        int(pd.Timestamp("2024-01-01").value): {"open_interest": 50000.0},
+                    },
+                    "ETHUSDT.BINANCE": {
+                        int(pd.Timestamp("2024-01-01").value): {"open_interest": 200000.0},
+                    },
                 },
-                "ETHUSDT.BINANCE": {
-                    int(pd.Timestamp("2024-01-01").value): {"open_interest": 200000.0},
-                },
-            },
+            ),
         ):
             manager.inject_panels(
                 panel_fields,
@@ -448,8 +490,11 @@ class TestE2EAnalyzePath:
 
         # All 5 fields must be present
         for field_name in [
-            "funding_rate", "open_interest", "quote_volume",
-            "btc_close", "eth_close",
+            "funding_rate",
+            "open_interest",
+            "quote_volume",
+            "btc_close",
+            "eth_close",
         ]:
             assert field_name in panel_fields, f"Missing: {field_name}"
             panel = panel_fields[field_name]
@@ -459,10 +504,8 @@ class TestE2EAnalyzePath:
     def test_broadcast_values_correct(self, panel_fields) -> None:
         """btc_close has BTC values, eth_close has ETH values everywhere."""
         configs = [
-            ExtraDataConfig(name="btc_close", source="broadcast",
-                            instruments=["BTC"]),
-            ExtraDataConfig(name="eth_close", source="broadcast",
-                            instruments=["ETH"]),
+            ExtraDataConfig(name="btc_close", source="broadcast", instruments=["BTC"]),
+            ExtraDataConfig(name="eth_close", source="broadcast", instruments=["ETH"]),
         ]
         manager = ExtraDataManager(configs)
         manager.inject_panels(panel_fields, self.INSTRUMENTS)
@@ -474,20 +517,21 @@ class TestE2EAnalyzePath:
         # btc_close: all columns = BTC's close
         for col in btc_panel.columns:
             np.testing.assert_array_equal(
-                btc_panel[col].values, close["BTCUSDT.BINANCE"].values,
+                btc_panel[col].values,
+                close["BTCUSDT.BINANCE"].values,
             )
         # eth_close: all columns = ETH's close
         for col in eth_panel.columns:
             np.testing.assert_array_equal(
-                eth_panel[col].values, close["ETHUSDT.BINANCE"].values,
+                eth_panel[col].values,
+                close["ETHUSDT.BINANCE"].values,
             )
 
     def test_variables_using_extra_data_evaluate(self, panel_fields) -> None:
         """Derived variables (btc_returns, btc_beta, vwap) evaluate correctly."""
         # Inject broadcast
         configs = [
-            ExtraDataConfig(name="btc_close", source="broadcast",
-                            instruments=["BTC"]),
+            ExtraDataConfig(name="btc_close", source="broadcast", instruments=["BTC"]),
         ]
         manager = ExtraDataManager(configs)
         manager.inject_panels(panel_fields, self.INSTRUMENTS)
@@ -522,9 +566,9 @@ class TestE2EAnalyzePath:
         # BTC's beta to itself should be ~1.0 (last valid row)
         last_valid = btc_beta["BTCUSDT.BINANCE"].dropna()
         if len(last_valid) > 0:
-            assert abs(last_valid.iloc[-1] - 1.0) < 0.1, (
-                f"BTC beta to itself should be ~1.0, got {last_valid.iloc[-1]}"
-            )
+            assert (
+                abs(last_valid.iloc[-1] - 1.0) < 0.1
+            ), f"BTC beta to itself should be ~1.0, got {last_valid.iloc[-1]}"
 
 
 # ── E2E: Backtest/Live path (Buffer + inject_staged_field) ──────────────
@@ -536,7 +580,9 @@ class TestE2EBacktestPath:
     INSTRUMENTS = ["BTCUSDT.BINANCE", "ETHUSDT.BINANCE", "SOLUSDT.BINANCE"]
 
     def _make_bar_data(
-        self, close: float, volume: float = 100.0,
+        self,
+        close: float,
+        volume: float = 100.0,
         funding_rate: float | None = None,
         open_interest: float | None = None,
         quote_volume: float | None = None,
@@ -559,25 +605,46 @@ class TestE2EBacktestPath:
     def test_all_5_fields_in_panel(self) -> None:
         """All 5 extra data fields appear in Buffer panels after flush."""
         extra_fields = (
-            "funding_rate", "open_interest", "quote_volume", "btc_close",
+            "funding_rate",
+            "open_interest",
+            "quote_volume",
+            "btc_close",
         )
         buf = Buffer(max_history=10, extra_fields=extra_fields)
 
         ts = 1_000_000_000
 
         # Simulate Actor.on_bar() per-bar enrichment for 3 instruments
-        buf.append("BTCUSDT.BINANCE", ts, self._make_bar_data(
-            close=40000, funding_rate=0.0001, open_interest=50000,
-            quote_volume=40000 * 100,
-        ))
-        buf.append("ETHUSDT.BINANCE", ts, self._make_bar_data(
-            close=2200, funding_rate=-0.0001, open_interest=200000,
-            quote_volume=2200 * 500,
-        ))
-        buf.append("SOLUSDT.BINANCE", ts, self._make_bar_data(
-            close=90, funding_rate=0.0005, open_interest=1000000,
-            quote_volume=90 * 20000,
-        ))
+        buf.append(
+            "BTCUSDT.BINANCE",
+            ts,
+            self._make_bar_data(
+                close=40000,
+                funding_rate=0.0001,
+                open_interest=50000,
+                quote_volume=40000 * 100,
+            ),
+        )
+        buf.append(
+            "ETHUSDT.BINANCE",
+            ts,
+            self._make_bar_data(
+                close=2200,
+                funding_rate=-0.0001,
+                open_interest=200000,
+                quote_volume=2200 * 500,
+            ),
+        )
+        buf.append(
+            "SOLUSDT.BINANCE",
+            ts,
+            self._make_bar_data(
+                close=90,
+                funding_rate=0.0005,
+                open_interest=1000000,
+                quote_volume=90 * 20000,
+            ),
+        )
 
         # Simulate Actor._inject_broadcast_staged() — broadcast BTC close
         buf.inject_staged_field(ts, "btc_close", "BTCUSDT.BINANCE")
@@ -634,11 +701,13 @@ class TestE2EBacktestPath:
 
         # Check btc_close: SOL column should have BTC's prices
         np.testing.assert_array_almost_equal(
-            btc_close["SOLUSDT.BINANCE"].values, btc_prices,
+            btc_close["SOLUSDT.BINANCE"].values,
+            btc_prices,
         )
         # Check eth_close: SOL column should have ETH's prices
         np.testing.assert_array_almost_equal(
-            eth_close["SOLUSDT.BINANCE"].values, eth_prices,
+            eth_close["SOLUSDT.BINANCE"].values,
+            eth_prices,
         )
 
     def test_variables_evaluate_on_buffer_panels(self) -> None:
@@ -652,12 +721,22 @@ class TestE2EBacktestPath:
         for i in range(10):
             ts = (i + 1) * 1_000_000_000
             btc_close = 40000 + i * 100
-            buf.append("BTCUSDT.BINANCE", ts, self._make_bar_data(
-                close=btc_close, funding_rate=0.0001 * (i + 1),
-            ))
-            buf.append("ETHUSDT.BINANCE", ts, self._make_bar_data(
-                close=2200 + i * 10, funding_rate=-0.0001,
-            ))
+            buf.append(
+                "BTCUSDT.BINANCE",
+                ts,
+                self._make_bar_data(
+                    close=btc_close,
+                    funding_rate=0.0001 * (i + 1),
+                ),
+            )
+            buf.append(
+                "ETHUSDT.BINANCE",
+                ts,
+                self._make_bar_data(
+                    close=2200 + i * 10,
+                    funding_rate=-0.0001,
+                ),
+            )
             buf.inject_staged_field(ts, "btc_close", "BTCUSDT.BINANCE")
             buf.flush_timestamp(ts)
 

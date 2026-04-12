@@ -1,0 +1,130 @@
+# Santiment Data Pipeline Configuration
+# Downloads FR/OI data from SanAPI (SANBASE PRO)
+#
+# Usage:
+#   python -m nautilus_quants.data santiment-download -c config/examples/data_santiment.yaml
+#   python -m nautilus_quants.data santiment-transform -c config/examples/data_santiment.yaml
+version: "1.0"
+
+download:
+  source: santiment
+  api_key: "y5ussqeqbhqkspkl_b53bb4eslbyxshzd"  # SANBASE PRO trial
+  api_key_env: "SAN_API_KEY"  # fallback: env var (used when api_key is empty)
+  metrics:
+    - funding_rate
+    - total_open_interest
+  interval: "4h"
+  start_date: "2025-04-12"
+  end_date: "2026-03-12"
+  # 87 tickers (FR ∩ OI verified 2026-04-12)
+  symbols:
+    - "1INCH"
+    - "AAVE"
+    - "ALGO"
+    - "ALPHA"
+    - "ANKR"
+    - "AR"
+    - "ARPA"
+    - "ATOM"
+    - "AUDIO"
+    - "AVAX"
+    - "AXS"
+    - "BAKE"
+    - "BAL"
+    - "BAND"
+    - "BAT"
+    - "BCH"
+    - "BEL"
+    - "BNB"
+    - "BTC"
+    - "C98"
+    - "CELO"
+    - "CELR"
+    - "CHR"
+    - "CHZ"
+    - "COMP"
+    - "COTI"
+    - "CTSI"
+    - "DASH"
+    - "DENT"
+    - "DGB"
+    - "DOGE"
+    - "DOT"
+    - "DUSK"
+    - "DYDX"
+    - "ENJ"
+    - "ENS"
+    - "ETC"
+    - "ETH"
+    - "GRT"
+    - "HBAR"
+    - "HOT"
+    - "ICX"
+    - "IOST"
+    - "IOTA"
+    - "IOTX"
+    - "KAVA"
+    - "KSM"
+    - "LINK"
+    - "LPT"
+    - "LRC"
+    - "LTC"
+    - "MANA"
+    - "MASK"
+    - "MATIC"
+    - "MKR"
+    - "MTL"
+    - "NEAR"
+    - "NEO"
+    - "NKN"
+    - "OGN"
+    - "OMG"
+    - "ONE"
+    - "ONT"
+    - "PEOPLE"
+    - "QTUM"
+    - "ROSE"
+    - "RSR"
+    - "RUNE"
+    - "RVN"
+    - "SAND"
+    - "SHIB"
+    - "SOL"
+    - "STORJ"
+    - "SXP"
+    - "TRB"
+    - "TRX"
+    - "VET"
+    - "WAVES"
+    - "XEM"
+    - "XLM"
+    - "XMR"
+    - "XRP"
+    - "XTZ"
+    - "YFI"
+    - "ZEC"
+    - "ZIL"
+    - "ZRX"
+
+  rate_limit:
+    delay_seconds: 1.2            # ~50 req/min, well under 100/min limit
+    max_retries: 3
+    backoff_multiplier: 2.0
+
+  checkpoint:
+    enabled: true                 # Skip already-downloaded tickers
+
+transform:
+  field_mapping:
+    funding_rate: "san_funding_rate"
+    total_open_interest: "san_open_interest"
+  file_suffix_mapping:
+    funding_rate: "san_fr"
+    total_open_interest: "san_oi"
+  venue: "BINANCE"
+  timeframe: "4h"
+
+paths:
+  raw_data: "data/raw/santiment"
+  catalog: "data/catalog_sanapi"
+  logs: "logs/santiment_pipeline"

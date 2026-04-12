@@ -764,6 +764,15 @@ wheels = [
 ]
 
 [[package]]
+name = "iso8601"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/f3/ef59cee614d5e0accf6fd0cbba025b93b272e626ca89fb70a3e9187c5d15/iso8601-2.1.0.tar.gz", hash = "sha256:6b1d3829ee8921c4301998c909f7829fa9ed3cbdac0d3b16af2d743aed1ba8df", size = 6522, upload-time = "2023-10-03T00:25:39.317Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/0c/f37b6a241f0759b7653ffa7213889d89ad49a2b76eb2ddf3b57b2738c347/iso8601-2.1.0-py3-none-any.whl", hash = "sha256:aac4145c4dcb66ad8b648a02830f5e2ff6c24af20f4f482689be402db2429242", size = 7545, upload-time = "2023-10-03T00:25:32.304Z" },
+]
+
+[[package]]
 name = "isort"
 version = "8.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1277,6 +1286,7 @@ all = [
     { name = "pytest-asyncio" },
     { name = "python-binance" },
     { name = "quantstats" },
+    { name = "sanpy" },
     { name = "tardis-dev" },
     { name = "tenacity" },
     { name = "tqdm" },
@@ -1292,6 +1302,7 @@ data = [
     { name = "pybit" },
     { name = "pysocks" },
     { name = "python-binance" },
+    { name = "sanpy" },
     { name = "tardis-dev" },
     { name = "tenacity" },
     { name = "tqdm" },
@@ -1327,6 +1338,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "quantstats", marker = "extra == 'backtest'", specifier = ">=0.0.64" },
     { name = "rich", specifier = ">=13.0.0" },
+    { name = "sanpy", marker = "extra == 'data'", specifier = ">=0.13.0" },
     { name = "scipy", specifier = ">=1.11.0" },
     { name = "tardis-dev", marker = "extra == 'data'", specifier = ">=2.1" },
     { name = "tenacity", marker = "extra == 'data'", specifier = ">=8.0.0" },
@@ -2170,6 +2182,22 @@ wheels = [
 ]
 
 [[package]]
+name = "sanpy"
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "iso8601" },
+    { name = "pandas" },
+    { name = "requests" },
+    { name = "setuptools" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/82/7861621238de7122e2ab62cff0ce805132ad3a51482b5db4b0642ad4341a/sanpy-0.13.0.tar.gz", hash = "sha256:af1acaef6160be46527b1e43d6a9e8a7288eab7f6d7f9f6b1e7acdefb009f7c7", size = 57736, upload-time = "2026-03-26T08:10:29.514Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/b2/b2cc829e11dfb04ffa9734dd7f995e1c7514d0e5c1204f02a9146e787bf9/sanpy-0.13.0-py3-none-any.whl", hash = "sha256:e31d148587bd1991da3de62e42d5ee0ddca712895cbdb101ae2ed876d3f3404b", size = 60243, upload-time = "2026-03-26T08:10:28.361Z" },
+]
+
+[[package]]
 name = "scikit-learn"
 version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2286,6 +2314,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/86/59/a451d7420a77ab0b98f7affa3a1d78a313d2f7281a57afb1a34bae8ab412/seaborn-0.13.2.tar.gz", hash = "sha256:93e60a40988f4d65e9f4885df477e2fdaff6b73a9ded434c1ab356dd57eefff7", size = 1457696, upload-time = "2024-01-25T13:21:52.551Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/83/11/00d3c3dfc25ad54e731d91449895a79e4bf2384dc3ac01809010ba88f6d5/seaborn-0.13.2-py3-none-any.whl", hash = "sha256:636f8336facf092165e27924f223d3c62ca560b1f2bb5dff7ab7fad265361987", size = 294914, upload-time = "2024-01-25T13:21:49.598Z" },
+]
+
+[[package]]
+name = "setuptools"
+version = "82.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/db/cfac1baf10650ab4d1c111714410d2fbb77ac5a616db26775db562c8fab2/setuptools-82.0.1.tar.gz", hash = "sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9", size = 1152316, upload-time = "2026-03-09T12:47:17.221Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/76/f789f7a86709c6b087c5a2f52f911838cad707cc613162401badc665acfe/setuptools-82.0.1-py3-none-any.whl", hash = "sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb", size = 1006223, upload-time = "2026-03-09T12:47:15.026Z" },
 ]
 
 [[package]]

@@ -46,16 +46,31 @@ class CatalogDataLoader:
         self._catalog = ParquetDataCatalog(catalog_path)
         self._bar_spec = bar_spec
 
-    def load_bars(self, instrument_ids: list[str]) -> dict[str, list[Bar]]:
+    def load_bars(
+        self,
+        instrument_ids: list[str],
+        start: str = "",
+        end: str = "",
+    ) -> dict[str, list[Bar]]:
         """Load bars for each instrument from catalog.
 
         Args:
             instrument_ids: List of instrument IDs (e.g., ["BTCUSDT.BINANCE"])
+            start: Start date filter (e.g., "2025-04-12"). Empty = no lower bound.
+            end: End date filter (e.g., "2026-03-12"). Empty = no upper bound.
 
         Returns:
             Dict mapping instrument_id to list of Bar objects
         """
         step, aggregation = _parse_bar_spec(self._bar_spec)
+
+        # Build optional time range kwargs for catalog.bars()
+        time_kwargs: dict = {}
+        if start:
+            time_kwargs["start"] = pd.Timestamp(start, tz="UTC")
+        if end:
+            time_kwargs["end"] = pd.Timestamp(end, tz="UTC")
+
         result: dict[str, list[Bar]] = {}
 
         for inst_id_str in instrument_ids:
@@ -69,7 +84,7 @@ class CatalogDataLoader:
                 instrument_id=instrument_id,
                 bar_spec=bar_spec,
             )
-            bars = self._catalog.bars(bar_types=[str(bar_type)])
+            bars = self._catalog.bars(bar_types=[str(bar_type)], **time_kwargs)
             result[inst_id_str] = list(bars) if bars is not None else []
 
         return result
