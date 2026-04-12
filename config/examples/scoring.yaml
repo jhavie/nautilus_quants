@@ -18,7 +18,7 @@ periods:
 # Each period is checked independently; factor is eliminated only if
 # fewer than min_valid_periods pass ALL checks.
 hard_filters:
-  enabled: false                  # false = skip, all factors pass through
+  enabled: true                  # false = skip, all factors pass through
   icir_abs_min: 0.05
   t_stat_nw_abs_min: 2.0
   p_value_nw_max: 0.05
@@ -33,7 +33,7 @@ hard_filters:
 # 4-dimension scoring: predictiveness, monotonicity, consistency, turnover.
 # When disabled, factors are ranked by avg |ICIR| instead.
 scoring:
-  enabled: false                  # false = skip, rank by |ICIR|
+  enabled: true                  # false = skip, rank by |ICIR|
   weights:
     predictiveness: 0.40
     monotonicity: 0.25
@@ -47,49 +47,58 @@ scoring:
 # ── [dedup] ──
 # Fingerprint exact dedup + Spearman correlation greedy selection.
 dedup:
-  enabled: false                  # false = skip dedup + greedy
+  enabled: true                  # false = skip dedup + greedy
   fingerprint_threshold: 1.0e-3
-  max_corr: 0.7
+  max_corr: 0.3
 
 # ── [clustering] ──
 # Auto-detect factor clusters, compose Super Alphas via PCA/equal/ICIR.
-# Noise factors (HDBSCAN label=-1) are automatically discarded.
 clustering:
-  enabled: true                   # false = skip, use individual factors
-  min_cluster_size: 3
-  cluster_selection_method: "eom" # "eom" (conservative) | "leaf" (finer)
-  min_samples: null
-  distance_metric: "spearman"
-  composition_method: "pca"       # "pca" | "equal" | "icir"
+  enabled: false
+  abs_correlation: true
+  algorithm: "agglomerative"       # "hdbscan" | "agglomerative"
+  composition_method: "pca"        # "pca" | "equal" | "icir"
   single_factor_passthrough: true
-  super_alpha_prefix: "SA"
+  noise_passthrough: true          # HDBSCAN only: noise → standalone Super Alpha
+  super_alpha_prefix: "SuperAlpha"
   component_status: "component"
+  # --- Agglomerative ---
+  linkage: "average"               # "average" | "complete" | "single"
+  distance_threshold: 0.3          # (1-corr)/2, 0.3 ≈ corr<0.4 不合并
+  # --- HDBSCAN ---
+  min_cluster_size: 3
+  cluster_selection_method: "eom"  # "eom" | "leaf"
+  min_samples: null
 
 # ── [orthogonalization] ──
 # Optimize composite weights to eliminate redundant exposure.
 orthogonalization:
-  enabled: false                  # false = skip, use original weights
+  enabled: true                  # false = skip, use original weights
   method: "lowdin"
   min_eigenvalue: 1.0e-6
   max_condition_number: 1.0e+6
 
 # ── Diagnostics ──
 diagnostics:
-  output_dir: "logs/promote"
+  output_dir: "logs/alpha_promote"
   correlation_heatmap: true
   cluster_report: true
   score_super_alphas: true
   overlap_validation: true
 
-# ── Promote ──
+# ── [migrate] ──
+# enabled=false → no DB migration, only console + logs output.
 promote:
+  enabled: false                  # false = 不入库，只看结果
   source_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/test.duckdb"
   target_db_path: "/Users/joe/Sync/nautilus_quants/logs/registry/dev.duckdb"
   max_factors: 50
   target_status: "active"
+  competitive: true               # full re-selection, evict losers
 
 # ── Data paths (for correlation computation) ──
 data:
+  panels_cache_dir: "data/factor_cache/panels_promote"
   catalog_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
   bar_spec: "4h"
   # Extra data sources (FR, OI, quote_volume, btc_close, eth_close)

@@ -22,10 +22,11 @@ class RegistryConfig:
 
 # ── Factor lifecycle ──
 
-VALID_STATUSES = {"candidate", "active", "archived"}
+VALID_STATUSES = {"candidate", "active", "archived", "component"}
 STATUS_TRANSITIONS: dict[str, set[str]] = {
     "candidate": {"active"},
-    "active": {"archived"},
+    "active": {"archived", "component"},
+    "component": {"active", "archived"},
     "archived": {"candidate"},
 }
 
