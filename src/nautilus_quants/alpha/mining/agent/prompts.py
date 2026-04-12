@@ -121,15 +121,9 @@ _OPERATOR_REFERENCE = """\
 def _get_window_guide(bar_spec: str) -> str:
     """Map bar frequency to human-readable window guide."""
     if bar_spec == "1h":
-        return (
-            "Window mapping (1h bars): "
-            "24=1day, 168=1week, 720=1month, 2160=3months"
-        )
+        return "Window mapping (1h bars): " "24=1day, 168=1week, 720=1month, 2160=3months"
     if bar_spec == "4h":
-        return (
-            "Window mapping (4h bars): "
-            "6=1day, 42=1week, 180=1month, 540=3months"
-        )
+        return "Window mapping (4h bars): " "6=1day, 42=1week, 180=1month, 540=3months"
     return f"Bar frequency: {bar_spec}"
 
 
@@ -164,11 +158,13 @@ _CONSTRUCTION_RULES = """\
 5. **Crypto-specific:**
    - 24/7 market — no overnight gaps, no weekend effects
    - High volatility — use shorter windows (6-42 bars) for responsiveness
-   - OHLCV + funding_rate + open_interest available
-   - funding_rate: settlement every 8h (00:00/08:00/16:00 UTC), positive=longs pay shorts
-   - open_interest: total open positions in base asset, 4h granularity
+   - OHLCV available, plus extra data variables depending on config
+   - funding_rate (Bybit): 8h settlement (forward-filled, changes every 2 bars at 4h)
+   - san_funding_rate (SanAPI): cross-exchange aggregated, native 4h granularity
+   - open_interest (Bybit): single-exchange, base asset (token) units
+   - san_open_interest (SanAPI): cross-exchange aggregated, USD units
+   - **Tip:** `san_open_interest / close` converts USD → token base units, removing price co-movement
    - {window_guide}
-   - **CRITICAL:** With 4h bars, funding_rate only changes every 2 bars (forward-filled).
 
 6. **Market factor variables:**
    - btc_close/eth_close are broadcast (same value across all instruments)
@@ -191,11 +187,15 @@ _CONSTRUCTION_RULES = """\
 _AVAILABLE_VARIABLES = (
     "close, open, high, low, volume, returns, "
     "funding_rate, open_interest, quote_volume, "
+    "san_funding_rate, san_open_interest, "
     "btc_close, eth_close, btc_returns, eth_returns, "
     "btc_vol, eth_vol, btc_beta, eth_beta, vwap\n"
     "- returns = delta(close,1)/delay(close,1), pre-computed\n"
-    "- funding_rate = 8h perpetual funding rate (typically ±0.01%, forward-filled)\n"
-    "- open_interest = total open interest in base asset units (4h granularity)\n"
+    "- funding_rate = Bybit 8h perpetual funding rate (forward-filled, ±0.01%)\n"
+    "- open_interest = Bybit open interest in base asset (token) units\n"
+    "- san_funding_rate = cross-exchange aggregated funding rate, native 4h\n"
+    "- san_open_interest = cross-exchange aggregated open interest (USD units);\n"
+    "  divide by close to get token-base units: san_open_interest / close\n"
     "- quote_volume = traded value in USDT (intra-bar turnover)\n"
     "- vwap = quote_volume / volume, volume-weighted average price\n"
     "- btc_close = BTC close price broadcast to all instruments\n"
@@ -297,9 +297,7 @@ def build_generation_prompt(
 
     # ── DSL reference ──
     if operator_subset:
-        sections.append(
-            "## Available Operators\n" + _filter_operator_reference(operator_subset)
-        )
+        sections.append("## Available Operators\n" + _filter_operator_reference(operator_subset))
     else:
         sections.append("## Available Operators\n" + _OPERATOR_REFERENCE)
 
@@ -311,13 +309,19 @@ def build_generation_prompt(
             extras.append("- returns = delta(close,1)/delay(close,1), pre-computed")
         if "funding_rate" in variable_subset:
             extras.append(
-                "- funding_rate = 8-hour perpetual funding rate from Bybit "
-                "(typically ±0.01%, forward-filled across bars)"
+                "- funding_rate = Bybit 8h perpetual funding rate " "(forward-filled, ±0.01%)"
+            )
+        if "san_funding_rate" in variable_subset:
+            extras.append(
+                "- san_funding_rate = cross-exchange aggregated funding rate, "
+                "native 4h granularity (no forward-fill artifacts)"
             )
         if "open_interest" in variable_subset:
+            extras.append("- open_interest = Bybit open interest in base asset (token) units")
+        if "san_open_interest" in variable_subset:
             extras.append(
-                "- open_interest = total open interest in base asset units from Bybit "
-                "(e.g. BTC quantity, 4h granularity)"
+                "- san_open_interest = cross-exchange aggregated OI (USD units); "
+                "use san_open_interest / close for token-base units"
             )
         var_block = vars_str + ("\n" + "\n".join(extras) if extras else "")
         sections.append(f"## Available Variables\n{var_block}")
@@ -326,7 +330,8 @@ def build_generation_prompt(
 
     # ── Construction rules ──
     rules = _CONSTRUCTION_RULES.replace(
-        "{window_guide}", _get_window_guide(bar_spec),
+        "{window_guide}",
+        _get_window_guide(bar_spec),
     )
     sections.append(rules)
 
@@ -377,9 +382,7 @@ def build_generation_prompt(
 
     # ── Anti-duplication ──
     if previous_factors:
-        expr_list = "\n".join(
-            f"  - {f['expression']}" for f in previous_factors
-        )
+        expr_list = "\n".join(f"  - {f['expression']}" for f in previous_factors)
         sections.append(
             "## Already Generated Expressions (DO NOT duplicate)\n"
             f"The following {len(previous_factors)} expressions have already "
@@ -396,12 +399,10 @@ def build_generation_prompt(
             ic_str = ", ".join(f"{k}={v:.4f}" for k, v in ic.items()) if ic else "n/a"
             icir_str = ", ".join(f"{k}={v:.3f}" for k, v in icir.items()) if icir else "n/a"
             feedback_lines.append(
-                f"  - {f['expression']}\n"
-                f"    IC: {ic_str}  |  ICIR: {icir_str}"
+                f"  - {f['expression']}\n" f"    IC: {ic_str}  |  ICIR: {icir_str}"
             )
         sections.append(
-            "## Best Factors So Far (generate variations of these)\n"
-            + "\n".join(feedback_lines)
+            "## Best Factors So Far (generate variations of these)\n" + "\n".join(feedback_lines)
         )
 
     # ── Factor Cutting Techniques ──
@@ -439,6 +440,13 @@ def build_generation_prompt(
         "### Interaction terms (combine two signals):\n"
         "- `cs_demean(returns) * cs_rank(volume)` — volume-weighted relative return\n"
         "- `cs_rank(funding_rate) * cs_rank(open_interest)` — FR × OI interaction\n\n"
+        "### SanAPI derivatives (cross-exchange aggregated):\n"
+        "- `san_open_interest / close` — convert USD OI to token units "
+        "(removes price co-movement for cleaner cross-sectional ranking)\n"
+        "- `rank(delta(san_open_interest / close, 6))` — 1-day OI growth rank\n"
+        "- `rank(san_funding_rate) - rank(returns(6))` — FR-return divergence\n"
+        "- `cs_rank(san_funding_rate) * cs_rank(san_open_interest / close)` — "
+        "crowded positioning signal\n\n"
         "### Tail signal extraction:\n"
         "- `clip_quantile(correlation(returns, volume, 20), 0.1, 0.9)` "
         "— focus on extreme correlations\n"
