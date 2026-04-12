@@ -952,11 +952,35 @@ def compute_factor_correlation(
                 logger.warning("Corr cache read failed: %s", e)
                 cached_corr = None
 
-    # Determine which factor pairs need computation
+    # Determine which factor pairs need computation.
+    # Treat "present but all-zero row" as stale: a factor can appear in the cached
+    # corr matrix with zeros everywhere (incl. diagonal) if a previous run wrote
+    # the matrix before that factor's panel was computable. Reusing such rows
+    # causes the greedy dedup to see ρ=0 with everything and wrongly admit highly
+    # correlated factors. Fall back to recomputing those rows.
     if cached_corr is not None:
         cached_set = set(cached_corr.index) & set(cached_corr.columns)
-        new_ids = [fid for fid in matched_ids if fid not in cached_set]
-        existing_ids_in_cache = [fid for fid in matched_ids if fid in cached_set]
+        stale_ids: list[str] = []
+        existing_ids_in_cache = []
+        for fid in matched_ids:
+            if fid not in cached_set:
+                continue
+            if (cached_corr.loc[fid] != 0).any():
+                existing_ids_in_cache.append(fid)
+            else:
+                stale_ids.append(fid)
+        new_ids = [
+            fid for fid in matched_ids
+            if fid not in cached_set or fid in stale_ids
+        ]
+        if stale_ids:
+            msg = (
+                f"Corr cache: {len(stale_ids)} stale rows (all-zero) will be "
+                f"recomputed: {stale_ids[:5]}"
+                f"{'...' if len(stale_ids) > 5 else ''}"
+            )
+            logger.warning(msg)
+            print(f"  ⚠ {msg}")
     else:
         new_ids = matched_ids
         existing_ids_in_cache = []
@@ -990,48 +1014,62 @@ def compute_factor_correlation(
     corr_sum = np.zeros((n_compute, n_compute))
     n_valid = np.zeros((n_compute, n_compute))
 
+    # Precompute new_indices once outside the hot loop.
+    incremental = bool(new_ids) and cached_corr is not None
+    new_indices = (
+        [compute_ids.index(fid) for fid in new_ids] if incremental else []
+    )
+
     for t in common_idx:
         cs_data = {}
         for fid in compute_ids:
             row = all_factor_panels[fid].loc[t].dropna()
             cs_data[fid] = row
 
-        common_assets = None
-        for fid, row in cs_data.items():
-            if common_assets is None:
-                common_assets = set(row.index)
-            else:
-                common_assets &= set(row.index)
-
-        if common_assets is None or len(common_assets) < 5:
-            continue
-
-        common_assets_list = sorted(common_assets)
-
-        if new_ids and cached_corr is not None:
-            # Incremental: only compute new factor columns
-            new_indices = [compute_ids.index(fid) for fid in new_ids]
-            all_vectors = {
-                fid: cs_data[fid].loc[common_assets_list].values
-                for fid in compute_ids
-            }
+        if incremental:
+            # Per-pair cross-section: do NOT require global asset intersection
+            # across all 700+ factors — a single sparse factor would skip every
+            # timestep. Compute each (new_fid, other_fid) pair on its own asset
+            # intersection, as long as ≥5 assets overlap.
             for ni in new_indices:
                 new_fid = compute_ids[ni]
-                new_vec = all_vectors[new_fid]
+                new_row = cs_data[new_fid]
+                if len(new_row) < 5:
+                    continue
+                # Diagonal (always 1.0 when factor has data)
+                corr_sum[ni, ni] += 1.0
+                n_valid[ni, ni] += 1
+                new_assets = set(new_row.index)
                 for j, other_fid in enumerate(compute_ids):
                     if j == ni:
-                        corr_sum[ni, j] += 1.0
-                        n_valid[ni, j] += 1
                         continue
-                    other_vec = all_vectors[other_fid]
-                    rho_val, _ = spearmanr(new_vec, other_vec)
+                    other_row = cs_data[other_fid]
+                    shared = new_assets & set(other_row.index)
+                    if len(shared) < 5:
+                        continue
+                    shared_list = sorted(shared)
+                    rho_val, _ = spearmanr(
+                        new_row.loc[shared_list].values,
+                        other_row.loc[shared_list].values,
+                    )
                     if not np.isnan(rho_val):
                         corr_sum[ni, j] += rho_val
                         corr_sum[j, ni] += rho_val
                         n_valid[ni, j] += 1
                         n_valid[j, ni] += 1
         else:
-            # Full computation
+            # Full computation requires all factors aligned on the same
+            # cross-section; fall back to global intersection.
+            common_assets: set | None = None
+            for row in cs_data.values():
+                common_assets = (
+                    set(row.index)
+                    if common_assets is None
+                    else common_assets & set(row.index)
+                )
+            if common_assets is None or len(common_assets) < 5:
+                continue
+            common_assets_list = sorted(common_assets)
             cs_matrix = np.column_stack([
                 cs_data[fid].loc[common_assets_list].values
                 for fid in compute_ids
