@@ -30,9 +30,9 @@ class JumpModelConfig:
     n_states: int = 3
     jump_penalty: float = 5000.0
     feature_set: str = "full"  # full/paper/returns_only
-    refit_window: int = 0      # 0=expanding, >0=rolling window size
+    refit_window: int = 0  # 0=expanding, >0=rolling window size
     refit_interval: int = 504  # refit every N bars (~84 days at 4h)
-    min_train: int = 1008      # minimum training bars (~168 days at 4h)
+    min_train: int = 1008  # minimum training bars (~168 days at 4h)
 
 
 @dataclass(frozen=True)
@@ -113,30 +113,36 @@ class AlphaAnalysisConfig:
     min_observations: int = 100
     min_coverage: float = 0.1
 
-    charts: list[str] = field(default_factory=lambda: [
-        "quantile_returns_bar",
-        "quantile_returns_violin",
-        "cumulative_returns",
-        "cumulative_returns_long_short",
-        "quantile_spread",
-        "returns_table",
-        "ic_time_series",
-        "ic_histogram",
-        "ic_qq",
-        "monthly_ic_heatmap",
-        "turnover",
-        "turnover_table",
-        "factor_rank_autocorrelation",
-        "event_study",
-        "events_distribution",
-        "quantile_statistics_table",
-    ])
+    charts: list[str] = field(
+        default_factory=lambda: [
+            "quantile_returns_bar",
+            "quantile_returns_violin",
+            "cumulative_returns",
+            "cumulative_returns_long_short",
+            "quantile_spread",
+            "returns_table",
+            "ic_time_series",
+            "ic_histogram",
+            "ic_qq",
+            "monthly_ic_heatmap",
+            "turnover",
+            "turnover_table",
+            "factor_rank_autocorrelation",
+            "event_study",
+            "events_distribution",
+            "quantile_statistics_table",
+        ]
+    )
 
     output_dir: str = "logs/alpha_analysis"
     output_format: tuple[str, ...] = ("png",)
     factor_cache_path: str = ""
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     regime: RegimeConfig | None = None
+
+    # Time range filter (empty = load all available data)
+    start_date: str = ""
+    end_date: str = ""
 
     # Unified extra data (replaces funding_rate/oi_data_path)
     extra_data_path: str = ""
@@ -189,18 +195,22 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         # Backward compat: convert legacy fields to ExtraDataConfig
         extra_data = []
         if raw.get("funding_rate"):
-            extra_data.append(ExtraDataConfig(
-                name="funding_rate",
-                source="catalog",
-                path=raw.get("catalog_path", ""),
-            ))
+            extra_data.append(
+                ExtraDataConfig(
+                    name="funding_rate",
+                    source="catalog",
+                    path=raw.get("catalog_path", ""),
+                )
+            )
         if raw.get("oi_data_path"):
-            extra_data.append(ExtraDataConfig(
-                name="open_interest",
-                source="parquet",
-                path=raw["oi_data_path"],
-                timeframe=raw.get("oi_timeframe", "4h"),
-            ))
+            extra_data.append(
+                ExtraDataConfig(
+                    name="open_interest",
+                    source="parquet",
+                    path=raw["oi_data_path"],
+                    timeframe=raw.get("oi_timeframe", "4h"),
+                )
+            )
 
     return AlphaAnalysisConfig(
         catalog_path=raw["catalog_path"],
@@ -220,6 +230,8 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
         factor_cache_path=raw.get("factor_cache_path", ""),
         metrics=_parse_metrics_config(raw.get("metrics", {})),
         regime=_parse_regime_config(raw.get("regime")),
+        start_date=raw.get("start_date", ""),
+        end_date=raw.get("end_date", ""),
         extra_data_path=extra_data_path,
         extra_data=extra_data,
         funding_rate=raw.get("funding_rate", False),

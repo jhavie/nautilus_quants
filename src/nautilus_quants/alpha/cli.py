@@ -32,11 +32,15 @@ def _run_alphalens_worker(
 
     try:
         result = run_alphalens_with_forward_returns(
-            factor_series, forward_returns, config.quantiles, config.max_loss,
+            factor_series,
+            forward_returns,
+            config.quantiles,
+            config.max_loss,
         )
         return factor_name, result
     except Exception as e:
         return factor_name, str(e)
+
 
 def _generate_charts_worker(
     factor_name: str,
@@ -52,6 +56,7 @@ def _generate_charts_worker(
     avoiding thread-safety issues.
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -61,10 +66,7 @@ def _generate_charts_worker(
         factor_dir = Path(output_dir) / factor_name
         factor_dir.mkdir(parents=True, exist_ok=True)
 
-        period_cols = [
-            c for c in factor_data.columns
-            if c not in ("factor", "factor_quantile")
-        ]
+        period_cols = [c for c in factor_data.columns if c not in ("factor", "factor_quantile")]
         period = period_cols[0] if period_cols else "1h"
         count = 0
 
@@ -82,6 +84,7 @@ def _generate_charts_worker(
                 plt.close("all")
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     f"Chart {chart_name} failed for {factor_name}: {e}",
                 )
@@ -90,7 +93,6 @@ def _generate_charts_worker(
         return factor_name, count
     except Exception as e:
         return factor_name, str(e)
-
 
 
 @click.group()
@@ -105,13 +107,24 @@ def cli() -> None:
 @click.option("-q", "--quiet", is_flag=True, help="Suppress non-error output")
 @click.option("--no-registry", is_flag=True, help="Skip writing to registry database")
 @click.option("--env", "env_name", default=None, help="Registry environment (test/dev/prod)")
-@click.option("--force-reanalyze", is_flag=True,
-              help="Re-analyze even if metrics already exist for the expression")
-@click.option("--workers", type=int, default=None,
-              help="Max parallel workers for alphalens (default: min(factors, 4))")
+@click.option(
+    "--force-reanalyze",
+    is_flag=True,
+    help="Re-analyze even if metrics already exist for the expression",
+)
+@click.option(
+    "--workers",
+    type=int,
+    default=None,
+    help="Max parallel workers for alphalens (default: min(factors, 4))",
+)
 def analyze(
-    config_file: Path, verbose: bool, quiet: bool,
-    no_registry: bool, env_name: str | None, force_reanalyze: bool,
+    config_file: Path,
+    verbose: bool,
+    quiet: bool,
+    no_registry: bool,
+    env_name: str | None,
+    force_reanalyze: bool,
     workers: int | None,
 ) -> None:
     """Execute factor analysis from a YAML configuration file.
@@ -152,21 +165,22 @@ def analyze(
             click.echo(f"Loading bar data from {config.catalog_path}...")
 
         loader = CatalogDataLoader(config.catalog_path, config.bar_spec)
-        bars_by_instrument = loader.load_bars(config.instrument_ids)
-
-        loaded_count = sum(len(bars) for bars in bars_by_instrument.values())
-        instruments_with_data = sum(
-            1 for bars in bars_by_instrument.values() if bars
+        bars_by_instrument = loader.load_bars(
+            config.instrument_ids,
+            start=config.start_date,
+            end=config.end_date,
         )
 
+        loaded_count = sum(len(bars) for bars in bars_by_instrument.values())
+        instruments_with_data = sum(1 for bars in bars_by_instrument.values() if bars)
+
         if not quiet:
-            click.echo(
-                f"Loaded {loaded_count} bars across "
-                f"{instruments_with_data} instruments"
-            )
+            click.echo(f"Loaded {loaded_count} bars across " f"{instruments_with_data} instruments")
 
         if loaded_count == 0:
-            click.echo("Error: No bar data loaded. Check catalog path and instrument IDs.", err=True)
+            click.echo(
+                "Error: No bar data loaded. Check catalog path and instrument IDs.", err=True
+            )
             sys.exit(1)
 
         # 4. Load factor config and create evaluator
@@ -201,12 +215,11 @@ def analyze(
         if use_cache:
             if not quiet:
                 click.echo()
-                click.echo(
-                    f"Loading factors from cache: {config.factor_cache_path}"
-                )
+                click.echo(f"Loading factors from cache: {config.factor_cache_path}")
             factor_series = load_as_factor_series(config.factor_cache_path)
             # pricing is always needed for forward returns (not cached)
             import pandas as pd
+
             pricing = pd.DataFrame(
                 {
                     inst_id: CatalogDataLoader.bars_to_dataframe(bars)["close"]
@@ -228,9 +241,7 @@ def analyze(
                     config_hash=config_hash,
                 )
                 if not quiet:
-                    click.echo(
-                        f"  Factor cache saved: {config.factor_cache_path}"
-                    )
+                    click.echo(f"  Factor cache saved: {config.factor_cache_path}")
 
         if not factor_series:
             click.echo("Error: No factor values computed. Check factor configuration.", err=True)
@@ -239,9 +250,7 @@ def analyze(
         # 6. Filter to requested factors
         computed_factor_names = list(factor_series.keys())
         if config.factors:
-            factor_series = {
-                k: v for k, v in factor_series.items() if k in config.factors
-            }
+            factor_series = {k: v for k, v in factor_series.items() if k in config.factors}
 
         if not factor_series:
             click.echo(
@@ -288,20 +297,12 @@ def analyze(
             _db.close()
 
             if already:
-                factor_series = {
-                    k: v for k, v in factor_series.items()
-                    if k not in already
-                }
+                factor_series = {k: v for k, v in factor_series.items() if k not in already}
                 if not quiet:
-                    click.echo(
-                        f"  Skipped {len(already)} factors "
-                        f"with existing metrics"
-                    )
+                    click.echo(f"  Skipped {len(already)} factors " f"with existing metrics")
             if not factor_series:
                 if not quiet:
-                    click.echo(
-                        "All factors already analyzed. Nothing to do."
-                    )
+                    click.echo("All factors already analyzed. Nothing to do.")
                 return
 
         if not quiet:
@@ -318,7 +319,9 @@ def analyze(
         # Use any factor's series to seed the index for forward returns
         any_factor_series = next(iter(factor_series.values()))
         forward_returns = evaluator.compute_forward_returns(
-            any_factor_series, pricing, config,
+            any_factor_series,
+            pricing,
+            config,
         )
         if verbose:
             click.echo(f"  Forward returns computed in {time.time() - t0:.2f}s")
@@ -370,15 +373,17 @@ def analyze(
             chart_futures = {}
             with ProcessPoolExecutor(max_workers=min(len(al_results), 4)) as executor:
                 for factor_name, al_result in al_results.items():
-                    chart_futures[executor.submit(
-                        _generate_charts_worker,
-                        factor_name,
-                        al_result["factor_data"],
-                        config.charts,
-                        config.output_format,
-                        str(output_dir),
-                        pricing,
-                    )] = factor_name
+                    chart_futures[
+                        executor.submit(
+                            _generate_charts_worker,
+                            factor_name,
+                            al_result["factor_data"],
+                            config.charts,
+                            config.output_format,
+                            str(output_dir),
+                            pricing,
+                        )
+                    ] = factor_name
 
                 for future in chart_futures:
                     fname = chart_futures[future]
@@ -392,7 +397,8 @@ def analyze(
         # 9. Generate summary
         if ic_results or skipped_factors:
             report_gen.generate_summary(
-                ic_results, output_dir,
+                ic_results,
+                output_dir,
                 factor_series=factor_series,
                 skipped_factors=skipped_factors,
             )
@@ -416,7 +422,8 @@ def analyze(
 
         if factor_metrics_results:
             report_gen.generate_extended_summary(
-                factor_metrics_results, output_dir,
+                factor_metrics_results,
+                output_dir,
             )
 
         # ── Registry auto-persist ──
@@ -436,7 +443,8 @@ def analyze(
 
                 env = resolve_env(env_name, config.registry_env)
                 reg_db = RegistryDatabase.for_environment(
-                    env, config.registry_db_dir,
+                    env,
+                    config.registry_db_dir,
                 )
                 repo = FactorRepository(reg_db)
 
@@ -444,7 +452,8 @@ def analyze(
                 with open(config.factor_config_path, encoding="utf-8") as _f:
                     factor_yaml_dict = _yaml.safe_load(_f)
                 factor_cfg_id = repo.save_config_snapshot(
-                    factor_yaml_dict, "factors",
+                    factor_yaml_dict,
+                    "factors",
                     config_name=factor_config.name,
                     file_path=str(config.factor_config_path),
                 )
@@ -452,14 +461,16 @@ def analyze(
                 with open(config_file, encoding="utf-8") as _f:
                     analysis_yaml_dict = _yaml.safe_load(_f)
                 analysis_cfg_id = repo.save_config_snapshot(
-                    analysis_yaml_dict, "analysis",
+                    analysis_yaml_dict,
+                    "analysis",
                     config_name=str(config_file.stem),
                     file_path=str(config_file),
                 )
 
                 # Register only factors that have analysis results
                 reg_result = repo.register_factors_from_config(
-                    factor_config, only_names=set(ic_results.keys()),
+                    factor_config,
+                    only_names=set(ic_results.keys()),
                 )
 
                 # Save analysis metrics
@@ -470,32 +481,29 @@ def analyze(
                         generate_factor_id(factor_config.source, fname),
                     )
                     ic_summary = compute_ic_summary(ic_df)
-                    fm = (
-                        factor_metrics_results.get(fname)
-                        if factor_metrics_results else None
+                    fm = factor_metrics_results.get(fname) if factor_metrics_results else None
+                    all_metrics.extend(
+                        build_analysis_metrics(
+                            run_id=run_id,
+                            factor_id=fid,
+                            timeframe=config.bar_spec,
+                            ic_summary=ic_summary,
+                            metrics_result=fm,
+                            factor_config_id=factor_cfg_id,
+                            analysis_config_id=analysis_cfg_id,
+                            output_dir=str(output_dir),
+                        )
                     )
-                    all_metrics.extend(build_analysis_metrics(
-                        run_id=run_id,
-                        factor_id=fid,
-                        timeframe=config.bar_spec,
-                        ic_summary=ic_summary,
-                        metrics_result=fm,
-                        factor_config_id=factor_cfg_id,
-                        analysis_config_id=analysis_cfg_id,
-                        output_dir=str(output_dir),
-                    ))
 
                 repo.save_metrics(all_metrics)
                 reg_db.close()
 
                 if not quiet:
-                    click.echo(
-                        f"  Registry: {len(all_metrics)} metrics saved to "
-                        f"{env}.duckdb"
-                    )
+                    click.echo(f"  Registry: {len(all_metrics)} metrics saved to " f"{env}.duckdb")
             except Exception as e:
                 click.echo(
-                    f"  Warning: Registry write failed: {e}", err=True,
+                    f"  Warning: Registry write failed: {e}",
+                    err=True,
                 )
 
         duration = time.time() - start_time
@@ -533,6 +541,7 @@ def analyze(
         click.echo(f"Error: {e}", err=True)
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
@@ -542,12 +551,15 @@ def analyze(
 # ---------------------------------------------------------------------------
 
 _ENV_OPTION = click.option(
-    "--env", "env_name", default=None,
+    "--env",
+    "env_name",
+    default=None,
     type=click.Choice(["test", "dev", "prod"]),
     help="Registry environment (default: test).",
 )
 _DB_DIR_OPTION = click.option(
-    "--db-dir", default="logs/registry",
+    "--db-dir",
+    default="logs/registry",
     help="Registry database directory.",
 )
 
@@ -582,7 +594,10 @@ def register(config_file: Path, env_name: str | None, db_dir: str) -> None:
     try:
         result = repo.register_factors_from_config(config)
         print_register_result(
-            result.new, result.updated, result.unchanged, result.renamed,
+            result.new,
+            result.updated,
+            result.unchanged,
+            result.renamed,
         )
     finally:
         db.close()
@@ -611,16 +626,17 @@ def list_factors(
     repo, db = _open_repo(env_name, db_dir)
     try:
         factors = repo.list_factors(
-            status=status, source=source, prototype=prototype,
-            tag=tag, limit=limit,
+            status=status,
+            source=source,
+            prototype=prototype,
+            tag=tag,
+            limit=limit,
         )
         if not factors:
             click.echo("(no factors found)")
             return
 
-        has_scores = any(
-            f.parameters.get("promote_score") is not None for f in factors
-        )
+        has_scores = any(f.parameters.get("promote_score") is not None for f in factors)
         print_factor_list(factors, has_scores)
     finally:
         db.close()
@@ -628,13 +644,16 @@ def list_factors(
 
 @cli.command()
 @click.argument("factor_id", required=False, default=None)
-@click.option("--prototype", "proto_name", default=None,
-              help="Inspect all factors sharing this prototype.")
+@click.option(
+    "--prototype", "proto_name", default=None, help="Inspect all factors sharing this prototype."
+)
 @_ENV_OPTION
 @_DB_DIR_OPTION
 def inspect(
-    factor_id: str | None, proto_name: str | None,
-    env_name: str | None, db_dir: str,
+    factor_id: str | None,
+    proto_name: str | None,
+    env_name: str | None,
+    db_dir: str,
 ) -> None:
     """Inspect a factor or prototype group.
 
@@ -715,10 +734,7 @@ def _inspect_factor(repo, db, factor_id: str) -> None:
     runs = bt_repo.list_backtests(factor_id=factor_id)
     backtests = None
     if runs:
-        backtests = [
-            (r, bt_repo.get_backtest_factors(r.backtest_id))
-            for r in runs
-        ]
+        backtests = [(r, bt_repo.get_backtest_factors(r.backtest_id)) for r in runs]
 
     print_factor_detail(f, metrics=metrics or None, backtests=backtests)
 
@@ -729,8 +745,10 @@ def _inspect_factor(repo, db, factor_id: str) -> None:
 @_ENV_OPTION
 @_DB_DIR_OPTION
 def status(
-    factor_id: str, new_status: str,
-    env_name: str | None, db_dir: str,
+    factor_id: str,
+    new_status: str,
+    env_name: str | None,
+    db_dir: str,
 ) -> None:
     """Change a factor's status (candidate/active/archived)."""
     repo, db = _open_repo(env_name, db_dir)
@@ -752,8 +770,10 @@ def status(
 @_ENV_OPTION
 @_DB_DIR_OPTION
 def metrics(
-    factor_id: str, timeframe: str | None,
-    env_name: str | None, db_dir: str,
+    factor_id: str,
+    timeframe: str | None,
+    env_name: str | None,
+    db_dir: str,
 ) -> None:
     """Show analysis metrics for a factor."""
     from nautilus_quants.alpha.formatters import print_metrics_table
@@ -776,8 +796,10 @@ def metrics(
 @_ENV_OPTION
 @_DB_DIR_OPTION
 def backtests(
-    factor_id: str | None, limit: int,
-    env_name: str | None, db_dir: str,
+    factor_id: str | None,
+    limit: int,
+    env_name: str | None,
+    db_dir: str,
 ) -> None:
     """List backtest runs from the registry."""
     from nautilus_quants.alpha.formatters import print_backtests_table
@@ -794,10 +816,7 @@ def backtests(
             click.echo("(no backtests found)")
             return
 
-        bt_with_factors = [
-            (r, bt_repo.get_backtest_factors(r.backtest_id))
-            for r in runs
-        ]
+        bt_with_factors = [(r, bt_repo.get_backtest_factors(r.backtest_id)) for r in runs]
         print_backtests_table(bt_with_factors)
     finally:
         db.close()
@@ -864,13 +883,20 @@ def config_cmd(
 @click.option("--context-id", default="", help="Config snapshot ID for variables/parameters.")
 @click.option("--method", default="equal", help="Composite weighting (equal/icir_weight).")
 @click.option("--top", "top_n", default=30, type=int, help="Max factors.")
-@click.option("--transform", default="normalize", help="Transform (normalize/cs_rank/cs_zscore/raw).")
+@click.option(
+    "--transform", default="normalize", help="Transform (normalize/cs_rank/cs_zscore/raw)."
+)
 @click.option("-o", "--output", "output_path", required=True, type=click.Path(path_type=Path))
 @_ENV_OPTION
 @_DB_DIR_OPTION
 def export_factors(
-    context_id: str, method: str, top_n: int, transform: str,
-    output_path: Path, env_name: str | None, db_dir: str,
+    context_id: str,
+    method: str,
+    top_n: int,
+    transform: str,
+    output_path: Path,
+    env_name: str | None,
+    db_dir: str,
 ) -> None:
     """Export active factors + composite to a factors.yaml file."""
     from nautilus_quants.alpha.registry.export import export_factors_yaml
@@ -878,7 +904,8 @@ def export_factors(
     repo, db = _open_repo(env_name, db_dir)
     try:
         export_factors_yaml(
-            repo, output_path,
+            repo,
+            output_path,
             context_id=context_id,
             composite_method=method,
             composite_top_n=top_n,
@@ -929,9 +956,7 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             click.echo("Nautilus Quants - Regime Analysis (JM vs EMA)")
             click.echo("=" * 80)
             click.echo(f"Config: {config_file}")
-            click.echo(
-                f"  Regime instrument: {rc.regime_instrument}"
-            )
+            click.echo(f"  Regime instrument: {rc.regime_instrument}")
             click.echo(
                 f"  JM: n_states={rc.jump_model.n_states} "
                 f"λ={rc.jump_model.jump_penalty} "
@@ -946,12 +971,17 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             click.echo(f"Loading bar data from {config.catalog_path}...")
 
         loader = CatalogDataLoader(config.catalog_path, config.bar_spec)
-        bars_by_instrument = loader.load_bars(config.instrument_ids)
+        bars_by_instrument = loader.load_bars(
+            config.instrument_ids,
+            start=config.start_date,
+            end=config.end_date,
+        )
 
         loaded_count = sum(len(bars) for bars in bars_by_instrument.values())
         if loaded_count == 0:
             click.echo(
-                "Error: No bar data loaded.", err=True,
+                "Error: No bar data loaded.",
+                err=True,
             )
             sys.exit(1)
 
@@ -990,12 +1020,10 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
 
         if use_cache:
             if not quiet:
-                click.echo(
-                    f"Loading factors from cache: "
-                    f"{config.factor_cache_path}"
-                )
+                click.echo(f"Loading factors from cache: " f"{config.factor_cache_path}")
             factor_series = load_as_factor_series(config.factor_cache_path)
             import pandas as _pd
+
             pricing = _pd.DataFrame(
                 {
                     inst_id: CatalogDataLoader.bars_to_dataframe(bars)["close"]
@@ -1015,22 +1043,18 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
                     config_hash=config_hash,
                 )
                 if not quiet:
-                    click.echo(
-                        f"  Cache saved: {config.factor_cache_path}"
-                    )
+                    click.echo(f"  Cache saved: {config.factor_cache_path}")
 
         if not factor_series:
             click.echo(
-                "Error: No factor values computed.", err=True,
+                "Error: No factor values computed.",
+                err=True,
             )
             sys.exit(1)
 
         # 4. Filter factors if specified
         if config.factors:
-            factor_series = {
-                k: v for k, v in factor_series.items()
-                if k in config.factors
-            }
+            factor_series = {k: v for k, v in factor_series.items() if k in config.factors}
         if not factor_series:
             click.echo("Error: No matching factors.", err=True)
             sys.exit(1)
@@ -1073,7 +1097,8 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
         # 7. Generate output directory and charts
         run_id = generate_run_id()
         output_dir = create_output_directory(
-            config.output_dir, f"regime_{run_id}",
+            config.output_dir,
+            f"regime_{run_id}",
         )
 
         from nautilus_quants.alpha.regime.charts import (
@@ -1093,7 +1118,8 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             fwd_returns = pricing.pct_change(fill_method=None).shift(-1)
         else:
             fwd_returns = pricing.pct_change(
-                periods=rc.forward_period, fill_method=None,
+                periods=rc.forward_period,
+                fill_method=None,
             ).shift(-rc.forward_period)
 
         # Build signed equal weights from factor config composite
@@ -1115,7 +1141,9 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             equal_weights.setdefault(name, 1.0 / n_factors)
 
         chart_ls_equity_curves(
-            report, factor_dfs, fwd_returns,
+            report,
+            factor_dfs,
+            fwd_returns,
             output_dir / "ls_equity_curves.png",
             equal_weights=equal_weights,
         )
@@ -1133,10 +1161,7 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             def _round_weights(
                 wm: dict[str, dict[str, float]],
             ) -> dict[str, dict[str, float]]:
-                return {
-                    r: {k: round(v, 4) for k, v in ws.items()}
-                    for r, ws in wm.items()
-                }
+                return {r: {k: round(v, 4) for k, v in ws.items()} for r, ws in wm.items()}
 
             # Read default composite weights from factor config
             default_weights = {}
@@ -1145,9 +1170,7 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             if cw:
                 total_abs = sum(abs(v) for v in cw.values())
                 if total_abs > 0:
-                    default_weights = {
-                        k: round(v / total_abs, 4) for k, v in cw.items()
-                    }
+                    default_weights = {k: round(v / total_abs, 4) for k, v in cw.items()}
 
             regime_data = {
                 "metadata": {
@@ -1187,7 +1210,8 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             config_path = output_dir / "regime_config.yaml"
             with open(config_path, "w", encoding="utf-8") as f:
                 _yaml.dump(
-                    regime_data, f,
+                    regime_data,
+                    f,
                     default_flow_style=False,
                     allow_unicode=True,
                     sort_keys=False,
@@ -1209,9 +1233,7 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
 
             # JM stats
             jm_counts = report.jm_regime.value_counts(normalize=True)
-            jm_sw = int(
-                (report.jm_regime != report.jm_regime.shift()).sum()
-            )
+            jm_sw = int((report.jm_regime != report.jm_regime.shift()).sum())
             jm_parts = []
             for label in ["bear", "neutral", "bull"]:
                 if label in jm_counts.index:
@@ -1224,17 +1246,12 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
 
             # EMA stats
             ema_counts = report.ema_regime.value_counts(normalize=True)
-            ema_sw = int(
-                (report.ema_regime != report.ema_regime.shift()).sum()
-            )
+            ema_sw = int((report.ema_regime != report.ema_regime.shift()).sum())
             ema_parts = []
             for label in ["bear", "bull"]:
                 if label in ema_counts.index:
                     ema_parts.append(f"{label}={ema_counts[label]:.1%}")
-            click.echo(
-                f"  EMA (span={rc.ema.span}): "
-                f"{' '.join(ema_parts)} switches={ema_sw}"
-            )
+            click.echo(f"  EMA (span={rc.ema.span}): " f"{' '.join(ema_parts)} switches={ema_sw}")
 
             # ICIR comparison table
             click.echo()
@@ -1254,39 +1271,28 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             ema_spreads = []
             for name in report.factor_names:
                 jm_r = next(
-                    (r for r in report.jm_results
-                     if r.factor_name == name), None,
+                    (r for r in report.jm_results if r.factor_name == name),
+                    None,
                 )
                 ema_r = next(
-                    (r for r in report.ema_results
-                     if r.factor_name == name), None,
+                    (r for r in report.ema_results if r.factor_name == name),
+                    None,
                 )
                 if jm_r is None or ema_r is None:
                     continue
 
-                jm_vals = " ".join(
-                    f"{jm_r.icir(r):>10.4f}" for r in jm_regimes
-                )
-                ema_vals = " ".join(
-                    f"{ema_r.icir(r):>10.4f}" for r in ema_regimes
-                )
+                jm_vals = " ".join(f"{jm_r.icir(r):>10.4f}" for r in jm_regimes)
+                ema_vals = " ".join(f"{ema_r.icir(r):>10.4f}" for r in ema_regimes)
                 jm_sp = jm_r.icir_spread()
                 ema_sp = ema_r.icir_spread()
                 jm_spreads.append(jm_sp)
                 ema_spreads.append(ema_sp)
 
-                click.echo(
-                    f"{name:<30} {jm_vals} {ema_vals} "
-                    f"{jm_sp:>10.4f}"
-                )
+                click.echo(f"{name:<30} {jm_vals} {ema_vals} " f"{jm_sp:>10.4f}")
 
             click.echo("-" * len(header))
-            avg_jm = (
-                sum(jm_spreads) / len(jm_spreads) if jm_spreads else 0.0
-            )
-            avg_ema = (
-                sum(ema_spreads) / len(ema_spreads) if ema_spreads else 0.0
-            )
+            avg_jm = sum(jm_spreads) / len(jm_spreads) if jm_spreads else 0.0
+            avg_ema = sum(ema_spreads) / len(ema_spreads) if ema_spreads else 0.0
             ratio = avg_jm / avg_ema if avg_ema > 0.001 else 0.0
             click.echo(
                 f"Average ICIR Spread: "
@@ -1307,13 +1313,15 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
         click.echo(f"Error: {e}", err=True)
         if verbose:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 
 
 @cli.command()
 @click.option(
-    "--config", "config_path",
+    "--config",
+    "config_path",
     default="config/examples/scoring.yaml",
     type=click.Path(exists=True, path_type=Path),
     help="Scoring configuration file (all behavior driven by config).",
@@ -1404,12 +1412,13 @@ def promote(config_path: Path) -> None:
             click.echo("[hard_filters]...")
             n_before = len(df)
             df = apply_hard_filters(
-                df, scoring_cfg.hard_filters, scoring_cfg.periods,
+                df,
+                scoring_cfg.hard_filters,
+                scoring_cfg.periods,
             )
             n_after_filter = len(df)
             click.echo(
-                f"  {n_before} → {n_after_filter} "
-                f"({n_before - n_after_filter} eliminated)",
+                f"  {n_before} → {n_after_filter} " f"({n_before - n_after_filter} eliminated)",
             )
             if df.empty:
                 click.echo("Error: No factors passed.", err=True)
@@ -1439,13 +1448,13 @@ def promote(config_path: Path) -> None:
             click.echo("[dedup] Fingerprint dedup...")
             n_before_fp = len(df)
             df = dedup_by_fingerprint(
-                df, scoring_cfg.periods,
+                df,
+                scoring_cfg.periods,
                 threshold=scoring_cfg.dedup.fingerprint_threshold,
             )
             n_after_dedup = len(df)
             click.echo(
-                f"  {n_before_fp} → {n_after_dedup} "
-                f"({n_before_fp - n_after_dedup} duplicates)",
+                f"  {n_before_fp} → {n_after_dedup} " f"({n_before_fp - n_after_dedup} duplicates)",
             )
 
             # Load target existing factors
@@ -1477,7 +1486,8 @@ def promote(config_path: Path) -> None:
                 target_db_for_corr = RegistryDatabase(Path(target_db_path))
                 try:
                     corr_matrix, factor_panels = compute_factor_correlation(
-                        all_corr_ids, scoring_cfg,
+                        all_corr_ids,
+                        scoring_cfg,
                         registry_dbs=[source_db, target_db_for_corr],
                         return_panels=True,
                     )
@@ -1496,15 +1506,21 @@ def promote(config_path: Path) -> None:
                     # Heatmap
                     try:
                         import matplotlib
+
                         matplotlib.use("Agg")
                         import matplotlib.pyplot as plt
                         import seaborn as sns
 
                         fig, ax = plt.subplots(figsize=(20, 16))
                         sns.heatmap(
-                            corr_matrix, vmin=-1, vmax=1, center=0,
-                            cmap="RdBu_r", ax=ax,
-                            xticklabels=True, yticklabels=True,
+                            corr_matrix,
+                            vmin=-1,
+                            vmax=1,
+                            center=0,
+                            cmap="RdBu_r",
+                            ax=ax,
+                            xticklabels=True,
+                            yticklabels=True,
                         )
                         ax.set_title("Factor Spearman Correlation")
                         plt.tight_layout()
@@ -1523,17 +1539,18 @@ def promote(config_path: Path) -> None:
                             f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
                         )
                         selected_ids = greedy_select(
-                            df, corr_matrix,
+                            df,
+                            corr_matrix,
                             max_corr=scoring_cfg.dedup.max_corr,
                             max_factors=scoring_cfg.promote.max_factors,
                         )
                     else:
                         click.echo(
-                            f"[dedup] Greedy "
-                            f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
+                            f"[dedup] Greedy " f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
                         )
                         selected_ids = greedy_select(
-                            df, corr_matrix,
+                            df,
+                            corr_matrix,
                             max_corr=scoring_cfg.dedup.max_corr,
                             max_factors=scoring_cfg.promote.max_factors,
                             existing_ids=target_existing_ids,
@@ -1553,20 +1570,14 @@ def promote(config_path: Path) -> None:
                             click.echo(f"    - evict: {fid}")
                 else:
                     click.echo("  Warning: Empty corr matrix")
-                    selected_ids = df.index.tolist()[
-                        :scoring_cfg.promote.max_factors
-                    ]
+                    selected_ids = df.index.tolist()[: scoring_cfg.promote.max_factors]
             except Exception as e:
                 click.echo(f"  Warning: Correlation failed: {e}", err=True)
-                selected_ids = df.index.tolist()[
-                    :scoring_cfg.promote.max_factors
-                ]
+                selected_ids = df.index.tolist()[: scoring_cfg.promote.max_factors]
         else:
             click.echo("[dedup] — SKIPPED")
             target_existing_ids = []
-            selected_ids = df.index.tolist()[
-                :scoring_cfg.promote.max_factors
-            ]
+            selected_ids = df.index.tolist()[: scoring_cfg.promote.max_factors]
 
         # ── [clustering] ──
         super_alphas: list | None = None
@@ -1584,7 +1595,8 @@ def promote(config_path: Path) -> None:
                     dbs_for_corr.append(target_db_for_corr)
                 try:
                     corr_matrix, factor_panels = compute_factor_correlation(
-                        selected_ids, scoring_cfg,
+                        selected_ids,
+                        scoring_cfg,
                         registry_dbs=dbs_for_corr,
                         return_panels=True,
                     )
@@ -1616,6 +1628,7 @@ def promote(config_path: Path) -> None:
                 from nautilus_quants.alpha.registry.clustering import (
                     ClusterConfig,
                 )
+
                 cluster_cfg = ClusterConfig(
                     enabled=True,
                     algorithm=scoring_cfg.clustering.algorithm,
@@ -1654,7 +1667,9 @@ def promote(config_path: Path) -> None:
                 heatmap_path = diag_dir / "cluster_heatmap.png"
                 try:
                     plot_cluster_heatmap(
-                        corr_matrix, clusters_for_plot, noise_for_plot,
+                        corr_matrix,
+                        clusters_for_plot,
+                        noise_for_plot,
                         output_path=str(heatmap_path),
                     )
                     click.echo(f"  Saved: {heatmap_path}")
@@ -1666,33 +1681,36 @@ def promote(config_path: Path) -> None:
                 rows = []
                 for sa in super_alphas:
                     for member in sa.members:
-                        rows.append({
-                            "factor_id": member,
-                            "super_alpha": sa.name,
-                            "method": sa.method,
-                            "weight": sa.weights.get(member, 0.0),
-                            "cluster_id": sa.cluster_id,
-                            "tags": "|".join(sa.tags),
-                        })
+                        rows.append(
+                            {
+                                "factor_id": member,
+                                "super_alpha": sa.name,
+                                "method": sa.method,
+                                "weight": sa.weights.get(member, 0.0),
+                                "cluster_id": sa.cluster_id,
+                                "tags": "|".join(sa.tags),
+                            }
+                        )
                 for nid in noise:
-                    rows.append({
-                        "factor_id": nid,
-                        "super_alpha": "",
-                        "method": "noise_discarded",
-                        "weight": 0.0,
-                        "cluster_id": -1,
-                        "tags": "",
-                    })
+                    rows.append(
+                        {
+                            "factor_id": nid,
+                            "super_alpha": "",
+                            "method": "noise_discarded",
+                            "weight": 0.0,
+                            "cluster_id": -1,
+                            "tags": "",
+                        }
+                    )
                 import csv as _csv
+
                 with open(cluster_csv_path, "w", newline="") as f:
                     writer = _csv.DictWriter(f, fieldnames=rows[0].keys())
                     writer.writeheader()
                     writer.writerows(rows)
                 click.echo(f"  Saved: {cluster_csv_path}")
 
-                n_passthrough = sum(
-                    1 for sa in super_alphas if sa.method == "passthrough"
-                )
+                n_passthrough = sum(1 for sa in super_alphas if sa.method == "passthrough")
                 n_composed = len(super_alphas) - n_passthrough
                 noise_msg = (
                     f"{len(noise)} noise discarded"
@@ -1736,16 +1754,12 @@ def promote(config_path: Path) -> None:
                 orthogonalize_factor_weights,
             )
 
-            typed_panels: dict[str, pd.DataFrame] = (
-                factor_panels  # type: ignore[assignment]
-            )
+            typed_panels: dict[str, pd.DataFrame] = factor_panels  # type: ignore[assignment]
             orth_cfg = OrthConfig(
                 enabled=True,
                 method=scoring_cfg.orthogonalization.method,
                 min_eigenvalue=scoring_cfg.orthogonalization.min_eigenvalue,
-                max_condition_number=(
-                    scoring_cfg.orthogonalization.max_condition_number
-                ),
+                max_condition_number=(scoring_cfg.orthogonalization.max_condition_number),
             )
 
             orth_result: OrthResult | None = None
@@ -1775,8 +1789,7 @@ def promote(config_path: Path) -> None:
                     n_sa = len(sa_ids)
                     sa_weights = {sid: 1.0 / n_sa for sid in sa_ids}
                     click.echo(
-                        f"  Inter-SA: {n_sa} Super Alphas, "
-                        f"equal initial weights",
+                        f"  Inter-SA: {n_sa} Super Alphas, " f"equal initial weights",
                     )
                     try:
                         orth_result = orthogonalize_factor_weights(
@@ -1787,42 +1800,32 @@ def promote(config_path: Path) -> None:
                         )
                     except ValueError as exc:
                         click.echo(
-                            f"  Warning: inter-SA: {exc}", err=True,
+                            f"  Warning: inter-SA: {exc}",
+                            err=True,
                         )
             elif super_alphas is not None and len(super_alphas) < 2:
                 click.echo("  Skipped: <2 Super Alphas")
             else:
                 # No clustering — global orthogonalization
-                available_ids = [
-                    f for f in selected_ids if f in typed_panels
-                ]
+                available_ids = [f for f in selected_ids if f in typed_panels]
                 if len(available_ids) < 2:
                     click.echo("  Skipped: <2 factors with panels")
                 else:
                     if "final_score" in df.columns:
-                        scores_s = df.loc[
-                            df.index.isin(available_ids), "final_score"
-                        ].clip(lower=0)
+                        scores_s = df.loc[df.index.isin(available_ids), "final_score"].clip(lower=0)
                         total = scores_s.sum()
                         n = len(available_ids)
                         global_weights = {
                             fid: (
-                                float(scores_s.get(fid, 1.0 / n))
-                                / total
-                                if total > 0
-                                else 1.0 / n
+                                float(scores_s.get(fid, 1.0 / n)) / total if total > 0 else 1.0 / n
                             )
                             for fid in available_ids
                         }
                     else:
                         n = len(available_ids)
-                        global_weights = {
-                            fid: 1.0 / n for fid in available_ids
-                        }
+                        global_weights = {fid: 1.0 / n for fid in available_ids}
 
-                    global_panels = {
-                        fid: typed_panels[fid] for fid in available_ids
-                    }
+                    global_panels = {fid: typed_panels[fid] for fid in available_ids}
                     click.echo(
                         f"  Global: {len(available_ids)} factors",
                     )
@@ -1835,7 +1838,8 @@ def promote(config_path: Path) -> None:
                         )
                     except ValueError as exc:
                         click.echo(
-                            f"  Warning: global: {exc}", err=True,
+                            f"  Warning: global: {exc}",
+                            err=True,
                         )
 
             # Print summary + save diagnostics
@@ -1866,13 +1870,16 @@ def promote(config_path: Path) -> None:
                     {
                         "factor_id": fid,
                         "original_weight": orth_result.original_weights.get(
-                            fid, 0.0,
+                            fid,
+                            0.0,
                         ),
                         "orth_weight": orth_result.orth_weights.get(
-                            fid, 0.0,
+                            fid,
+                            0.0,
                         ),
                         "overlap_score": orth_result.overlap_scores.get(
-                            fid, 0.0,
+                            fid,
+                            0.0,
                         ),
                     }
                     for fid in orth_result.orth_weights
@@ -1881,8 +1888,10 @@ def promote(config_path: Path) -> None:
                     writer = _csv.DictWriter(
                         fh,
                         fieldnames=[
-                            "factor_id", "original_weight",
-                            "orth_weight", "overlap_score",
+                            "factor_id",
+                            "original_weight",
+                            "orth_weight",
+                            "overlap_score",
                         ],
                     )
                     writer.writeheader()
@@ -1893,7 +1902,8 @@ def promote(config_path: Path) -> None:
                 eig_csv = diag_dir / "lowdin_eigenvalues.csv"
                 with open(eig_csv, "w", newline="") as fh:
                     writer = _csv.DictWriter(
-                        fh, fieldnames=["index", "eigenvalue"],
+                        fh,
+                        fieldnames=["index", "eigenvalue"],
                     )
                     writer.writeheader()
                     for i, ev in enumerate(orth_result.eigenvalues):
@@ -1907,12 +1917,20 @@ def promote(config_path: Path) -> None:
         if scoring_cfg.weights.enabled:
             scores_csv = diag_dir / "factor_scores.csv"
             save_cols = [
-                c for c in [
-                    "final_score", "avg_period_score", "pred_score",
-                    "mono_score", "consistency", "turnover_friendliness",
-                    "avg_icir", "avg_ic_mean", "avg_monotonicity",
+                c
+                for c in [
+                    "final_score",
+                    "avg_period_score",
+                    "pred_score",
+                    "mono_score",
+                    "consistency",
+                    "turnover_friendliness",
+                    "avg_icir",
+                    "avg_ic_mean",
+                    "avg_monotonicity",
                     "n_valid_periods",
-                ] if c in df.columns
+                ]
+                if c in df.columns
             ]
             df[save_cols].to_csv(scores_csv)
             click.echo(f"\n  Scores saved: {scores_csv}")
@@ -1925,7 +1943,8 @@ def promote(config_path: Path) -> None:
         if scoring_cfg.promote.enabled:
             if not target_db_path:
                 click.echo(
-                    "Error: promote.target_db_path required.", err=True,
+                    "Error: promote.target_db_path required.",
+                    err=True,
                 )
                 sys.exit(1)
 
@@ -1936,21 +1955,23 @@ def promote(config_path: Path) -> None:
                 try:
                     if competitive and target_existing_ids:
                         evicted_ids = retire_evicted_factors(
-                            target_db, selected_ids, target_existing_ids,
+                            target_db,
+                            selected_ids,
+                            target_existing_ids,
                         )
                         if evicted_ids:
                             click.echo(
-                                f"[migrate] Archived {len(evicted_ids)} "
-                                f"evicted factors",
+                                f"[migrate] Archived {len(evicted_ids)} " f"evicted factors",
                             )
 
                     label = "[migrate] Syncing" if competitive else "[migrate] Migrating"
                     click.echo(
-                        f"{label} {len(selected_ids)} factors "
-                        f"to {target_db_path}...",
+                        f"{label} {len(selected_ids)} factors " f"to {target_db_path}...",
                     )
                     counts = migrate_factors(
-                        source_db, target_db, selected_ids,
+                        source_db,
+                        target_db,
+                        selected_ids,
                         target_status=scoring_cfg.promote.target_status,
                         scores=df,
                     )
@@ -1966,7 +1987,8 @@ def promote(config_path: Path) -> None:
                     if competitive and target_existing_ids:
                         target_db.connection.rollback()
                         click.echo(
-                            "  Error — rolled back.", err=True,
+                            "  Error — rolled back.",
+                            err=True,
                         )
                     raise
             finally:
@@ -1977,13 +1999,17 @@ def promote(config_path: Path) -> None:
         source_db.close()
         duration = time.time() - start_time
         print_promote_summary(
-            n_after_filter, n_after_dedup, len(selected_ids),
-            duration, not scoring_cfg.promote.enabled,
+            n_after_filter,
+            n_after_dedup,
+            len(selected_ids),
+            duration,
+            not scoring_cfg.promote.enabled,
         )
 
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
@@ -2044,7 +2070,8 @@ def backfill(execute: bool, env_name: str | None, db_dir: str) -> None:
 
 @cli.command()
 @click.option(
-    "--keep-source", default=None,
+    "--keep-source",
+    default=None,
     help="Preferred source to keep (e.g. alpha101).",
 )
 @click.option("--dry-run", is_flag=True, default=True, help="Preview only.")
@@ -2067,7 +2094,9 @@ def dedup(
     repo, db = _open_repo(env_name, db_dir)
     try:
         removed = dedup_factors(
-            repo, keep_source=keep_source, dry_run=actual_dry_run,
+            repo,
+            keep_source=keep_source,
+            dry_run=actual_dry_run,
         )
         print_dedup_result(removed, actual_dry_run)
     finally:
@@ -2103,9 +2132,7 @@ def repair(
             return
 
         # Print conflict report
-        click.echo(
-            f"Found {len(conflicts)} factors with conflicting metrics:\n"
-        )
+        click.echo(f"Found {len(conflicts)} factors with conflicting metrics:\n")
         total_orphan_runs = 0
         for c in conflicts:
             n_orphans = sum(len(g.run_ids) for g in c.orphan_groups)
@@ -2123,10 +2150,7 @@ def repair(
                 )
                 click.echo(f"    expr: {g.expression[:90]}")
 
-        click.echo(
-            f"\nTotal: {len(conflicts)} factors, "
-            f"{total_orphan_runs} orphan runs"
-        )
+        click.echo(f"\nTotal: {len(conflicts)} factors, " f"{total_orphan_runs} orphan runs")
 
         actions = repair_factors(repo, dry_run=dry_run)
 
@@ -2138,13 +2162,10 @@ def repair(
         for a in actions:
             if a.action in ("split", "merge"):
                 click.echo(
-                    f"  {a.action}: {a.factor_id} → {a.new_factor_id} "
-                    f"({len(a.run_ids)} runs)"
+                    f"  {a.action}: {a.factor_id} → {a.new_factor_id} " f"({len(a.run_ids)} runs)"
                 )
             else:
-                click.echo(
-                    f"  {a.action}: {a.factor_id} — {a.detail}"
-                )
+                click.echo(f"  {a.action}: {a.factor_id} — {a.detail}")
 
         if dry_run:
             click.echo("\nRe-run with --execute to apply.")
@@ -2155,10 +2176,18 @@ def repair(
 @cli.command()
 @click.argument("config_file", type=click.Path(exists=True, path_type=Path))
 @click.option("--rounds", default=5, type=int, help="Number of mining rounds.")
-@click.option("--factors-per-round", default=None, type=int,
-              help="Factors to generate per round (default: from config or 8).")
-@click.option("--model", default=None, help="Claude model (sonnet/opus, default: from config or sonnet).")
-@click.option("--hypothesis", default=None, help="Initial hypothesis direction for factor generation.")
+@click.option(
+    "--factors-per-round",
+    default=None,
+    type=int,
+    help="Factors to generate per round (default: from config or 8).",
+)
+@click.option(
+    "--model", default=None, help="Claude model (sonnet/opus, default: from config or sonnet)."
+)
+@click.option(
+    "--hypothesis", default=None, help="Initial hypothesis direction for factor generation."
+)
 @click.option("--no-analyze", is_flag=True, help="Generate factors only, skip IC analysis.")
 def mine(
     config_file: Path,
