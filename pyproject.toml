@@ -33,6 +33,7 @@ data = [
     "python-binance>=1.0.19",
     "pybit>=5.0",
     "tenacity>=8.0.0",
+    "sanpy>=0.13.0",
 ]
 backtest = [
     "quantstats>=0.0.64",

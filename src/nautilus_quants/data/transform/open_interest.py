@@ -156,9 +156,7 @@ def transform_open_interest(
                 continue
 
             merged_df = pd.concat(frames, ignore_index=True)
-            merged_df = merged_df.drop_duplicates(
-                subset=["timestamp"], keep="last"
-            )
+            merged_df = merged_df.drop_duplicates(subset=["timestamp"], keep="last")
             merged_df = merged_df.sort_values("timestamp").reset_index(drop=True)
 
             # Write merged data to a temporary CSV-like DataFrame,
@@ -169,9 +167,7 @@ def transform_open_interest(
 
             out_df = pd.DataFrame(
                 {
-                    "timestamp_ns": (
-                        merged_df["timestamp"].astype("int64") * 1_000_000
-                    ),
+                    "timestamp_ns": (merged_df["timestamp"].astype("int64") * 1_000_000),
                     "instrument_id": instrument_id,
                     "open_interest": merged_df["open_interest"].astype("float64"),
                 }
@@ -185,15 +181,11 @@ def transform_open_interest(
                 ]
             )
 
-            table = pa.Table.from_pandas(
-                out_df, schema=schema, preserve_index=False
-            )
+            table = pa.Table.from_pandas(out_df, schema=schema, preserve_index=False)
             pq.write_table(table, str(output_file))
 
             count = len(out_df)
-            logger.info(
-                "Wrote %d OI records for %s to %s", count, symbol, output_file
-            )
+            logger.info("Wrote %d OI records for %s to %s", count, symbol, output_file)
             results.append(
                 {
                     "symbol": symbol,
@@ -204,9 +196,7 @@ def transform_open_interest(
 
         except Exception as e:
             msg = f"{e}\n{traceback.format_exc()}"
-            logger.error(
-                "Failed to transform open interest for %s: %s", symbol, msg
-            )
+            logger.error("Failed to transform open interest for %s: %s", symbol, msg)
             results.append(
                 {
                     "symbol": symbol,
@@ -219,6 +209,70 @@ def transform_open_interest(
     return results
 
 
+def load_parquet_field_lookup(
+    catalog_path: Path | str,
+    instrument_ids: list[str],
+    field_name: str,
+    timeframe: str = "4h",
+    file_suffix: str = "",
+    subdirectory: str = "",
+) -> dict[str, dict[int, dict[str, float]]]:
+    """Load standalone Parquet files as nested lookup dict (generic version).
+
+    File pattern: ``{subdirectory}/{SYMBOL}_{timeframe}_{file_suffix}.parquet``
+
+    Args:
+        catalog_path: Root data directory.
+        instrument_ids: Instrument ID strings (e.g., ``["BTCUSDT.BINANCE"]``).
+        field_name: Column name in the Parquet file to read.
+        timeframe: Timeframe label in the filename (default ``"4h"``).
+        file_suffix: Suffix in the filename (default = ``field_name``).
+        subdirectory: Subdirectory under catalog_path (default = ``field_name``).
+
+    Returns:
+        ``{instrument_id: {timestamp_ns: {field_name: float}}}``
+    """
+    catalog_path = Path(catalog_path)
+    sub = subdirectory or field_name
+    suffix = file_suffix or field_name
+    data_dir = catalog_path / sub
+
+    lookup: dict[str, dict[int, dict[str, float]]] = {}
+
+    for iid in instrument_ids:
+        symbol = iid.split(".")[0]
+        parquet_file = data_dir / f"{symbol}_{timeframe}_{suffix}.parquet"
+
+        if not parquet_file.exists():
+            logger.info("Parquet not found for %s at %s (skipped)", iid, parquet_file)
+            lookup[iid] = {}
+            continue
+
+        table = pq.read_table(str(parquet_file))
+        df = table.to_pandas()
+
+        if field_name not in df.columns:
+            logger.warning(
+                "Column '%s' not found in %s (has: %s)",
+                field_name,
+                parquet_file,
+                list(df.columns),
+            )
+            lookup[iid] = {}
+            continue
+
+        ts_lookup: dict[int, dict[str, float]] = {}
+        for _, row in df.iterrows():
+            ts_lookup[int(row["timestamp_ns"])] = {
+                field_name: float(row[field_name]),
+            }
+
+        lookup[iid] = ts_lookup
+        logger.info("Loaded %d '%s' records for %s", len(ts_lookup), field_name, iid)
+
+    return lookup
+
+
 def load_oi_lookup(
     catalog_path: Path | str,
     instrument_ids: list[str],
@@ -226,45 +280,17 @@ def load_oi_lookup(
 ) -> dict[str, dict[int, dict[str, float]]]:
     """Load OI Parquet files as nested lookup dict.
 
-    Scans {catalog_path}/open_interest/ for matching files by extracting
-    the symbol from each instrument_id (e.g., "BTCUSDT" from "BTCUSDT.BINANCE").
-
-    Args:
-        catalog_path: NautilusTrader Parquet catalog directory.
-        instrument_ids: List of instrument ID strings (e.g., ["BTCUSDT.BINANCE"]).
-        timeframe: Timeframe label used in the filename (default "4h").
+    Thin wrapper around :func:`load_parquet_field_lookup` for backward
+    compatibility.  Reads ``{catalog_path}/open_interest/{SYMBOL}_{tf}_oi.parquet``.
 
     Returns:
-        Nested dict: {instrument_id: {timestamp_ns: {"open_interest": float}}}
-
-    For backtesting, the FactorEngineActor calls this at startup and uses
-    the lookup to inject OI values into bar_data on each bar.
+        ``{instrument_id: {timestamp_ns: {"open_interest": float}}}``
     """
-    catalog_path = Path(catalog_path)
-    oi_dir = catalog_path / "open_interest"
-
-    lookup: dict[str, dict[int, dict[str, float]]] = {}
-
-    for iid in instrument_ids:
-        # Extract symbol from instrument_id: "BTCUSDT.BINANCE" -> "BTCUSDT"
-        symbol = iid.split(".")[0]
-        parquet_file = oi_dir / f"{symbol}_{timeframe}_oi.parquet"
-
-        if not parquet_file.exists():
-            logger.info("OI parquet not found for %s (skipped)", iid)
-            lookup[iid] = {}
-            continue
-
-        table = pq.read_table(str(parquet_file))
-        df = table.to_pandas()
-
-        ts_lookup: dict[int, dict[str, float]] = {}
-        for _, row in df.iterrows():
-            ts_lookup[int(row["timestamp_ns"])] = {
-                "open_interest": float(row["open_interest"]),
-            }
-
-        lookup[iid] = ts_lookup
-        logger.info("Loaded %d OI records for %s", len(ts_lookup), iid)
-
-    return lookup
+    return load_parquet_field_lookup(
+        catalog_path=catalog_path,
+        instrument_ids=instrument_ids,
+        field_name="open_interest",
+        timeframe=timeframe,
+        file_suffix="oi",
+        subdirectory="open_interest",
+    )

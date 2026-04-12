@@ -61,6 +61,8 @@ class ExtraDataConfig:
     path: str = ""
     timeframe: str = ""
     fill: str = "ffill"
+    field_name: str = ""
+    file_suffix: str = ""
 
 
 # ── Config Loading ───────────────────────────────────────────────────────
@@ -109,14 +111,18 @@ def parse_extra_data_raw(raw: dict | None) -> list[ExtraDataConfig]:
             instruments = value.get("instruments", [])
             if isinstance(instruments, str):
                 instruments = [instruments]
-            configs.append(ExtraDataConfig(
-                name=name,
-                source=value.get("source", ""),
-                instruments=instruments,
-                path=value.get("path", ""),
-                timeframe=value.get("timeframe", ""),
-                fill=value.get("fill", "ffill"),
-            ))
+            configs.append(
+                ExtraDataConfig(
+                    name=name,
+                    source=value.get("source", ""),
+                    instruments=instruments,
+                    path=value.get("path", ""),
+                    timeframe=value.get("timeframe", ""),
+                    fill=value.get("fill", "ffill"),
+                    field_name=value.get("field_name", ""),
+                    file_suffix=value.get("file_suffix", ""),
+                )
+            )
         else:
             logger.warning("Skipping invalid extra_data entry: %s", name)
 
@@ -155,7 +161,8 @@ def _load_broadcast(
     if matched is None:
         logger.warning(
             "Broadcast '%s': instrument '%s' not found in panel columns",
-            cfg.name, pattern,
+            cfg.name,
+            pattern,
         )
         return None
 
@@ -278,7 +285,8 @@ def _load_bar_field_from_parquet(
         df = df[(df["ts"] >= ts_min) & (df["ts"] <= ts_max)]
         if len(df) > 0:
             series_dict[inst_id] = pd.Series(
-                df[field_name].values, index=df["ts"].values,
+                df[field_name].values,
+                index=df["ts"].values,
             )
 
     if not series_dict:
@@ -336,9 +344,7 @@ def _load_catalog_field(
         if not fr_dict:
             return None
 
-        fr_panel = pd.DataFrame(
-            {k: pd.Series(v) for k, v in fr_dict.items()}
-        )
+        fr_panel = pd.DataFrame({k: pd.Series(v) for k, v in fr_dict.items()})
         fr_panel = fr_panel.reindex(close_panel.index, method="ffill")
         for col in close_panel.columns:
             if col not in fr_panel.columns:
@@ -358,7 +364,8 @@ def _load_parquet_field(
 ) -> pd.DataFrame | None:
     """Load data from parquet directory and build aligned panel.
 
-    Refactored from ``FactorEvaluator._load_oi_panel()``.
+    Supports generic field names via ``cfg.field_name`` / ``cfg.file_suffix``.
+    Falls back to ``cfg.name`` when not specified (backward compatible with OI).
     """
     if not cfg.path:
         logger.warning("Parquet field '%s': no path provided", cfg.name)
@@ -366,30 +373,41 @@ def _load_parquet_field(
 
     try:
         from nautilus_quants.data.transform.open_interest import (
-            load_oi_lookup,
+            load_parquet_field_lookup,
         )
 
         target_instruments = cfg.instruments or instruments
         timeframe = cfg.timeframe or "4h"
-        lookup = load_oi_lookup(cfg.path, target_instruments, timeframe)
+        effective_field = cfg.field_name or cfg.name
+        effective_suffix = cfg.file_suffix or cfg.name
 
-        oi_series: dict[str, pd.Series] = {}
+        lookup = load_parquet_field_lookup(
+            catalog_path=cfg.path,
+            instrument_ids=target_instruments,
+            field_name=effective_field,
+            timeframe=timeframe,
+            file_suffix=effective_suffix,
+            subdirectory=effective_field,
+        )
+
+        series_dict: dict[str, pd.Series] = {}
         for inst_id, ts_map in lookup.items():
             if not ts_map:
                 continue
             timestamps = [pd.Timestamp(ts, unit="ns") for ts in ts_map]
-            values = [d["open_interest"] for d in ts_map.values()]
-            oi_series[inst_id] = pd.Series(values, index=timestamps)
+            values = [d[effective_field] for d in ts_map.values()]
+            series_dict[inst_id] = pd.Series(values, index=timestamps)
 
-        if not oi_series:
+        if not series_dict:
             return None
 
-        oi_panel = pd.DataFrame(oi_series)
-        oi_panel = oi_panel.reindex(close_panel.index, method="ffill")
+        panel = pd.DataFrame(series_dict)
+        fill_method = "ffill" if cfg.fill == "ffill" else None
+        panel = panel.reindex(close_panel.index, method=fill_method)
         for col in close_panel.columns:
-            if col not in oi_panel.columns:
-                oi_panel[col] = 0.0
-        result = oi_panel[close_panel.columns]
+            if col not in panel.columns:
+                panel[col] = 0.0
+        result = panel[close_panel.columns]
         logger.info("Injected parquet field '%s': %s", cfg.name, result.shape)
         return result
     except Exception as e:
@@ -460,19 +478,31 @@ def load_parquet_field_lookup(
     cfg: ExtraDataConfig,
     instruments: list[str],
 ) -> dict[str, dict[int, dict[str, float]]]:
-    """Preload OI (or similar parquet source) into a lookup.
+    """Preload parquet source into a lookup for per-bar injection.
 
-    Returns ``{instrument_id: {ts_ns: {field: value}}}`` for per-bar injection.
-    Wraps ``load_oi_lookup`` from the data transform module.
+    Returns ``{instrument_id: {ts_ns: {field: value}}}``.
+    Uses generic :func:`load_parquet_field_lookup` from the transform module.
     """
     if not cfg.path:
         return {}
 
-    from nautilus_quants.data.transform.open_interest import load_oi_lookup
+    from nautilus_quants.data.transform.open_interest import (
+        load_parquet_field_lookup as _load_pfl,
+    )
 
     target = cfg.instruments or instruments
     timeframe = cfg.timeframe or "4h"
-    return load_oi_lookup(cfg.path, target, timeframe)
+    effective_field = cfg.field_name or cfg.name
+    effective_suffix = cfg.file_suffix or cfg.name
+
+    return _load_pfl(
+        catalog_path=cfg.path,
+        instrument_ids=target,
+        field_name=effective_field,
+        timeframe=timeframe,
+        file_suffix=effective_suffix,
+        subdirectory=effective_field,
+    )
 
 
 def load_lookup(
@@ -541,15 +571,20 @@ class ExtraDataManager:
         for cfg in self._configs:
             try:
                 panel = self._load_one(
-                    cfg, close_panel, instruments,
-                    bars_by_instrument, catalog_path,
+                    cfg,
+                    close_panel,
+                    instruments,
+                    bars_by_instrument,
+                    catalog_path,
                 )
                 if panel is not None:
                     panel_fields[cfg.name] = panel
             except Exception:
                 logger.warning(
                     "Extra data '%s' (%s) failed",
-                    cfg.name, cfg.source, exc_info=True,
+                    cfg.name,
+                    cfg.source,
+                    exc_info=True,
                 )
 
     def _load_one(

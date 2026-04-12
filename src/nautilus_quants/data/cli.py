@@ -1422,6 +1422,198 @@ def tardis_transform(
         ctx.exit(EXIT_TRANSFORM_ERROR)
 
 
+@cli.command("santiment-download")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default="config/examples/data_santiment.yaml",
+    help="Santiment configuration file path",
+)
+@click.option("--symbol", "-s", help="Override symbols, comma-separated")
+@click.option("--from-date", help="Override start date (YYYY-MM-DD)")
+@click.option("--to-date", help="Override end date (YYYY-MM-DD)")
+@click.option("--force", is_flag=True, help="Re-download all (ignore checkpoints)")
+@click.pass_context
+def santiment_download(
+    ctx: click.Context,
+    config_path: str,
+    symbol: Optional[str],
+    from_date: Optional[str],
+    to_date: Optional[str],
+    force: bool,
+) -> None:
+    """Download funding rate and open interest data from SanAPI."""
+    from nautilus_quants.data.config import (
+        ConfigurationError,
+        load_santiment_config,
+    )
+
+    overrides: dict[str, str] = {}
+    if symbol:
+        overrides["download.symbols"] = symbol
+    if from_date:
+        overrides["download.start_date"] = from_date
+    if to_date:
+        overrides["download.end_date"] = to_date
+
+    try:
+        config = load_santiment_config(config_path, overrides if overrides else None)
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if force:
+        # Disable checkpoint to re-download everything
+        from dataclasses import replace
+        config = replace(config, download=replace(config.download, checkpoint_enabled=False))
+
+    if ctx.obj.get("dry_run"):
+        click.echo("DRY RUN: Would download Santiment data:")
+        click.echo(f"  Metrics: {list(config.download.metrics)}")
+        click.echo(f"  Interval: {config.download.interval}")
+        click.echo(f"  Date range: {config.download.start_date} to {config.download.end_date}")
+        syms = list(config.download.symbols) if config.download.symbols else ["(AVAILABLE set)"]
+        click.echo(f"  Symbols: {syms}")
+        click.echo(f"  Output: {config.paths.raw_data}")
+        return
+
+    from nautilus_quants.data.download.santiment import SantimentDownloader
+
+    run_id = generate_run_id()
+    log_dir = create_log_dir(config.paths.logs, run_id)
+    start_time = datetime.now()
+
+    click.echo("=" * 70)
+    click.echo(f"SANTIMENT DOWNLOAD: {run_id}")
+    click.echo("=" * 70)
+    click.echo(f"Metrics: {list(config.download.metrics)}")
+    click.echo(f"Interval: {config.download.interval}")
+    click.echo(f"Date range: {config.download.start_date} to {config.download.end_date}")
+    n_syms = len(config.download.symbols) if config.download.symbols else 87
+    click.echo(f"Symbols: {n_syms} tickers")
+    click.echo(f"Log directory: {log_dir}")
+    click.echo()
+
+    try:
+        downloader = SantimentDownloader(config=config.download, paths=config.paths)
+        results = downloader.download_all()
+    except Exception as e:
+        click.echo(f"Download failed: {e}", err=True)
+        ctx.exit(EXIT_DOWNLOAD_ERROR)
+        return
+
+    failed = [r for r in results if not r.success]
+    succeeded = [r for r in results if r.success]
+    total_rows = sum(r.rows for r in succeeded)
+
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
+
+    click.echo()
+    click.echo("=" * 70)
+    duration_str = f"{duration / 60:.1f} min" if duration >= 60 else f"{duration:.0f}s"
+    status = "SUCCESS" if not failed else "PARTIAL"
+    click.echo(f"SANTIMENT DOWNLOAD {status} in {duration_str}")
+    click.echo(f"  OK: {len(succeeded)}, Failed: {len(failed)}, Total rows: {total_rows}")
+    if failed:
+        for r in failed[:5]:
+            click.echo(f"  ! {r.ticker}/{r.metric}: {r.error[:60]}")
+    click.echo(f"  Reports: {log_dir}")
+    click.echo("=" * 70)
+
+    if failed:
+        ctx.exit(EXIT_DOWNLOAD_ERROR)
+
+
+@cli.command("santiment-transform")
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default="config/examples/data_santiment.yaml",
+    help="Santiment configuration file path",
+)
+@click.option("--symbol", "-s", help="Override symbols, comma-separated")
+@click.pass_context
+def santiment_transform(
+    ctx: click.Context,
+    config_path: str,
+    symbol: Optional[str],
+) -> None:
+    """Transform Santiment CSV data to Parquet format."""
+    from nautilus_quants.data.config import (
+        ConfigurationError,
+        load_santiment_config,
+    )
+
+    overrides: dict[str, str] = {}
+    if symbol:
+        overrides["download.symbols"] = symbol
+
+    try:
+        config = load_santiment_config(config_path, overrides if overrides else None)
+    except ConfigurationError as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if ctx.obj.get("dry_run"):
+        click.echo("DRY RUN: Would transform Santiment data:")
+        click.echo(f"  Metrics: {list(config.download.metrics)}")
+        click.echo(f"  Field mapping: {config.transform.field_mapping}")
+        click.echo(f"  Catalog: {config.paths.catalog}")
+        return
+
+    from nautilus_quants.data.santiment.slug_map import AVAILABLE
+    from nautilus_quants.data.transform.santiment import transform_santiment
+
+    tickers = list(config.download.symbols) if config.download.symbols else sorted(AVAILABLE)
+
+    click.echo("=" * 70)
+    click.echo("SANTIMENT TRANSFORM")
+    click.echo("=" * 70)
+
+    has_errors = False
+
+    for metric in config.download.metrics:
+        field_name = config.transform.field_mapping.get(metric, f"san_{metric}")
+        file_suffix = config.transform.file_suffix_mapping.get(metric, f"san_{metric}")
+
+        click.echo(f"\nTransforming {metric} → {field_name} (suffix={file_suffix})...")
+
+        results = transform_santiment(
+            raw_dir=Path(config.paths.raw_data),
+            catalog_path=Path(config.paths.catalog),
+            tickers=tickers,
+            metric=metric,
+            field_name=field_name,
+            file_suffix=file_suffix,
+            venue=config.transform.venue,
+            timeframe=config.transform.timeframe,
+        )
+
+        ok = sum(1 for r in results if r["success"])
+        fail = sum(1 for r in results if not r["success"])
+        total = sum(r["count"] for r in results if r["success"])
+        click.echo(f"  OK: {ok}, Failed: {fail}, Total rows: {total}")
+
+        for r in results:
+            if not r["success"]:
+                click.echo(f"  ! {r['ticker']}: {r.get('error', '')[:60]}", err=True)
+                has_errors = True
+
+    click.echo()
+    click.echo("=" * 70)
+    status = "SUCCESS" if not has_errors else "PARTIAL"
+    click.echo(f"SANTIMENT TRANSFORM {status}")
+    click.echo("=" * 70)
+
+    if has_errors:
+        ctx.exit(EXIT_TRANSFORM_ERROR)
+
+
 def _load_config_with_overrides(
     ctx: click.Context,
     symbol: Optional[str] = None,
