@@ -776,7 +776,9 @@ class CsVectorNeut(CrossSectionalOperator):
 
         dot_xy = (x_d * y_d).sum(axis=1)
         dot_yy = (y_d ** 2).sum(axis=1)
+        # y constant across cross-section → beta = 0 → residual = x - mean(x)
         beta = dot_xy / dot_yy.replace(0, np.nan)
+        beta = beta.fillna(0.0)
 
         residual = df.sub(x_m, axis=0) - y_df.sub(y_m, axis=0).mul(beta, axis=0)
         # Rows with fewer than 3 valid instruments → NaN

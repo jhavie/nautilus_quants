@@ -134,8 +134,7 @@ class DataConfig:
     bar_spec: str = "4h"
     factor_configs: list[str] = field(default_factory=list)
     instrument_ids: list[str] = field(default_factory=list)
-    funding_rate: bool = False
-    oi_data_path: str = ""
+    extra_data_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -251,8 +250,7 @@ def load_scoring_config(path: str | Path) -> ScoringConfig:
             bar_spec=da.get("bar_spec", "4h"),
             factor_configs=da.get("factor_configs", []),
             instrument_ids=da.get("instrument_ids", []),
-            funding_rate=da.get("funding_rate", False),
-            oi_data_path=da.get("oi_data_path", ""),
+            extra_data_path=da.get("extra_data_path", ""),
         ),
     )
 
@@ -621,6 +619,52 @@ def dedup_by_fingerprint(
     return df.drop(index=list(to_remove), errors="ignore")
 
 
+def _topo_sort_variables(variables: dict[str, str]) -> dict[str, str]:
+    """Sort variables so dependencies are evaluated first.
+
+    A variable V depends on another variable U if U's name appears as a
+    token in V's expression.  Simple word-boundary check is sufficient
+    because variable names are identifiers.
+    """
+    import re
+
+    names = set(variables)
+    # Build adjacency: var → set of vars it depends on
+    deps: dict[str, set[str]] = {}
+    for name, expr in variables.items():
+        tokens = set(re.findall(r"[A-Za-z_]\w*", expr))
+        deps[name] = tokens & names - {name}
+
+    # Kahn's algorithm
+    sorted_names: list[str] = []
+    in_degree = {n: 0 for n in names}
+    for n, d in deps.items():
+        for dep in d:
+            in_degree[n] += 1  # n depends on dep
+
+    # Reverse edges for traversal
+    dependents: dict[str, list[str]] = {n: [] for n in names}
+    for n, d in deps.items():
+        for dep in d:
+            dependents[dep].append(n)
+
+    queue = [n for n in names if in_degree[n] == 0]
+    while queue:
+        node = queue.pop(0)
+        sorted_names.append(node)
+        for dep in dependents[node]:
+            in_degree[dep] -= 1
+            if in_degree[dep] == 0:
+                queue.append(dep)
+
+    # Fallback: append any remaining (cyclic) variables
+    for n in names:
+        if n not in sorted_names:
+            sorted_names.append(n)
+
+    return {n: variables[n] for n in sorted_names}
+
+
 def compute_factor_correlation(
     factor_ids: list[str],
     config: ScoringConfig,
@@ -661,37 +705,18 @@ def compute_factor_correlation(
             "for correlation computation.",
         )
 
-    # Build analysis config for FR/OI data injection
+    # Build analysis config for extra data injection
     analysis_config = None
-    if data_cfg.funding_rate or data_cfg.oi_data_path:
+    if data_cfg.extra_data_path:
         from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
-        from nautilus_quants.factors.engine.extra_data import ExtraDataConfig
-
-        # Convert legacy fields to extra_data configs (same as load_analysis_config)
-        extra_data: list[ExtraDataConfig] = []
-        if data_cfg.funding_rate:
-            extra_data.append(ExtraDataConfig(
-                name="funding_rate",
-                source="catalog",
-                path=data_cfg.catalog_path,
-            ))
-        if data_cfg.oi_data_path:
-            extra_data.append(ExtraDataConfig(
-                name="open_interest",
-                source="parquet",
-                path=data_cfg.oi_data_path,
-                timeframe=data_cfg.bar_spec,
-            ))
+        from nautilus_quants.factors.engine.extra_data import load_extra_data_config
 
         analysis_config = AlphaAnalysisConfig(
             catalog_path=data_cfg.catalog_path,
             factor_config_path="",
             instrument_ids=data_cfg.instrument_ids,
             bar_spec=data_cfg.bar_spec,
-            extra_data=extra_data,
-            funding_rate=data_cfg.funding_rate,
-            oi_data_path=data_cfg.oi_data_path,
-            oi_timeframe=data_cfg.bar_spec,
+            extra_data=load_extra_data_config(data_cfg.extra_data_path),
         )
 
     # Load bar data
@@ -775,6 +800,10 @@ def compute_factor_correlation(
 
             loaded_count = 0
             for source, (variables, parameters, all_records) in merged.items():
+                # Topological sort: variables that reference other variables
+                # must be evaluated after their dependencies.
+                variables = _topo_sort_variables(variables)
+
                 # Split into chunks to limit memory
                 for chunk_idx in range(0, len(all_records), _CHUNK_SIZE):
                     chunk = all_records[chunk_idx:chunk_idx + _CHUNK_SIZE]
