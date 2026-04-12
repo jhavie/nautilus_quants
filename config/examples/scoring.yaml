@@ -18,7 +18,7 @@ periods:
 # Each period is checked independently; factor is eliminated only if
 # fewer than min_valid_periods pass ALL checks.
 hard_filters:
-  enabled: true                  # false = skip, all factors pass through
+  enabled: false                  # false = skip, all factors pass through
   icir_abs_min: 0.05
   t_stat_nw_abs_min: 2.0
   p_value_nw_max: 0.05
@@ -33,7 +33,7 @@ hard_filters:
 # 4-dimension scoring: predictiveness, monotonicity, consistency, turnover.
 # When disabled, factors are ranked by avg |ICIR| instead.
 scoring:
-  enabled: true                  # false = skip, rank by |ICIR|
+  enabled: false                  # false = skip, rank by |ICIR|
   weights:
     predictiveness: 0.40
     monotonicity: 0.25
@@ -47,16 +47,15 @@ scoring:
 # ── [dedup] ──
 # Fingerprint exact dedup + Spearman correlation greedy selection.
 dedup:
-  enabled: true                  # false = skip dedup + greedy
+  enabled: false                  # false = skip dedup + greedy
   fingerprint_threshold: 1.0e-3
-  max_corr: 0.6
-  competitive: false             # true = no gatekeepers, full re-selection
+  max_corr: 0.7
 
 # ── [clustering] ──
 # Auto-detect factor clusters, compose Super Alphas via PCA/equal/ICIR.
 # Noise factors (HDBSCAN label=-1) are automatically discarded.
 clustering:
-  enabled: false                   # false = skip, use individual factors
+  enabled: true                   # false = skip, use individual factors
   min_cluster_size: 3
   cluster_selection_method: "eom" # "eom" (conservative) | "leaf" (finer)
   min_samples: null
@@ -95,8 +94,6 @@ data:
   bar_spec: "4h"
   # Extra data sources (FR, OI, quote_volume, btc_close, eth_close)
   extra_data_path: "config/cs/extra_data.yaml"
-  # Per-factor panel cache (parquet); first run computes, subsequent reuse
-  panels_cache_dir: "logs/scoring/panels_cache"
   # Factor config files for correlation computation
   factor_configs: []
     # - "config/alpha_batch/factors_alpha101.yaml"
