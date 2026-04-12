@@ -48,11 +48,11 @@ class SantimentDownloader:
         self._config = config
         self._paths = paths
 
-        api_key = os.environ.get(config.api_key_env, "")
+        api_key = config.api_key or os.environ.get(config.api_key_env, "")
         if not api_key:
             raise ValueError(
-                f"Environment variable {config.api_key_env} not set. "
-                f"Export it before running: export {config.api_key_env}=your_key"
+                f"No API key: set download.api_key in config or "
+                f"export {config.api_key_env}=your_key"
             )
 
         import san
@@ -61,10 +61,13 @@ class SantimentDownloader:
         self._san = san
 
     def _resolve_symbols(self) -> list[str]:
-        """Resolve symbols: config override or default AVAILABLE set."""
-        if self._config.symbols:
-            return list(self._config.symbols)
-        return sorted(AVAILABLE)
+        """Resolve symbols from config. Raises if empty."""
+        if not self._config.symbols:
+            raise ValueError(
+                "No symbols configured. List symbols explicitly in "
+                "data_santiment.yaml → download.symbols"
+            )
+        return list(self._config.symbols)
 
     def download_all(self) -> list[SantimentDownloadResult]:
         """Download all configured metrics for all symbols.

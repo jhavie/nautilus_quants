@@ -456,12 +456,13 @@ class SantimentDownloadConfig:
     """Download configuration for Santiment data."""
 
     source: str = "santiment"
+    api_key: str = ""  # plaintext key (takes precedence over api_key_env)
     api_key_env: str = "SAN_API_KEY"
     metrics: tuple[str, ...] = ("funding_rate", "total_open_interest")
     interval: str = "4h"
     start_date: str = "2025-04-12"
     end_date: str = "2026-04-12"
-    symbols: tuple[str, ...] = ()  # empty = slug_map.AVAILABLE
+    symbols: tuple[str, ...] = ()
     rate_limit: SantimentRateLimitConfig = SantimentRateLimitConfig()
     checkpoint_enabled: bool = True
 
@@ -511,6 +512,7 @@ def _parse_santiment_download(data: dict) -> SantimentDownloadConfig:
     symbols = data.get("symbols", [])
     return SantimentDownloadConfig(
         source=data.get("source", "santiment"),
+        api_key=data.get("api_key", ""),
         api_key_env=data.get("api_key_env", "SAN_API_KEY"),
         metrics=tuple(metrics),
         interval=data.get("interval", "4h"),
