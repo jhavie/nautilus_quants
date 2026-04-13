@@ -313,3 +313,93 @@ class TestOiInjection:
         assert len(bar_data) == 7
         assert bar_data["funding_rate"] == pytest.approx(0.0001)
         assert bar_data["open_interest"] == pytest.approx(5000.0)
+
+    def test_multi_parquet_sources_all_injected(self) -> None:
+        """Replicates the new ``_parquet_lookups`` injection loop in on_bar.
+
+        Regression: prior to the fix, FactorEngineActor stored only one
+        parquet lookup in ``self._oi_lookup`` which got overwritten whenever
+        more than one ``source: parquet`` entry was configured in
+        extra_data.yaml (e.g. open_interest + san_funding_rate +
+        san_open_interest + san_volume_usd + san_social_volume).
+
+        The new implementation keeps per-field-name lookups in
+        ``self._parquet_lookups`` and iterates over all of them on each bar.
+        """
+        bar_data = _extract_bar_data(_make_mock_bar())
+
+        instrument_id = "BTCUSDT.BINANCE"
+        ts = 1700000000000 * 1_000_000
+
+        # Simulate 5 parquet sources (as in extra_data.yaml)
+        parquet_lookups = {
+            "open_interest": {
+                instrument_id: {ts: {"open_interest": 5000.0}},
+            },
+            "san_funding_rate": {
+                instrument_id: {ts: {"san_funding_rate": 0.00012}},
+            },
+            "san_open_interest": {
+                instrument_id: {ts: {"san_open_interest": 4.5e10}},
+            },
+            "san_volume_usd": {
+                instrument_id: {ts: {"san_volume_usd": 6.8e10}},
+            },
+            "san_social_volume": {
+                instrument_id: {ts: {"san_social_volume": 1234.0}},
+            },
+        }
+
+        # Replicate the new on_bar injection logic
+        for field_name, inst_map in parquet_lookups.items():
+            inst_data = inst_map.get(instrument_id)
+            if inst_data is None:
+                continue
+            ts_data = inst_data.get(ts)
+            if ts_data:
+                bar_data.update(ts_data)
+
+        # OHLCV(5) + 5 parquet fields = 10
+        assert len(bar_data) == 10
+        assert bar_data["open_interest"] == pytest.approx(5000.0)
+        assert bar_data["san_funding_rate"] == pytest.approx(0.00012)
+        assert bar_data["san_open_interest"] == pytest.approx(4.5e10)
+        assert bar_data["san_volume_usd"] == pytest.approx(6.8e10)
+        assert bar_data["san_social_volume"] == pytest.approx(1234.0)
+
+    def test_multi_parquet_sources_partial_ts_coverage(self) -> None:
+        """When different parquet sources have different ts coverage for
+        the same instrument, only matching-ts fields are injected."""
+        bar_data = _extract_bar_data(_make_mock_bar())
+
+        instrument_id = "BTCUSDT.BINANCE"
+        ts_bar = 1700000000000 * 1_000_000
+        ts_other = 1700014400000 * 1_000_000
+
+        parquet_lookups = {
+            # Has data at ts_bar
+            "open_interest": {
+                instrument_id: {ts_bar: {"open_interest": 5000.0}},
+            },
+            # Only has data at ts_other (different ts)
+            "san_funding_rate": {
+                instrument_id: {ts_other: {"san_funding_rate": 0.00012}},
+            },
+            # No data for this instrument
+            "san_open_interest": {
+                "ETHUSDT.BINANCE": {ts_bar: {"san_open_interest": 4.5e10}},
+            },
+        }
+
+        for field_name, inst_map in parquet_lookups.items():
+            inst_data = inst_map.get(instrument_id)
+            if inst_data is None:
+                continue
+            ts_data = inst_data.get(ts_bar)
+            if ts_data:
+                bar_data.update(ts_data)
+
+        # Only open_interest should be injected
+        assert bar_data["open_interest"] == pytest.approx(5000.0)
+        assert "san_funding_rate" not in bar_data
+        assert "san_open_interest" not in bar_data
