@@ -201,10 +201,15 @@ _AVAILABLE_VARIABLES = (
     "- san_funding_rate = cross-exchange aggregated funding rate, native 4h\n"
     "- san_open_interest = cross-exchange aggregated open interest (USD units);\n"
     "  divide by close to get token-base units: san_open_interest / close\n"
-    "- san_volume_usd = cross-exchange ROLLING 24h trading volume (USD, sampled every 4h);\n"
-    "  NOT a 4h bucket — use cs_rank for attention ranking, or rate-of-change for surges\n"
-    "- san_social_volume = total social mentions across Twitter/Reddit/Telegram/4chan etc;\n"
-    "  sudden spikes often precede price moves — use delta/delay over raw counts\n"
+    "- san_volume_usd = rolling 24h USD trading volume, aggregated across exchanges,\n"
+    "  sampled every 4h. IMPORTANT: each bar's value SUMS THE PAST 24h (6 bars),\n"
+    "  so consecutive bars overlap 83% (20/24h). This means:\n"
+    "    * cs_rank(san_volume_usd) — cross-sectional attention ranking (preferred)\n"
+    "    * delta(san_volume_usd, 6) — today's 24h vs yesterday's 24h attention change\n"
+    "    * AVOID delta(x, 1..3) — noisy, consecutive values overlap heavily\n"
+    "- san_social_volume = 4h-bucket count of mentions across Twitter/Reddit/Telegram/\n"
+    "  4chan/Farcaster. Spikes often lead price. Use ROC (delta/delay) or cs_rank\n"
+    "  of ROC; raw counts are cross-sectionally incomparable (BTC >> small caps)\n"
     "- quote_volume = traded value in USDT (intra-bar turnover)\n"
     "- vwap = quote_volume / volume, volume-weighted average price\n"
     "- btc_close = BTC close price broadcast to all instruments\n"
@@ -334,13 +339,16 @@ def build_generation_prompt(
             )
         if "san_volume_usd" in variable_subset:
             extras.append(
-                "- san_volume_usd = cross-exchange ROLLING 24h trading volume (USD, "
-                "sampled every 4h); NOT a 4h bucket, use cs_rank for attention ranking"
+                "- san_volume_usd = rolling 24h aggregated USD volume, sampled every "
+                "4h (each value sums the past 24h; consecutive bars overlap 83%); "
+                "use cs_rank(x) for ranking or delta(x, 6) for 24h change; "
+                "AVOID delta(x, 1..3) — noisy due to overlap"
             )
         if "san_social_volume" in variable_subset:
             extras.append(
-                "- san_social_volume = total social mentions across platforms (count); "
-                "use delta/delay rather than raw counts, spikes often lead price"
+                "- san_social_volume = 4h-bucket count of social mentions; "
+                "raw counts cross-sectionally incomparable (BTC >> small caps); "
+                "use cs_rank(delta/delay) for surge detection"
             )
         var_block = vars_str + ("\n" + "\n".join(extras) if extras else "")
         sections.append(f"## Available Variables\n{var_block}")
