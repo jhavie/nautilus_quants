@@ -30,11 +30,11 @@ mining:
   constraints:
     max_char_length: 200
     max_node_count: 30
-    max_depth: 6
+    max_depth: 8
     max_func_nesting: 4
     max_variables: 5
     max_window: 720
-    max_numeric_ratio: 0.3
+    max_numeric_ratio: 0.4
 
   # ── Two directions: sentiment (derivatives) + attention (volume/social) ──
   directions:
