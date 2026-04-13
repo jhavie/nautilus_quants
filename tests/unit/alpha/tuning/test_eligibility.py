@@ -10,7 +10,10 @@ from nautilus_quants.alpha.registry.database import RegistryDatabase
 from nautilus_quants.alpha.registry.models import AnalysisMetrics, FactorRecord
 from nautilus_quants.alpha.registry.repository import FactorRepository
 from nautilus_quants.alpha.tuning.config import CandidatesConfig, EligibilityConfig
-from nautilus_quants.alpha.tuning.eligibility import filter_tune_eligible, group_eligible_by_prototype
+from nautilus_quants.alpha.tuning.eligibility import (
+    filter_tune_eligible,
+    group_eligible_by_prototype,
+)
 
 
 @pytest.fixture()
@@ -50,6 +53,7 @@ def _save_metrics(
     period: str = "4h",
     timeframe: str = "4h",
     run_id: str = "20260412_000000",
+    created_at: str = "",
 ) -> None:
     repo.save_metrics(
         [
@@ -62,6 +66,7 @@ def _save_metrics(
                 coverage=coverage,
                 n_samples=n_samples,
                 timeframe=timeframe,
+                created_at=created_at,
             )
         ]
     )
@@ -176,6 +181,73 @@ class TestFilterTuneEligible:
         cfg = CandidatesConfig(prototype="alpha044")
         report = filter_tune_eligible(repo, cfg)
         assert [f.factor_id for f in report.eligible_factors] == ["f1"]
+
+    def test_dedupes_latest_run_per_period(self, repo: FactorRepository) -> None:
+        """Regression: prior implementation accepted a factor whose newest
+        run failed because an older successful run was still in
+        ``alpha_analysis_metrics`` and got counted as a passing period.
+        """
+        _register_factor(repo, "f1", "ts_mean(close, 5)")
+        # Older run: passes all gates.
+        _save_metrics(
+            repo,
+            "f1",
+            period="4h",
+            icir=0.20,
+            coverage=0.8,
+            n_samples=5000,
+            run_id="r_old",
+            created_at="2026-04-10T00:00:00",
+        )
+        # Newest run for the same (timeframe, period): fails ICIR gate.
+        _save_metrics(
+            repo,
+            "f1",
+            period="4h",
+            icir=0.005,
+            coverage=0.8,
+            n_samples=5000,
+            run_id="r_new",
+            created_at="2026-04-13T00:00:00",
+        )
+
+        report = filter_tune_eligible(repo, CandidatesConfig())
+        # Eligibility must be driven by the most recent run per period only.
+        assert report.n_eligible == 0
+        assert report.n_low_icir == 1
+
+    def test_duplicate_runs_dont_inflate_passing_count(self, repo: FactorRepository) -> None:
+        """Regression: same (timeframe, period) saved twice must not count as
+        two passing periods (would let ``min_valid_periods=2`` pass via a
+        single passing period).
+        """
+        _register_factor(repo, "f1", "ts_mean(close, 5)")
+        # Two runs of the same period — both pass; should still count as 1.
+        _save_metrics(
+            repo,
+            "f1",
+            period="4h",
+            icir=0.20,
+            coverage=0.8,
+            n_samples=5000,
+            run_id="r1",
+            created_at="2026-04-12T00:00:00",
+        )
+        _save_metrics(
+            repo,
+            "f1",
+            period="4h",
+            icir=0.18,
+            coverage=0.8,
+            n_samples=5000,
+            run_id="r2",
+            created_at="2026-04-13T00:00:00",
+        )
+
+        cfg = CandidatesConfig(eligibility=EligibilityConfig(min_valid_periods=2))
+        report = filter_tune_eligible(repo, cfg)
+        assert report.n_eligible == 0
+        assert report.n_too_few_periods == 1
 
     def test_source_filter_narrows_scope(self, repo: FactorRepository) -> None:
         _register_factor(repo, "f1", "ts_mean(close, 5)", source="llm")

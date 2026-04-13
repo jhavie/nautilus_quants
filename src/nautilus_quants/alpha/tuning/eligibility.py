@@ -69,13 +69,31 @@ def _check_single_factor(
 ) -> EligibilityReason:
     """Decide whether one factor is worth tuning.
 
-    Accept iff at least ``cfg.min_valid_periods`` of the factor's metrics
-    rows satisfy ALL gates simultaneously: |ICIR|, |t_stat_nw|, coverage,
-    and n_samples. Cross-period rule is OR (any qualifying period passes
-    the factor) but per-period rule is AND (each candidate period must
-    clear every gate).
+    Accept iff at least ``cfg.min_valid_periods`` of the factor's *latest run
+    per (timeframe, period)* satisfy ALL gates simultaneously: |ICIR|,
+    |t_stat_nw|, coverage, and n_samples. Cross-period rule is OR (any
+    qualifying period passes the factor) but per-period rule is AND (each
+    candidate period must clear every gate).
+
+    Multiple historical runs of the same (timeframe, period) are deduped to
+    the latest one — otherwise stale-good runs would inflate
+    ``passing_periods`` above ``min_valid_periods`` even when the most
+    recent run failed.
     """
-    metrics_list = [m for m in metrics if m is not None]
+    # ``repo.get_metrics`` returns rows ordered by ``created_at DESC``, so
+    # the first occurrence of a given (timeframe, period) is the most
+    # recent run; subsequent duplicates can be ignored safely.
+    seen: set[tuple[str | None, str | None]] = set()
+    metrics_list: list[AnalysisMetrics] = []
+    for m in metrics:
+        if m is None:
+            continue
+        key = (m.timeframe, m.period)
+        if key in seen:
+            continue
+        seen.add(key)
+        metrics_list.append(m)
+
     if not metrics_list:
         return EligibilityReason(
             factor_id=factor_id,
@@ -180,11 +198,20 @@ def filter_tune_eligible(
         if "no metrics" in reason.reason:
             counts["no_metrics"] += 1
         else:
-            if reason.best_icir_abs is not None and reason.best_icir_abs < candidates.eligibility.icir_abs_min:
+            if (
+                reason.best_icir_abs is not None
+                and reason.best_icir_abs < candidates.eligibility.icir_abs_min
+            ):
                 counts["low_icir"] += 1
-            if reason.best_coverage is not None and reason.best_coverage < candidates.eligibility.coverage_min:
+            if (
+                reason.best_coverage is not None
+                and reason.best_coverage < candidates.eligibility.coverage_min
+            ):
                 counts["low_coverage"] += 1
-            if reason.max_n_samples is not None and reason.max_n_samples < candidates.eligibility.n_samples_min:
+            if (
+                reason.max_n_samples is not None
+                and reason.max_n_samples < candidates.eligibility.n_samples_min
+            ):
                 counts["low_samples"] += 1
             if reason.n_valid_periods < candidates.eligibility.min_valid_periods:
                 counts["too_few_periods"] += 1

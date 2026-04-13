@@ -25,10 +25,20 @@ import yaml
 from nautilus_quants.alpha.registry.database import RegistryDatabase
 from nautilus_quants.alpha.registry.models import FactorRecord
 from nautilus_quants.alpha.registry.repository import FactorRepository
-from nautilus_quants.alpha.tuning.config import CVConfig, DimensionsConfig, TuneConfig
+from nautilus_quants.alpha.tuning.config import (
+    ALGORITHM_GRID,
+    CVConfig,
+    DimensionsConfig,
+    TuneConfig,
+)
 from nautilus_quants.alpha.tuning.objective import build_cv_folds, compute_forward_returns_panel
 from nautilus_quants.alpha.tuning.optimizer import OptimizeInputs, optimize_factor
-from nautilus_quants.alpha.tuning.report import build_factor_dir, build_run_dir, write_factor_artefacts, write_run_summary
+from nautilus_quants.alpha.tuning.report import (
+    build_factor_dir,
+    build_run_dir,
+    write_factor_artefacts,
+    write_run_summary,
+)
 from nautilus_quants.alpha.tuning.variant_registration import register_tuned_variants
 
 # ── Test fixtures ──────────────────────────────────────────────────────────
@@ -203,3 +213,39 @@ class TestTuneEndToEnd:
         assert any(k.startswith("op_") for k in result.operator_comparison)
         any_options = any(bool(v) for v in result.operator_comparison.values())
         assert any_options, "Expected at least one operator comparison entry"
+
+    def test_grid_algorithm_smoke(self, tmp_path: Path) -> None:
+        """End-to-end regression for ``algorithm: grid``.
+
+        Pre-fix this run aborted on the very first ``trial.suggest_*`` call
+        because ``GridSampler`` was constructed with ``{}``. Now the sampler
+        receives the full numeric/op/var grid built from ``build_search_space``
+        and the study completes normally.
+        """
+        panel, close = _synthetic_panel()
+        inputs = OptimizeInputs(
+            panel_fields=panel,
+            pricing=close,
+            fwd_returns=compute_forward_returns_panel(close, 1),
+            cv_schedule=build_cv_folds(
+                len(close.index),
+                CVConfig(n_folds=2, test_ratio=0.15, holdout_ratio=0.15),
+            ),
+        )
+        config = TuneConfig(
+            algorithm=ALGORITHM_GRID,
+            trials=4,
+            register_top_k=1,
+            seed=7,
+            dimensions=DimensionsConfig(numeric=True, operators=False, variables=False),
+            cv=CVConfig(n_folds=2, test_ratio=0.15, holdout_ratio=0.15),
+            early_stop_patience=0,  # let grid traverse the search space
+        )
+
+        result = optimize_factor(
+            expression="-correlation(high, rank(volume), 5)",
+            inputs=inputs,
+            tune_config=config,
+        )
+        assert result.n_trials > 0
+        assert result.best_expression  # non-empty

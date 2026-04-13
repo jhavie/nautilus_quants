@@ -272,18 +272,83 @@ def prepare_inputs(
     )
 
 
+def _grid_choices_from_specs(
+    numeric_specs: tuple[ParamSpec, ...],
+    operator_slots: tuple[OperatorSlot, ...],
+    variable_slots: tuple[VariableSlot, ...],
+) -> dict[str, list[Any]]:
+    """Build the GridSampler search-space dict from tuning specs/slots.
+
+    Keys must mirror the ``trial.suggest_*`` names used in ``objective.py``:
+    numeric → ``ParamSpec.name`` (e.g. ``p0``); operator → ``OperatorSlot.slot_id``
+    (``op_0``); operator extras → ``"{slot_id}__{extra_name}"`` (``op_0__std_mult``);
+    variable → ``VariableSlot.slot_id`` (``var_0``).
+
+    Operator extras are listed for every alternative even when an extra is
+    only consumed by some alts — Optuna's GridSampler tolerates unused keys
+    but raises if a key is missing from the grid.
+
+    Continuous (range-based) numeric params are not enumerable for grid mode;
+    raises ``ValueError`` so the caller falls back to (or rejects) grid.
+    """
+    grid: dict[str, list[Any]] = {}
+
+    for spec in numeric_specs:
+        if not spec.is_tunable:
+            continue
+        if spec.values is None:
+            raise ValueError(
+                f"Grid algorithm requires categorical `values` for ParamSpec "
+                f"'{spec.name}', got continuous range (low/high)"
+            )
+        grid[spec.name] = [float(v) for v in spec.values]
+
+    for slot in operator_slots:
+        grid[slot.slot_id] = [alt.name for alt in slot.alternatives]
+        for alt in slot.alternatives:
+            for extra in alt.extra_params:
+                if not extra.is_tunable:
+                    continue
+                key = f"{slot.slot_id}__{extra.name}"
+                if extra.values is None:
+                    raise ValueError(
+                        f"Grid algorithm requires categorical `values` for operator "
+                        f"extra '{key}', got continuous range (low/high)"
+                    )
+                # Multiple alts may share an extra name; later assignment wins
+                # (values must agree across alts in practice, but be defensive).
+                grid[key] = [float(v) for v in extra.values]
+
+    for slot in variable_slots:
+        grid[slot.slot_id] = list(slot.alternatives)
+
+    return grid
+
+
 def _build_optuna_study(
     config: TuneConfig,
     study_name: str | None = None,
+    *,
+    grid_choices: dict[str, list[Any]] | None = None,
 ) -> "optuna.Study":
-    """Create a study honouring ``config.algorithm`` + seed."""
+    """Create a study honouring ``config.algorithm`` + seed.
+
+    For ``ALGORITHM_GRID``, ``grid_choices`` MUST cover every parameter that
+    the objective will sample — Optuna raises ``ValueError`` on the first
+    ``trial.suggest_*`` whose name is missing from the grid.
+    """
     import optuna
     from optuna.pruners import MedianPruner
     from optuna.samplers import GridSampler, TPESampler
 
     if config.algorithm == ALGORITHM_GRID:
+        if not grid_choices:
+            raise ValueError(
+                "grid algorithm requires a non-empty search space; "
+                "pass `grid_choices` derived from build_search_space()"
+            )
         sampler: optuna.samplers.BaseSampler = GridSampler(
-            {},
+            grid_choices,
             seed=config.seed,
         )
     else:
@@ -373,12 +438,20 @@ def _extract_trial_result(
     numeric = trial.user_attrs.get("numeric_values", {}) or {}
     op_choices = trial.user_attrs.get("op_choices", {}) or {}
     var_choices = trial.user_attrs.get("var_choices", {}) or {}
+    op_extras = trial.user_attrs.get("op_extras", {}) or {}
     fold_icirs = tuple(float(v) for v in trial.user_attrs.get("fold_icirs", []))
     mean_icir = float(trial.user_attrs.get("mean_icir", float("nan")))
     params: dict[str, float | str] = {}
     params.update({k: float(v) for k, v in numeric.items()})
     params.update({k: str(v) for k, v in op_choices.items()})
     params.update({k: str(v) for k, v in var_choices.items()})
+    # Flatten operator extras into the params dict using the same
+    # ``"{slot_id}__{extra_name}"`` key that ``_eval_icir_for_perturbation``
+    # consults; without this the stability perturbation falls back to default
+    # extras and ``stability_score`` no longer reflects the tuned operator.
+    for slot_id, extras in op_extras.items():
+        for extra_name, value in extras.items():
+            params[f"{slot_id}__{extra_name}"] = float(value)
     objective_value = float(trial.value) if trial.value is not None else float("nan")
     return TrialResult(
         trial_number=trial.number,
@@ -501,10 +574,17 @@ def optimize_factor(
             n_trials=0,
         )
 
-    eval_ctx = _build_evaluation_context(template, numeric_specs, operator_slots, variable_slots, inputs)
+    eval_ctx = _build_evaluation_context(
+        template, numeric_specs, operator_slots, variable_slots, inputs
+    )
     objective = create_objective(eval_ctx)
 
-    study = _build_optuna_study(tune_config, study_name=study_name)
+    grid_choices = (
+        _grid_choices_from_specs(numeric_specs, operator_slots, variable_slots)
+        if tune_config.algorithm == ALGORITHM_GRID
+        else None
+    )
+    study = _build_optuna_study(tune_config, study_name=study_name, grid_choices=grid_choices)
 
     # Convergence early-stop callback — halts the study once TPE settles
     # on a stable optimum. Disabled when ``early_stop_patience == 0``.
@@ -551,7 +631,9 @@ def optimize_factor(
         )
 
     # Rank trials by |objective| (maximise abs ICIR).
-    trial_results = [r for r in (_extract_trial_result(t, template) for t in completed_trials) if r is not None]
+    trial_results = [
+        r for r in (_extract_trial_result(t, template) for t in completed_trials) if r is not None
+    ]
     trial_results.sort(key=lambda r: r.objective_value, reverse=True)
     top_k_trials = _unique_top_k(trial_results, tune_config.register_top_k)
 
@@ -634,8 +716,12 @@ def _eval_icir_for_perturbation(
     """Rebuild the expression with perturbed numeric values but the same
     operator + variable choices, evaluate, return |mean CV ICIR|.
     """
-    op_choices = {s.slot_id: str(best_all_params.get(s.slot_id, s.current_op)) for s in operator_slots}
-    var_choices = {s.slot_id: str(best_all_params.get(s.slot_id, s.current_var)) for s in variable_slots}
+    op_choices = {
+        s.slot_id: str(best_all_params.get(s.slot_id, s.current_op)) for s in operator_slots
+    }
+    var_choices = {
+        s.slot_id: str(best_all_params.get(s.slot_id, s.current_var)) for s in variable_slots
+    }
     op_extras: dict[str, dict[str, float]] = {}
     for slot in operator_slots:
         extras: dict[str, float] = {}
