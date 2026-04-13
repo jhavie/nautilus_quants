@@ -102,8 +102,8 @@ data:
   panels_cache_dir: "/Users/joe/Sync/nautilus_quants/data/factor_cache/panels_promote"
   catalog_path: "/Users/joe/Sync/nautilus_quants/data/data_4years_4h_fr_oi/catalog"
   bar_spec: "4h"
-  # Extra data sources (FR, OI, quote_volume, btc_close, eth_close, san_fr, san_oi)
-  extra_data_path: "/Users/joe/Sync/worktrees/feature-044-sanapi-extra-data/config/cs/extra_data.yaml"
+  # Extra data sources (FR, OI, quote_volume, btc_close, eth_close, san_fr/oi/vol/social)
+  extra_data_path: "/Users/joe/Sync/worktrees/feature-045-sanapi-volume-social/config/cs/extra_data.yaml"
   # Factor config files for correlation computation
   factor_configs: []
     # - "config/alpha_batch/factors_alpha101.yaml"

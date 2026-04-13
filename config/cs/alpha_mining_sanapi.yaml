@@ -1,11 +1,16 @@
-# Alpha Factor Mining — SanAPI Sentiment (cross-exchange aggregated FR/OI)
+# Alpha Factor Mining — SanAPI (cross-exchange aggregated derivatives + attention)
 #
 # Usage:
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining_sanapi.yaml --rounds 3
 #
 # Data: 78 coins with complete FR + OI (>=2000 4h bars, 2025-04 ~ 2026-03)
-# Variables: san_funding_rate, san_open_interest + OHLCV + quote_volume + btc/eth_close
-# Focus: sentiment factors only (FR/OI derivatives signals)
+# Variables:
+#   san_funding_rate, san_open_interest    — derivatives (FR/OI)
+#   san_volume_usd, san_social_volume      — attention (cross-exchange + social)
+#   OHLCV + quote_volume + btc/eth_close   — standard
+# Directions:
+#   sentiment — FR/OI derivatives signals
+#   attention — cross-exchange volume + social signals
 
 registry:
   env: test
@@ -14,7 +19,7 @@ registry:
 
 # ── Mining settings ──
 mining:
-  source: "llm_sanapi_sentiment"
+  source: "llm_sanapi"
   factors_per_round: 8
   model: "sonnet"
   proxy: "http://127.0.0.1:8888"
@@ -25,13 +30,13 @@ mining:
   constraints:
     max_char_length: 200
     max_node_count: 30
-    max_depth: 6
+    max_depth: 8
     max_func_nesting: 4
     max_variables: 5
     max_window: 720
-    max_numeric_ratio: 0.3
+    max_numeric_ratio: 0.4
 
-  # ── Sentiment only (san_funding_rate + san_open_interest) ──
+  # ── Two directions: sentiment (derivatives) + attention (volume/social) ──
   directions:
     sentiment:
       theme: >-
@@ -40,11 +45,30 @@ mining:
         Key patterns: FR extreme reversal, FR momentum, OI expansion/contraction,
         OI-price divergence, crowded positioning signals.
         san_funding_rate: aggregated across all exchanges (decimal, 0.0001=0.01%),
-        updates every 4h bar (may repeat within 8h settlement windows).
-        san_open_interest: total open positions across all exchanges (USD).
+        native 4h granularity.
+        san_open_interest: total open positions across all exchanges (USD);
+        divide by close for token-base units (removes price co-movement).
         Can combine with OHLCV (close, volume, high, low) and
         quote_volume, btc_close, eth_close for cross-signal factors.
       tags: [sentiment, san_funding_rate, san_open_interest]
+      rounds: 3
+
+    attention:
+      theme: >-
+        Market attention factors via cross-exchange volume and social signals.
+        Explore how san_volume_usd and san_social_volume predict returns.
+        san_volume_usd: ROLLING 24h USD trading volume aggregated across all
+        exchanges, sampled every 4h (NOT a 4h bucket). Use cs_rank for
+        cross-sectional attention ranking; combine with quote_volume (Binance
+        4h bucket) for exchange-concentration / dispersion signals.
+        san_social_volume: total mentions across Twitter/Reddit/Telegram/4chan/
+        Farcaster (count). Sudden spikes often LEAD price moves. Use relative
+        change (delta/delay) or rank-of-change rather than raw counts.
+        Key patterns: social burst anticipation (delta social_volume leading
+        returns), volume-social divergence (hype without flow or vice versa),
+        exchange concentration shift (san_volume_usd vs quote_volume),
+        attention→flow transmission (corr social with volume).
+      tags: [attention, san_volume_usd, san_social_volume]
       rounds: 3
 
 # ── Charts ──

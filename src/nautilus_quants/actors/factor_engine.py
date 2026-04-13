@@ -244,8 +244,10 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         # Funding rate: cache latest rate per instrument (forward-fill)
         self._latest_funding_rates: dict[str, float] = {}
-        # Open interest: preloaded lookup {inst_id: {ts_ns: {field: val}}}
-        self._oi_lookup: dict[str, dict[int, dict[str, float]]] = {}
+        # Parquet lookups: {field_name: {inst_id: {ts_ns: {field: val}}}}
+        # Supports multiple parquet extra_data sources (e.g. open_interest,
+        # san_funding_rate, san_open_interest, san_volume_usd, ...).
+        self._parquet_lookups: dict[str, dict[str, dict[int, dict[str, float]]]] = {}
         # Bar field lookups: {field_name: {inst_id: {ts_ns: value}}}
         self._bar_field_lookups: dict[str, dict[str, dict[int, float]]] = {}
         # Broadcast configs for pre-flush injection (btc_close, eth_close, etc.)
@@ -285,8 +287,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._pending_instruments.clear()
 
         self.log.info(
-            f"Registered {len(self._engine.factor_names)} factors: "
-            f"{self._engine.factor_names}"
+            f"Registered {len(self._engine.factor_names)} factors: " f"{self._engine.factor_names}"
         )
 
         # Get bar types from injected config (required)
@@ -304,9 +305,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
         # Track expected instruments for set-complete flush detection
         self._expected_instruments = set(self._bar_type_to_inst_id.values())
-        self.log.info(
-            f"Tracking {len(self._expected_instruments)} instruments for flush sync"
-        )
+        self.log.info(f"Tracking {len(self._expected_instruments)} instruments for flush sync")
 
         # ── Unified extra data setup ──
         extra_configs = self._load_extra_data_configs(factor_config)
@@ -327,9 +326,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                 # Broadcast: flush 前 Buffer.inject_staged_field (Actor-specific)
                 self._broadcast_configs.append(cfg)
                 extra_buffer_fields.append(cfg.name)
-                self.log.info(
-                    f"Extra data '{cfg.name}': broadcast from {cfg.instruments}"
-                )
+                self.log.info(f"Extra data '{cfg.name}': broadcast from {cfg.instruments}")
             elif cfg.source in ("bar", "parquet"):
                 # bar/parquet: preload lookup via extra_data.py unified entry
                 extra_buffer_fields.append(cfg.name)
@@ -339,20 +336,17 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                         if cfg.source == "bar":
                             self._bar_field_lookups[cfg.name] = lookup
                         else:
-                            self._oi_lookup = lookup
+                            # Store per-field-name to allow multiple parquet sources
+                            self._parquet_lookups[cfg.name] = lookup
                         total = sum(len(v) for v in lookup.values())
                         self.log.info(
                             f"Extra data '{cfg.name}': preloaded "
                             f"{len(lookup)} instruments, {total} data points"
                         )
                     elif cfg.source == "bar" and not cfg.path:
-                        self.log.info(
-                            f"Extra data '{cfg.name}': bar field auto-extract"
-                        )
+                        self.log.info(f"Extra data '{cfg.name}': bar field auto-extract")
                     else:
-                        self.log.warning(
-                            f"Extra data '{cfg.name}': no data found"
-                        )
+                        self.log.warning(f"Extra data '{cfg.name}': no data found")
                 except Exception as e:
                     self.log.warning(f"Extra data '{cfg.name}' load failed: {e}")
 
@@ -379,7 +373,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             if has_cache(cache_path):
                 config_hash = compute_config_hash(factor_config)
                 valid, warnings = validate_cache(
-                    cache_path, config_hash, self._expected_instruments,
+                    cache_path,
+                    config_hash,
+                    self._expected_instruments,
                 )
                 for w in warnings:
                     self.log.warning(w)
@@ -395,9 +391,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                         self.log.warning(f"Failed to load factor cache: {e}")
                         self._cached_results = None
                 else:
-                    self.log.warning(
-                        "Factor cache config mismatch, ignoring cache"
-                    )
+                    self.log.warning("Factor cache config mismatch, ignoring cache")
             else:
                 self.log.info(
                     f"Factor cache path configured but empty, "
@@ -407,13 +401,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         # Hot-reload: set up periodic config check via Nautilus Clock Timer.
         if self._config.enable_hot_reload:
             try:
-                self._factors_mtime = Path(
-                    self._config.factor_config_path
-                ).stat().st_mtime
+                self._factors_mtime = Path(self._config.factor_config_path).stat().st_mtime
             except OSError:
-                self.log.warning(
-                    "Cannot stat factor config file, hot-reload disabled"
-                )
+                self.log.warning("Cannot stat factor config file, hot-reload disabled")
             else:
                 self.clock.set_timer(
                     name=_HOT_RELOAD_TIMER,
@@ -435,7 +425,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             return
 
         result = _try_reload_factors(
-            self._config.factor_config_path, self._factors_mtime,
+            self._config.factor_config_path,
+            self._factors_mtime,
         )
         if result is None:
             return
@@ -464,7 +455,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             self._engine.register_variable(var_name, var_expr)
         for factor in new_config.all_factors:
             self._engine.register_expression_factor(
-                factor.name, factor.expression, factor.description,
+                factor.name,
+                factor.expression,
+                factor.description,
             )
         self._factors_mtime = new_mtime
         self.log.info(
@@ -507,12 +500,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
             parquet_path = _Path(self._config.factor_cache_path) / "factors.parquet"
             if parquet_path.is_file():
-                self.cache.add(
-                    FACTOR_VALUES_CACHE_KEY, str(parquet_path).encode()
-                )
-                self.log.info(
-                    f"Factor report will read from cache: {parquet_path}"
-                )
+                self.cache.add(FACTOR_VALUES_CACHE_KEY, str(parquet_path).encode())
+                self.log.info(f"Factor report will read from cache: {parquet_path}")
         elif self._factor_snapshots:
             # First run: serialize snapshots for reports + save cache
             self._serialize_factor_snapshots()
@@ -586,11 +575,15 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if instrument_id in self._latest_funding_rates:
             bar_data["funding_rate"] = self._latest_funding_rates[instrument_id]
 
-        # Inject open interest from preloaded lookup
-        if self._oi_lookup and instrument_id in self._oi_lookup:
-            oi_data = self._oi_lookup[instrument_id].get(ts)
-            if oi_data:
-                bar_data.update(oi_data)
+        # Inject all parquet-sourced fields from preloaded lookups
+        # (open_interest, san_funding_rate, san_open_interest, ...)
+        for field_name, inst_map in self._parquet_lookups.items():
+            inst_data = inst_map.get(instrument_id)
+            if inst_data is None:
+                continue
+            ts_data = inst_data.get(ts)
+            if ts_data:
+                bar_data.update(ts_data)
 
         # Inject bar fields from preloaded parquet lookups (e.g. quote_volume)
         for field_name, lookup in self._bar_field_lookups.items():
@@ -609,14 +602,13 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             self._flush_and_publish(ts)
             self._pending_instruments.clear()
             self._pending_ts = 0
-        elif (
-            self._config.flush_timeout_secs > 0 and len(self._pending_instruments) == 1
-        ):
+        elif self._config.flush_timeout_secs > 0 and len(self._pending_instruments) == 1:
             # First instrument arrived → start one-shot timeout alert
             self._set_flush_alert(ts)
 
     def _load_extra_data_configs(
-        self, factor_config: FactorConfig | None,
+        self,
+        factor_config: FactorConfig | None,
     ) -> list[ExtraDataConfig]:
         """Load extra data configs from file or legacy fields."""
         if self._config.extra_data_path:
@@ -636,12 +628,14 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         if self._config.subscribe_funding_rates:
             configs.append(ExtraDataConfig(name="funding_rate", source="catalog"))
         if self._config.oi_data_path:
-            configs.append(ExtraDataConfig(
-                name="open_interest",
-                source="parquet",
-                path=self._config.oi_data_path,
-                timeframe=self._config.bar_spec or "4h",
-            ))
+            configs.append(
+                ExtraDataConfig(
+                    name="open_interest",
+                    source="parquet",
+                    path=self._config.oi_data_path,
+                    timeframe=self._config.bar_spec or "4h",
+                )
+            )
         return configs
 
     def on_funding_rate(self, funding_rate: FundingRateUpdate) -> None:
@@ -683,9 +677,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             for fname, fvals in results.items():
                 if fvals:
                     sorted_vals = sorted(fvals.items(), key=lambda x: x[1])
-                    vals_str = ", ".join(
-                        f"{inst}={v:.6f}" for inst, v in sorted_vals
-                    )
+                    vals_str = ", ".join(f"{inst}={v:.6f}" for inst, v in sorted_vals)
                     self.log.info(f"[{fname}] {vals_str}")
 
         # Create and publish FactorValues
@@ -719,23 +711,23 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
                     continue
                 pattern_upper = pattern.upper()
                 matched = next(
-                    (i for i in self._expected_instruments
-                     if i.upper().startswith(pattern_upper)),
+                    (i for i in self._expected_instruments if i.upper().startswith(pattern_upper)),
                     None,
                 )
                 if matched:
                     self._broadcast_resolved[cfg.name] = matched
                 else:
                     self.log.warning(
-                        f"Broadcast '{cfg.name}': instrument '{pattern}' "
-                        f"not found in universe"
+                        f"Broadcast '{cfg.name}': instrument '{pattern}' " f"not found in universe"
                     )
 
         for cfg in self._broadcast_configs:
             matched = self._broadcast_resolved.get(cfg.name)
             if matched:
                 self._engine._buffer.inject_staged_field(
-                    ts, cfg.name, matched,
+                    ts,
+                    cfg.name,
+                    matched,
                 )
 
     # -------------------------------------------------------------------------
@@ -787,9 +779,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         import pickle
 
         try:
-            self.cache.add(
-                FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots)
-            )
+            self.cache.add(FACTOR_VALUES_CACHE_KEY, pickle.dumps(self._factor_snapshots))
             self.log.info(
                 f"Cached {len(self._factor_snapshots)} factor snapshots "
                 f"({FACTOR_VALUES_CACHE_KEY})"
@@ -832,7 +822,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._cancel_flush_alert()
         self._factor_snapshots.clear()
         self._latest_funding_rates.clear()
-        self._oi_lookup.clear()
+        self._parquet_lookups.clear()
+        self._bar_field_lookups.clear()
         self.log.info("FactorEngineActor reset")
 
     # -------------------------------------------------------------------------

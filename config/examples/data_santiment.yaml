@@ -13,6 +13,8 @@ download:
   metrics:
     - funding_rate
     - total_open_interest
+    - volume_usd              # rolling 24h USD trading volume (cross-exchange aggregated)
+    - social_volume_total     # total social mentions across platforms (proprietary)
   interval: "4h"
   start_date: "2025-04-12"
   end_date: "2026-03-12"
@@ -118,9 +120,13 @@ transform:
   field_mapping:
     funding_rate: "san_funding_rate"
     total_open_interest: "san_open_interest"
+    volume_usd: "san_volume_usd"
+    social_volume_total: "san_social_volume"
   file_suffix_mapping:
     funding_rate: "san_fr"
     total_open_interest: "san_oi"
+    volume_usd: "san_vol"
+    social_volume_total: "san_social"
   venue: "BINANCE"
   timeframe: "4h"
 
