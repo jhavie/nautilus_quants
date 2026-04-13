@@ -214,7 +214,10 @@ def load_analysis_config(path: str | Path) -> AlphaAnalysisConfig:
 
     return AlphaAnalysisConfig(
         catalog_path=raw["catalog_path"],
-        factor_config_path=raw["factor_config_path"],
+        # Optional: mining configs auto-generate factors per round and don't
+        # specify this; tune reads factors from the registry, so it doesn't
+        # need a fixed factors yaml either. Default to "" so both paths work.
+        factor_config_path=raw.get("factor_config_path", ""),
         instrument_ids=raw["instrument_ids"],
         bar_spec=raw.get("bar_spec", "1h"),
         factors=raw.get("factors", []) or [],

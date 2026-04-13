@@ -1,10 +1,15 @@
 # Alpha Factor Mining Configuration
-# LLM-driven factor discovery via Claude Code CLI
+# LLM-driven factor discovery (via `alpha mine`) + parameter/operator/variable
+# tuning (via `alpha tune`). Both commands read the same YAML and write new
+# candidate factors into the `test` registry; downstream `alpha promote`
+# decides which variants migrate to `dev`.
 #
 # Usage:
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml --rounds 3
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml --hypothesis "volume divergence"
+#   python -m nautilus_quants.alpha tune config/cs/alpha_mining.yaml
+#   python -m nautilus_quants.alpha tune config/cs/alpha_mining.yaml -e "-correlation(high, rank(volume), 10)"
 
 registry:
   env: test
@@ -52,6 +57,73 @@ mining:
   #     variables: [close, volume, open_interest, funding_rate]
   #     tags: [onchain]
   #     rounds: 3
+
+# ── Tune settings (only used by `alpha tune`) ──
+# Parameter / operator / variable optimisation for already-registered factors.
+# Default disabled — flip `enabled: true` to include in a scheduled run.
+tune:
+  enabled: true
+  source: "alpha_tune"                       # source field of newly-registered variants
+  output_dir: "logs/alpha_tune"        # actual runs under output_dir/{run_id}/
+
+  # Which registered factors to tune (ANDed filters + eligibility gate).
+  candidates:
+    env: test
+    # prototype: null                 # specific prototype (e.g. "alpha044")
+    # source: null                    # e.g. "llm_claude" to tune only LLM output
+    status: candidate
+    tags: []
+    eligibility:
+      # Per-period AND gates; cross-period OR (any qualifying period passes).
+      # Tuned to skip noise but keep "potential" factors that could
+      # realistically improve 2-3x with parameter / operator search.
+      icir_abs_min: 0.05              # ↑ from 0.02 — 0.02 is essentially noise
+      t_stat_nw_abs_min: 1.5          # 1.5σ one-tailed; rules out spurious peaks
+      coverage_min: 0.30
+      n_samples_min: 1000
+      min_valid_periods: 1            # ≥2 for stricter cross-horizon consistency
+
+  # Search dimensions (start with numeric only; enable others as needed).
+  dimensions:
+    numeric: true
+    operators: false                  # outer cs_rank → cs_zscore / winsorize / ...
+    variables: false                  # high ↔ low, volume ↔ quote_volume, btc ↔ eth
+
+  # Search strategy.
+  by_prototype: true                  # tune once per prototype, not per factor
+  algorithm: "tpe"                    # "tpe" | "grid"
+  trials: 50
+  # Parallel Optuna trials per study. 4 is the sweet spot on 10+ core
+  # machines (~2.2x speedup); set to 1 for strictly reproducible runs.
+  n_jobs: 4
+  # Convergence early-stop: if this many consecutive trials sample the same
+  # parameter tuple, stop the study (TPE has converged). Set to 0 to disable.
+  early_stop_patience: 20
+  early_stop_min_trials: 30           # warm-up period before checking
+  timeout: 3600
+  seed: 42
+  register_top_k: 3                   # register top-K distinct variants per group
+
+  # Time-series cross-validation.
+  cv:
+    method: "expanding"               # "expanding" | "rolling"
+    n_folds: 3
+    test_ratio: 0.167
+    holdout_ratio: 0.167
+    gap_bars: 0
+
+  # Overfit guards.
+  stability_min: 0.5                  # warn when neighbour ICIR drops below this
+  correction_method: "bonferroni"     # "bonferroni" | "fdr_bh" | "none"
+  significance_alpha: 0.05
+
+  # Charts (empty = skip all matplotlib work for speed).
+  charts: []
+  # charts:
+  #   - optimization_history
+  #   - parameter_importance
+  #   - operator_comparison
+  #   - variable_comparison
 
 # Charts (only these 6; empty list = no charts)
 charts:

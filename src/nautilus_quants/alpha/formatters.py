@@ -548,3 +548,188 @@ def print_dedup_result(
     console.print(table)
     if dry_run:
         console.print("\n[dim]Use --execute to actually delete.[/dim]")
+
+
+# ── tune command formatters ──
+
+
+def _format_optional_float(value: float | None, precision: int = 4) -> str:
+    """Render ``None``/``NaN`` as an em-dash, numbers with the given precision."""
+    if value is None:
+        return "—"
+    try:
+        fv = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    import math
+
+    if math.isnan(fv):
+        return "—"
+    return f"{fv:+.{precision}f}" if precision > 0 else f"{fv:.{precision}f}"
+
+
+def print_tune_result(
+    tune_result,
+    *,
+    label: str | None = None,
+    registration=None,
+) -> None:
+    """Print a single ``TuneResult`` as a rich-formatted summary.
+
+    Used by ``alpha tune`` for both prototype-grouped and single-factor
+    modes. ``registration`` (a ``RegistrationSummary`` or ``None``) drives
+    the "registered variants" footer.
+    """
+    header = label or tune_result.template
+    title = Text(f"Tune result — {header}", style="bold cyan")
+    console.print(Panel(title, border_style="cyan"))
+
+    base_tbl = Table(show_header=False, box=None, pad_edge=False)
+    base_tbl.add_column(style="dim", width=20)
+    base_tbl.add_column(style="white")
+    base_tbl.add_row("template", tune_result.template)
+    base_tbl.add_row("original", tune_result.original_expression)
+    base_tbl.add_row("best", f"[green]{tune_result.best_expression}[/green]")
+    base_tbl.add_row(
+        "CV ICIR",
+        _format_optional_float(tune_result.best_icir_cv),
+    )
+    base_tbl.add_row(
+        "holdout ICIR",
+        _format_optional_float(tune_result.holdout_icir),
+    )
+    base_tbl.add_row(
+        "holdout t(NW)",
+        _format_optional_float(tune_result.holdout_t_stat_nw, precision=2),
+    )
+    base_tbl.add_row(
+        "stability",
+        _format_optional_float(tune_result.stability_score, precision=2),
+    )
+    base_tbl.add_row(
+        "adjusted p",
+        _format_optional_float(tune_result.adjusted_p_value, precision=4),
+    )
+    base_tbl.add_row(
+        "trials",
+        f"{tune_result.n_trials}  ([red]{tune_result.n_pruned} pruned[/red])",
+    )
+    console.print(base_tbl)
+
+    if tune_result.top_k:
+        top_tbl = Table(
+            title="Top variants",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        top_tbl.add_column("#", width=3, justify="right")
+        top_tbl.add_column("CV ICIR", width=10, justify="right")
+        top_tbl.add_column("Expression")
+        for i, trial in enumerate(tune_result.top_k, start=1):
+            top_tbl.add_row(
+                str(i),
+                _format_optional_float(trial.mean_icir),
+                trial.expression,
+            )
+        console.print(top_tbl)
+
+    if tune_result.param_importance:
+        imp_tbl = Table(
+            title="Parameter importance",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        imp_tbl.add_column("parameter", style="white")
+        imp_tbl.add_column("importance", justify="right", style="magenta")
+        for name, value in sorted(
+            tune_result.param_importance.items(),
+            key=lambda kv: kv[1],
+            reverse=True,
+        ):
+            imp_tbl.add_row(name, f"{value:.1%}")
+        console.print(imp_tbl)
+
+    if registration is not None:
+        console.print()
+        if registration.variants:
+            console.print(
+                f"[green]Registered {registration.n_registered} new[/green], "
+                f"[yellow]{registration.n_updated} updated[/yellow], "
+                f"[dim]{registration.n_skipped} skipped[/dim] "
+                f"(source: {tune_result.best_expression})"
+            )
+            for v in registration.variants:
+                marker = {
+                    "new": "[green]+[/green]",
+                    "updated": "[yellow]~[/yellow]",
+                    "unchanged": "[dim]=[/dim]",
+                    "skipped_duplicate": "[dim]-[/dim]",
+                }.get(v.outcome, "?")
+                console.print(f"  {marker} {v.factor_id}  ({v.outcome})")
+
+
+def print_operator_comparison(
+    operator_comparison: dict | None,
+) -> None:
+    """Render the per-slot operator comparison as a table.
+
+    Passed the ``TuneResult.operator_comparison`` dict verbatim; skips quietly
+    when operator tuning was disabled.
+    """
+    if not operator_comparison:
+        return
+    for slot_id, per_op in operator_comparison.items():
+        if not per_op:
+            continue
+        tbl = Table(
+            title=f"Operator comparison ({slot_id})",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        tbl.add_column("operator", style="white")
+        tbl.add_column("best |ICIR|", justify="right", style="magenta")
+        for name, score in sorted(per_op.items(), key=lambda kv: kv[1], reverse=True):
+            tbl.add_row(name, f"{score:+.4f}")
+        console.print(tbl)
+
+
+def print_variable_comparison(
+    variable_comparison: dict | None,
+) -> None:
+    """Render the per-slot variable comparison as a table."""
+    if not variable_comparison:
+        return
+    for slot_id, per_var in variable_comparison.items():
+        if not per_var:
+            continue
+        tbl = Table(
+            title=f"Variable comparison ({slot_id})",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        tbl.add_column("variable", style="white")
+        tbl.add_column("best |ICIR|", justify="right", style="magenta")
+        for name, score in sorted(per_var.items(), key=lambda kv: kv[1], reverse=True):
+            tbl.add_row(name, f"{score:+.4f}")
+        console.print(tbl)
+
+
+def print_eligibility_report(report) -> None:
+    """Summarise the pre-tune eligibility pass."""
+    tbl = Table(
+        title="Tune eligibility",
+        show_header=False,
+        box=None,
+        pad_edge=False,
+    )
+    tbl.add_column(style="dim", width=26)
+    tbl.add_column(style="white")
+    tbl.add_row("candidates", str(report.n_total))
+    tbl.add_row("eligible", f"[green]{report.n_eligible}[/green]")
+    tbl.add_row("rejected", f"[red]{report.n_rejected}[/red]")
+    tbl.add_row("  no metrics", str(report.n_no_metrics))
+    tbl.add_row("  |ICIR| below threshold", str(report.n_low_icir))
+    tbl.add_row("  coverage below threshold", str(report.n_low_coverage))
+    tbl.add_row("  n_samples below threshold", str(report.n_low_samples))
+    tbl.add_row("  too few valid periods", str(report.n_too_few_periods))
+    console.print(tbl)

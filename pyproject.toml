@@ -41,6 +41,7 @@ backtest = [
     "plotly>=5.18.0",
     "duckdb>=1.0.0",
     "jumpmodels",
+    "optuna>=3.0.0",
 ]
 dev = [
     "pytest>=7.0.0",
