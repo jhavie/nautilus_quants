@@ -141,13 +141,17 @@ _CONSTRUCTION_RULES = """\
 3. **Cross-sectional processing** — choose based on signal characteristics:
    | Signal type | Operator | When to use |
    |-------------|----------|-------------|
-   | Heavy tails / extreme outliers | `cs_rank(expr)` | volume ratios, OI spikes |
+   | Heavy tails / extreme outliers | `cs_rank(expr)` | volume ratios, OI spikes, social bursts |
+   | Magnitude matters (don't lose info) | `cs_zscore(expr)` | returns, FR, beta — keeps relative scale |
    | Moderate outliers | `winsorize(expr, 3)` | returns, correlation values |
    | Need market-neutral | `vector_neut(expr, btc_returns)` | any signal with BTC exposure |
+   | Demean only (preserve scale) | `cs_demean(expr)` | interaction terms, residual signals |
    | Isolate extremes only | `clip_quantile(expr, 0.1, 0.9)` | signals where middle is noise |
+   | Bounded interaction term | `scale_down(expr, 0.5)` | signal × signal products |
    | Already bounded (e.g. corr) | no wrapper needed | correlation [-1,1], ts_rank [0,1] |
    - Pick ONE outer wrapper. NEVER nest: `winsorize(cs_rank(...))` is wrong
    - Do NOT wrap with `normalize()` — the composite pipeline handles that
+   - DIVERSITY MATTERS: don't default to `cs_rank` for every factor — see Wrapper Diversity section below
 
 4. **Use diverse operators** in intermediate steps:
    - `ts_rank(x, w)` — rank in time, resistant to outliers
@@ -420,6 +424,28 @@ def build_generation_prompt(
             "## Best Factors So Far (generate variations of these)\n" + "\n".join(feedback_lines)
         )
 
+    # ── Wrapper Diversity Guidance ──
+    sections.append(
+        "## Wrapper Diversity Guidance (IMPORTANT — read before generating)\n\n"
+        "Past mining batches show >90% of factors used `cs_rank` as the outer "
+        "wrapper, while `cs_zscore`, `cs_demean`, `scale_down`, `clip_quantile` "
+        "were never tried. This monoculture creates highly correlated factors "
+        "and over-fits to rank-based noise.\n\n"
+        "**Match wrapper to signal characteristics:**\n"
+        "- Heavy-tailed (volume ratios, OI spikes, social bursts) → `cs_rank`\n"
+        "- Bounded with meaningful magnitude (returns, FR, beta, vwap dev) "
+        "→ `cs_zscore`\n"
+        "- Already in [-1,1] or [0,1] (correlation, ts_rank) → no wrapper\n"
+        "- Want middle suppressed, only tails predict → `clip_quantile(x, 0.1, 0.9)`\n"
+        "- Need market-neutral → `vector_neut(x, btc_returns)`\n"
+        "- Demean preserving scale (interaction terms) → `cs_demean(x)`\n"
+        "- Bounded interaction term → `scale_down(x, 0.5)`\n"
+        "- Moderate outlier clipping (preserves order) → `winsorize(x, 3)`\n\n"
+        "**Aim for ≤50% `cs_rank` outer wrappers** across your generated batch. "
+        "If you've already used `cs_rank` for several factors, switch to "
+        "`cs_zscore` / `cs_demean` / `winsorize` / `vector_neut` for the next.\n"
+    )
+
     # ── Factor Cutting Techniques ──
     sections.append(
         "## Factor Cutting Techniques (因子切割论)\n\n"
@@ -433,6 +459,25 @@ def build_generation_prompt(
         "High-volatility return minus low-volatility return\n"
         "- `rolling_selmean_diff(returns, funding_rate, 20, 5)` — "
         "Regime split by funding rate level\n\n"
+        "### Single-side cutting (top-only or bottom-only — when only one regime predicts):\n"
+        "- `rolling_selmean_top(returns, volume, 20, 5)` — "
+        "Mean return on the 5 highest-volume days only "
+        "(use when low-volume regime is just noise, top alone has alpha)\n"
+        "- `rolling_selmean_btm(returns, ts_std(returns, 6), 20, 5)` — "
+        "Mean return on the 5 calmest days only "
+        "(isolates low-vol regime alpha; symmetric `_diff` mixes regimes)\n"
+        "- `rolling_selmean_top(san_funding_rate, san_open_interest, 24, 6)` — "
+        "FR on the highest-OI bars (crowded long crowding signal)\n\n"
+        "### Other cutting operators (often forgotten — use these to diversify):\n"
+        "- `cs_rank(ts_max_to_min(close, 20) / replace_zero(ts_mean(close, 20)))` — "
+        "relative amplitude (range/mean), captures volatility regime\n"
+        "- `cs_zscore(diff_sign(volume, 20) * returns)` — "
+        "return signed by 'is volume above 20-bar mean' (regime-conditioned momentum)\n"
+        "- `cs_rank(ts_meanrank(returns, 20))` — "
+        "average cross-sectional rank position over 20 bars (smoothed momentum, "
+        "less noisy than instantaneous `cs_rank(returns)`)\n"
+        "- `ts_max_to_min(san_funding_rate, 24) - ts_max_to_min(san_funding_rate, 6)` — "
+        "long-window vs short-window FR amplitude divergence\n\n"
         "### if_else cutting (alternative — more flexible conditions):\n"
         "- Conditional: `if_else(cs_rank(ts_mean(volume, 6)) > 0.5, F, 0)`\n"
         "- Differential: `if_else(C, F, 0) - if_else(!C, F, 0)` "
@@ -473,6 +518,19 @@ def build_generation_prompt(
         "— turnover vs positioning ratio\n"
         "- `cs_rank(san_social_volume) - cs_rank(san_volume_usd)` "
         "— social attention premium (hype without flow)\n\n"
+        "### Wrapper variations (avoid cs_rank monoculture):\n"
+        "- `cs_zscore(returns - ts_mean(returns, 20))` "
+        "— z-score deviation, preserves magnitude (vs rank's equal-spaced compression)\n"
+        "- `cs_zscore(ts_slope(close, 20))` "
+        "— z-score trend strength (alternative to `cs_rank` for bounded signals)\n"
+        "- `cs_demean(funding_rate) * volume` "
+        "— demean before interaction (preserves scale, vs `cs_rank * cs_rank` rank-only)\n"
+        "- `winsorize(btc_beta * returns, 3)` "
+        "— winsorized beta-weighted return (alternative to `cs_rank`)\n"
+        "- `clip_quantile(funding_rate, 0.05, 0.95)` "
+        "— FR tail signal: drop middle 90%, keep extremes\n"
+        "- `cs_zscore(san_open_interest / close) - cs_zscore(volume)` "
+        "— z-score difference (vs rank difference, keeps intensity info)\n\n"
         "### Tail signal extraction:\n"
         "- `clip_quantile(correlation(returns, volume, 20), 0.1, 0.9)` "
         "— focus on extreme correlations\n"
