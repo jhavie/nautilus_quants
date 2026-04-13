@@ -50,3 +50,23 @@ san_open_interest:
   file_suffix: "san_oi"
   timeframe: "4h"
   fill: ffill
+
+# ROLLING 24h USD trading volume aggregated across exchanges, sampled every 4h.
+# NOT a 4h bucket; use cs_rank for attention ranking, not absolute volume.
+san_volume_usd:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_volume_usd"
+  file_suffix: "san_vol"
+  timeframe: "4h"
+  fill: ffill
+
+# Total social mentions across Twitter/Reddit/Telegram/4chan/Farcaster (count).
+# Proprietary signal — unique to SanAPI. Use rate-of-change rather than raw counts.
+san_social_volume:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_social_volume"
+  file_suffix: "san_social"
+  timeframe: "4h"
+  fill: ffill

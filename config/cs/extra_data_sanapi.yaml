@@ -4,6 +4,8 @@
 # Variables available in factor expressions:
 #   san_funding_rate  — aggregated funding rate (decimal, ~0.0001 = 0.01%)
 #   san_open_interest — aggregated open interest (USD)
+#   san_volume_usd    — rolling 24h USD volume aggregated across exchanges (NOT 4h bucket)
+#   san_social_volume — total social mentions across platforms (count)
 #   quote_volume      — from OHLCV bars
 #   btc_close         — BTC price broadcast to all instruments
 #   eth_close         — ETH price broadcast to all instruments
@@ -21,6 +23,22 @@ san_open_interest:
   path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
   field_name: "san_open_interest"
   file_suffix: "san_oi"
+  timeframe: "4h"
+  fill: ffill
+
+san_volume_usd:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_volume_usd"
+  file_suffix: "san_vol"
+  timeframe: "4h"
+  fill: ffill
+
+san_social_volume:
+  source: parquet
+  path: "/Users/joe/Sync/nautilus_quants/data/catalog_sanapi"
+  field_name: "san_social_volume"
+  file_suffix: "san_social"
   timeframe: "4h"
   fill: ffill
 

@@ -188,6 +188,7 @@ _AVAILABLE_VARIABLES = (
     "close, open, high, low, volume, returns, "
     "funding_rate, open_interest, quote_volume, "
     "san_funding_rate, san_open_interest, "
+    "san_volume_usd, san_social_volume, "
     "btc_close, eth_close, btc_returns, eth_returns, "
     "btc_vol, eth_vol, btc_beta, eth_beta, vwap\n"
     "- returns = delta(close,1)/delay(close,1), pre-computed\n"
@@ -196,6 +197,10 @@ _AVAILABLE_VARIABLES = (
     "- san_funding_rate = cross-exchange aggregated funding rate, native 4h\n"
     "- san_open_interest = cross-exchange aggregated open interest (USD units);\n"
     "  divide by close to get token-base units: san_open_interest / close\n"
+    "- san_volume_usd = cross-exchange ROLLING 24h trading volume (USD, sampled every 4h);\n"
+    "  NOT a 4h bucket — use cs_rank for attention ranking, or rate-of-change for surges\n"
+    "- san_social_volume = total social mentions across Twitter/Reddit/Telegram/4chan etc;\n"
+    "  sudden spikes often precede price moves — use delta/delay over raw counts\n"
     "- quote_volume = traded value in USDT (intra-bar turnover)\n"
     "- vwap = quote_volume / volume, volume-weighted average price\n"
     "- btc_close = BTC close price broadcast to all instruments\n"
@@ -323,6 +328,16 @@ def build_generation_prompt(
                 "- san_open_interest = cross-exchange aggregated OI (USD units); "
                 "use san_open_interest / close for token-base units"
             )
+        if "san_volume_usd" in variable_subset:
+            extras.append(
+                "- san_volume_usd = cross-exchange ROLLING 24h trading volume (USD, "
+                "sampled every 4h); NOT a 4h bucket, use cs_rank for attention ranking"
+            )
+        if "san_social_volume" in variable_subset:
+            extras.append(
+                "- san_social_volume = total social mentions across platforms (count); "
+                "use delta/delay rather than raw counts, spikes often lead price"
+            )
         var_block = vars_str + ("\n" + "\n".join(extras) if extras else "")
         sections.append(f"## Available Variables\n{var_block}")
     else:
@@ -447,6 +462,17 @@ def build_generation_prompt(
         "- `rank(san_funding_rate) - rank(returns(6))` — FR-return divergence\n"
         "- `cs_rank(san_funding_rate) * cs_rank(san_open_interest / close)` — "
         "crowded positioning signal\n\n"
+        "### SanAPI attention signals (exclusive cross-exchange/social data):\n"
+        "- `cs_rank(delta(san_social_volume, 6) / replace_zero(delay(san_social_volume, 6)))` "
+        "— 24h social burst (precedes price)\n"
+        "- `correlation(san_social_volume, volume, 20)` "
+        "— social-volume sync (attention translates to trading)\n"
+        "- `cs_rank(san_volume_usd) - cs_rank(quote_volume)` "
+        "— Binance-vs-aggregate volume dispersion\n"
+        "- `rank(san_volume_usd) / rank(replace_zero(san_open_interest / close))` "
+        "— turnover vs positioning ratio\n"
+        "- `cs_rank(san_social_volume) - cs_rank(san_volume_usd)` "
+        "— social attention premium (hype without flow)\n\n"
         "### Tail signal extraction:\n"
         "- `clip_quantile(correlation(returns, volume, 20), 0.1, 0.9)` "
         "— focus on extreme correlations\n"
