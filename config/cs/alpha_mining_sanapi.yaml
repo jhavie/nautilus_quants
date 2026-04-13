@@ -137,6 +137,33 @@ tune:
   correction_method: "bonferroni"
   significance_alpha: 0.05
 
+  # Forward-return horizon in **bar units**. MUST match the strategy's
+  # ``rebalance_interval`` (see config/cs/backtest.yaml) — misalignment
+  # makes tune score diverge from live PnL:
+  #   horizon = rebalance  → IC measures the exact holding-period return ✅
+  #   horizon < rebalance  → signal decays before next rebalance → tune score inflated
+  #   horizon > rebalance  → strategy exits before signal realises → tune score depressed
+  # Current pairing: bar_spec=4h × forward_horizon_bars=2 = 8h holding period,
+  # which matches rebalance_interval=2 in config/cs/backtest.yaml.
+  forward_horizon_bars: 2
+
+  # Composite objective: score = |mean_icir| + ic_mean_weight · |mean_ic|.
+  # 2026-04-13 ablation (4 factors × {w=0, w=0.5}, 8h horizon, 200 trials):
+  #   1/4 factors GAINED significance with w=0.5 (oi_surge_rank: adj_p 0.48→0.04)
+  #   2/4 factors LOST significance (san_xex_volume_premium: 0.007→0.022;
+  #        social_volume_cv: 0.146→0.477) — TPE chose high-IC but
+  #        holdout-fragile variants
+  #   1/4 factor was a tie (simple structure, ICIR/IC 100% correlated)
+  # Net contribution was NEGATIVE on this panel: here |IC|/|ICIR| ≈ 1.17
+  # (vs ~0.1 on equity data), so IC estimation noise exceeds its tie-breaker
+  # signal. Kept at 0.0 pending a more robust IC estimator (e.g. t-stat on IC,
+  # or rank-IC stability across folds). Dimensionality reference:
+  #   0.0 → pure ICIR (legacy)
+  #   0.1 → IC contributes ~10% on this panel (very light regulariser)
+  #   0.5 → IC contributes ~37% on this panel (shown harmful in ablation)
+  #   3-5 → IC dominates score
+  ic_mean_weight: 0.0
+
   charts: []
   # charts:
   #   - optimization_history

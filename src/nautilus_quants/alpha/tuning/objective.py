@@ -333,6 +333,7 @@ def create_objective(
     ctx: EvaluationContext,
     *,
     monotonicity_weight: float = 0.0,
+    ic_mean_weight: float = 0.0,
     enable_pruning: bool = True,
 ) -> Callable[["optuna.Trial"], float]:
     """Build an Optuna-compatible objective callable for the given context.
@@ -345,6 +346,10 @@ def create_objective(
     4. Computes CV-fold ICIR using ``_spearman_ic_vectorized`` and averages
        them into a single scalar — higher is better in magnitude.
     5. Reports fold-level progress for Optuna's pruner.
+
+    ``ic_mean_weight`` adds a composite IC term to the score:
+    ``score = |mean_icir| + ic_mean_weight · |mean_ic|``. See ``TuneConfig``
+    for dimensionality notes (|IC| and |ICIR| differ by ~10×).
     """
 
     import optuna
@@ -379,12 +384,15 @@ def create_objective(
         trial.set_user_attr("op_extras", {k: dict(v) for k, v in op_extras.items()})
 
         fold_icirs: list[float] = []
+        fold_ic_means: list[float] = []
         for fold in ctx.cv_schedule.folds:
             test_factor = factor_panel.iloc[fold.test_start : fold.test_end]
             test_returns = ctx.fwd_returns.iloc[fold.test_start : fold.test_end]
             ic_series = _spearman_ic_vectorized(test_factor, test_returns)
             icir = _fold_icir(ic_series)
             fold_icirs.append(icir)
+            # IC mean per fold (may be NaN if ``ic_series`` is empty).
+            fold_ic_means.append(float(ic_series.mean()) if len(ic_series) else float("nan"))
             if enable_pruning:
                 report_value = 0.0 if not np.isfinite(icir) else abs(icir)
                 trial.report(report_value, fold.fold_idx)
@@ -392,6 +400,7 @@ def create_objective(
                     raise optuna.TrialPruned()
 
         trial.set_user_attr("fold_icirs", list(fold_icirs))
+        trial.set_user_attr("fold_ic_means", list(fold_ic_means))
         finite = [v for v in fold_icirs if np.isfinite(v)]
         if not finite:
             raise optuna.TrialPruned()
@@ -403,6 +412,15 @@ def create_objective(
         # ICIR because Spearman is symmetric — strong negative ICIR factors
         # should be surfaced too, so we optimise ``|mean_icir|``.
         score = abs(mean_icir)
+        if ic_mean_weight > 0.0:
+            # Composite objective: |ICIR| + w·|IC|. |IC| is ~10× smaller than
+            # |ICIR| in practice, so ``w`` works as a light regulariser at
+            # 0.5-1.0 and as true "equal weight" only at w ≈ 3-5.
+            finite_ic = [v for v in fold_ic_means if np.isfinite(v)]
+            if finite_ic:
+                mean_ic = float(np.mean(finite_ic))
+                trial.set_user_attr("mean_ic", mean_ic)
+                score += ic_mean_weight * abs(mean_ic)
         if monotonicity_weight > 0.0:
             # Proxy for monotonicity: |IC_mean| magnitude agreement across
             # folds (tight cluster → high monotonicity). Cheap enough to

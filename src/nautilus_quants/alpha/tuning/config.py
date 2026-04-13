@@ -303,6 +303,20 @@ class TuneConfig:
     correction_method: str = CORRECTION_BONFERRONI
     significance_alpha: float = 0.05
     charts: tuple[str, ...] = ()
+    # Forward-return horizon in **bar units**. ``bar_spec="4h"`` +
+    # ``forward_horizon_bars=2`` → 8 h forward return. Default 1 preserves
+    # legacy behaviour (objective evaluated on a single-bar horizon).
+    forward_horizon_bars: int = 1
+    # Weight applied to ``|mean(IC)|`` in the composite objective.
+    # ``score = |mean_icir| + ic_mean_weight · |mean_ic|``.
+    #
+    # Dimensionality note: typical |IC| ≈ 0.01–0.05, typical |ICIR| ≈
+    # 0.10–0.30 (roughly 10× larger), so ``w=1`` gives the IC term only
+    # ~10-17 % of the score — not a 50/50 split. To make IC and ICIR
+    # truly comparable weight, use ``w ≈ 3–5``. Default 0.0 keeps the
+    # pure-ICIR behaviour; 0.5-1.0 is a sensible "light regulariser"
+    # that catches factors whose ICIR is inflated by a small std(IC).
+    ic_mean_weight: float = 0.0
 
     def __post_init__(self) -> None:
         if self.algorithm not in VALID_ALGORITHMS:
@@ -330,6 +344,14 @@ class TuneConfig:
             raise ValueError(f"stability_min must be in [0, 1], got {self.stability_min}")
         if not 0.0 < self.significance_alpha < 1.0:
             raise ValueError("significance_alpha must be in (0, 1), got " f"{self.significance_alpha}")
+        if self.forward_horizon_bars < 1:
+            raise ValueError(
+                f"forward_horizon_bars must be >= 1, got {self.forward_horizon_bars}"
+            )
+        if self.ic_mean_weight < 0.0:
+            raise ValueError(
+                f"ic_mean_weight must be >= 0, got {self.ic_mean_weight}"
+            )
 
 
 # ── Trial / result ─────────────────────────────────────────────────────────

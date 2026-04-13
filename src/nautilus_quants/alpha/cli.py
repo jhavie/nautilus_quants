@@ -2406,7 +2406,9 @@ def tune(
         bars_by_instrument,
     )
 
-    forward_returns = compute_forward_returns_panel(pricing, period_bars=1)
+    forward_returns = compute_forward_returns_panel(
+        pricing, period_bars=tune_config.forward_horizon_bars
+    )
     cv_schedule = build_cv_folds(len(pricing.index), tune_config.cv)
     inputs = OptimizeInputs(
         panel_fields=panel_fields,

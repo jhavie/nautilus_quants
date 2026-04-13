@@ -577,7 +577,7 @@ def optimize_factor(
     eval_ctx = _build_evaluation_context(
         template, numeric_specs, operator_slots, variable_slots, inputs
     )
-    objective = create_objective(eval_ctx)
+    objective = create_objective(eval_ctx, ic_mean_weight=tune_config.ic_mean_weight)
 
     grid_choices = (
         _grid_choices_from_specs(numeric_specs, operator_slots, variable_slots)

@@ -140,5 +140,7 @@ def build_tune_config(
         correction_method=str(raw.get("correction_method", CORRECTION_BONFERRONI)),
         significance_alpha=float(raw.get("significance_alpha", 0.05)),
         charts=charts,
+        forward_horizon_bars=int(raw.get("forward_horizon_bars", 1)),
+        ic_mean_weight=float(raw.get("ic_mean_weight", 0.0)),
     )
     return config

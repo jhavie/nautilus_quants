@@ -53,6 +53,20 @@ class TestBuildTuneConfig:
         assert cfg.candidates.eligibility.icir_abs_min == 0.05
         assert cfg.candidates.eligibility.coverage_min == 0.5
 
+    def test_forward_horizon_and_ic_weight_default_to_legacy(self) -> None:
+        """Missing fields default to legacy behaviour (1-bar horizon, pure ICIR)."""
+        cfg = build_tune_config({})
+        assert cfg.forward_horizon_bars == 1
+        assert cfg.ic_mean_weight == 0.0
+
+    def test_forward_horizon_and_ic_weight_parsed_from_yaml(self) -> None:
+        """YAML values feed straight through to TuneConfig."""
+        cfg = build_tune_config(
+            {"forward_horizon_bars": 2, "ic_mean_weight": 0.5}
+        )
+        assert cfg.forward_horizon_bars == 2
+        assert cfg.ic_mean_weight == 0.5
+
     def test_cli_overrides_win_over_yaml(self) -> None:
         cfg = build_tune_config(
             {"trials": 10, "dimensions": {"operators": False}},
