@@ -136,10 +136,7 @@ def analyze(
     from nautilus_quants.alpha.analysis.evaluator import FactorEvaluator
     from nautilus_quants.alpha.analysis.report import AnalysisReportGenerator
     from nautilus_quants.alpha.data_loader import CatalogDataLoader
-    from nautilus_quants.backtest.utils.reporting import (
-        create_output_directory,
-        generate_run_id,
-    )
+    from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
     from nautilus_quants.factors.config import load_factor_config
 
     start_time = time.time()
@@ -178,7 +175,9 @@ def analyze(
             click.echo(f"Loaded {loaded_count} bars across " f"{instruments_with_data} instruments")
 
         if loaded_count == 0:
-            click.echo("Error: No bar data loaded. Check catalog path and instrument IDs.", err=True)
+            click.echo(
+                "Error: No bar data loaded. Check catalog path and instrument IDs.", err=True
+            )
             sys.exit(1)
 
         # 4. Load factor config and create evaluator
@@ -263,9 +262,7 @@ def analyze(
         if registry_enabled and not force_reanalyze:
             from nautilus_quants.alpha.registry.database import RegistryDatabase
             from nautilus_quants.alpha.registry.environment import resolve_env
-            from nautilus_quants.factors.expression.normalize import (
-                expression_hash as _expr_hash,
-            )
+            from nautilus_quants.factors.expression.normalize import expression_hash as _expr_hash
 
             _env = resolve_env(env_name, config.registry_env)
             _db = RegistryDatabase.for_environment(_env, config.registry_db_dir)
@@ -304,7 +301,10 @@ def analyze(
                 return
 
         if not quiet:
-            click.echo(f"Analyzing {len(factor_series)} factors across " f"{instruments_with_data} instruments...")
+            click.echo(
+                f"Analyzing {len(factor_series)} factors across "
+                f"{instruments_with_data} instruments..."
+            )
 
         # 7. Pre-compute forward returns once (shared across all factors)
         if not quiet:
@@ -639,7 +639,9 @@ def list_factors(
 
 @cli.command()
 @click.argument("factor_id", required=False, default=None)
-@click.option("--prototype", "proto_name", default=None, help="Inspect all factors sharing this prototype.")
+@click.option(
+    "--prototype", "proto_name", default=None, help="Inspect all factors sharing this prototype."
+)
 @_ENV_OPTION
 @_DB_DIR_OPTION
 def inspect(
@@ -712,9 +714,7 @@ def p_keys_of(params: dict) -> list[str]:
 def _inspect_factor(repo, db, factor_id: str) -> None:
     """Show single factor details + metrics + backtests."""
     from nautilus_quants.alpha.formatters import print_factor_detail
-    from nautilus_quants.alpha.registry.backtest_repository import (
-        BacktestRepository,
-    )
+    from nautilus_quants.alpha.registry.backtest_repository import BacktestRepository
 
     f = repo.get_factor(factor_id)
     if f is None:
@@ -876,7 +876,9 @@ def config_cmd(
 @click.option("--context-id", default="", help="Config snapshot ID for variables/parameters.")
 @click.option("--method", default="equal", help="Composite weighting (equal/icir_weight).")
 @click.option("--top", "top_n", default=30, type=int, help="Max factors.")
-@click.option("--transform", default="normalize", help="Transform (normalize/cs_rank/cs_zscore/raw).")
+@click.option(
+    "--transform", default="normalize", help="Transform (normalize/cs_rank/cs_zscore/raw)."
+)
 @click.option("-o", "--output", "output_path", required=True, type=click.Path(path_type=Path))
 @_ENV_OPTION
 @_DB_DIR_OPTION
@@ -921,10 +923,7 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
     from nautilus_quants.alpha.analysis.config import load_analysis_config
     from nautilus_quants.alpha.analysis.evaluator import FactorEvaluator
     from nautilus_quants.alpha.data_loader import CatalogDataLoader
-    from nautilus_quants.backtest.utils.reporting import (
-        create_output_directory,
-        generate_run_id,
-    )
+    from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
     from nautilus_quants.factors.config import load_factor_config
 
     start_time = time.time()
@@ -934,7 +933,8 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
         config = load_analysis_config(config_file)
         if config.regime is None:
             click.echo(
-                "Error: No 'regime' section in config. " "Add regime: {...} to enable regime analysis.",
+                "Error: No 'regime' section in config. "
+                "Add regime: {...} to enable regime analysis.",
                 err=True,
             )
             sys.exit(1)
@@ -977,7 +977,9 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
 
         if not quiet:
             click.echo(
-                f"Loaded {loaded_count} bars across " f"{sum(1 for b in bars_by_instrument.values() if b)} " f"instruments"
+                f"Loaded {loaded_count} bars across "
+                f"{sum(1 for b in bars_by_instrument.values() if b)} "
+                f"instruments"
             )
 
         # 3. Load factors (with cache support, same as analyze)
@@ -1053,12 +1055,13 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             factor_dfs[name] = series.unstack("asset")
 
         if not quiet:
-            click.echo(f"Analyzing {len(factor_dfs)} factors " f"across {len(pricing.columns)} instruments...")
+            click.echo(
+                f"Analyzing {len(factor_dfs)} factors "
+                f"across {len(pricing.columns)} instruments..."
+            )
 
         # 6. Run comparative regime analysis
-        from nautilus_quants.alpha.regime.regime_ic_analysis import (
-            run_comparative_analysis,
-        )
+        from nautilus_quants.alpha.regime.regime_ic_analysis import run_comparative_analysis
 
         if not quiet:
             click.echo("Running regime detection and IC analysis...")
@@ -1139,9 +1142,7 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
 
             import yaml as _yaml
 
-            from nautilus_quants.alpha.regime.regime_ic_analysis import (
-                extract_regime_schedule,
-            )
+            from nautilus_quants.alpha.regime.regime_ic_analysis import extract_regime_schedule
 
             def _round_weights(
                 wm: dict[str, dict[str, float]],
@@ -1204,7 +1205,10 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             if not quiet:
                 jm_n = len(regime_data["jump_model"]["schedule"])
                 ema_n = len(regime_data["ema"]["schedule"])
-                click.echo(f"  Regime config: {config_path} " f"(JM {jm_n} transitions, EMA {ema_n} transitions)")
+                click.echo(
+                    f"  Regime config: {config_path} "
+                    f"(JM {jm_n} transitions, EMA {ema_n} transitions)"
+                )
 
         # 9. Print summary table
         duration = time.time() - start_time
@@ -1276,7 +1280,11 @@ def regime(config_file: Path, verbose: bool, quiet: bool) -> None:
             avg_jm = sum(jm_spreads) / len(jm_spreads) if jm_spreads else 0.0
             avg_ema = sum(ema_spreads) / len(ema_spreads) if ema_spreads else 0.0
             ratio = avg_jm / avg_ema if avg_ema > 0.001 else 0.0
-            click.echo(f"Average ICIR Spread: " f"JM={avg_jm:.4f}  EMA={avg_ema:.4f}  " f"(JM/EMA={ratio:.1f}x)")
+            click.echo(
+                f"Average ICIR Spread: "
+                f"JM={avg_jm:.4f}  EMA={avg_ema:.4f}  "
+                f"(JM/EMA={ratio:.1f}x)"
+            )
 
             click.echo()
             click.echo("=" * 80)
@@ -1322,10 +1330,7 @@ def promote(config_path: Path) -> None:
     """
     import warnings
 
-    from nautilus_quants.backtest.utils.reporting import (
-        create_output_directory,
-        generate_run_id,
-    )
+    from nautilus_quants.backtest.utils.reporting import create_output_directory, generate_run_id
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -1513,7 +1518,8 @@ def promote(config_path: Path) -> None:
                     click.echo()
                     if competitive:
                         click.echo(
-                            f"[dedup] Competitive greedy " f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
+                            f"[dedup] Competitive greedy "
+                            f"(max_corr≤{scoring_cfg.dedup.max_corr})...",
                         )
                         selected_ids = greedy_select(
                             df,
@@ -1587,9 +1593,7 @@ def promote(config_path: Path) -> None:
                     cluster_factors,
                     plot_cluster_heatmap,
                 )
-                from nautilus_quants.alpha.registry.repository import (
-                    FactorRepository,
-                )
+                from nautilus_quants.alpha.registry.repository import FactorRepository
 
                 # Get factor expressions from source DB
                 src_repo = FactorRepository(source_db)
@@ -1602,9 +1606,7 @@ def promote(config_path: Path) -> None:
                         factor_tags_map[fid] = rec.tags
 
                 # Build clustering config
-                from nautilus_quants.alpha.registry.clustering import (
-                    ClusterConfig,
-                )
+                from nautilus_quants.alpha.registry.clustering import ClusterConfig
 
                 cluster_cfg = ClusterConfig(
                     enabled=True,
@@ -1689,7 +1691,11 @@ def promote(config_path: Path) -> None:
 
                 n_passthrough = sum(1 for sa in super_alphas if sa.method == "passthrough")
                 n_composed = len(super_alphas) - n_passthrough
-                noise_msg = f"{len(noise)} noise discarded" if noise else f"{n_passthrough} noise passthrough"
+                noise_msg = (
+                    f"{len(noise)} noise discarded"
+                    if noise
+                    else f"{n_passthrough} noise passthrough"
+                )
                 click.echo(
                     f"  {len(super_alphas)} Super Alphas "
                     f"({n_composed} composed, {n_passthrough} passthrough), "
@@ -1697,7 +1703,8 @@ def promote(config_path: Path) -> None:
                 )
                 for sa in super_alphas:
                     click.echo(
-                        f"    {sa.name}: {len(sa.members)} members " f"[{sa.method}] tags={sa.tags}",
+                        f"    {sa.name}: {len(sa.members)} members "
+                        f"[{sa.method}] tags={sa.tags}",
                     )
             else:
                 click.echo("  Warning: No corr matrix, skipping clustering")
@@ -1710,7 +1717,9 @@ def promote(config_path: Path) -> None:
             click.echo("[orthogonalization] — SKIPPED")
         elif factor_panels is None:
             click.echo(
-                "[orthogonalization] — SKIPPED " "(factor_panels unavailable; " "re-run with dedup or clustering enabled)",
+                "[orthogonalization] — SKIPPED "
+                "(factor_panels unavailable; "
+                "re-run with dedup or clustering enabled)",
                 err=True,
             )
         else:
@@ -1718,6 +1727,7 @@ def promote(config_path: Path) -> None:
             import csv as _csv
 
             import numpy as _np
+
             from nautilus_quants.alpha.registry.orthogonalization import (
                 OrthConfig,
                 OrthResult,
@@ -1740,7 +1750,11 @@ def promote(config_path: Path) -> None:
                 # 2. Löwdin across SA composite panels
                 sa_panels: dict[str, pd.DataFrame] = {}
                 for sa in super_alphas:
-                    panels_for_sa = [typed_panels[fid] * sa.weights.get(fid, 0.0) for fid in sa.members if fid in typed_panels]
+                    panels_for_sa = [
+                        typed_panels[fid] * sa.weights.get(fid, 0.0)
+                        for fid in sa.members
+                        if fid in typed_panels
+                    ]
                     if not panels_for_sa:
                         continue
                     composite = panels_for_sa[0]
@@ -1782,7 +1796,10 @@ def promote(config_path: Path) -> None:
                         total = scores_s.sum()
                         n = len(available_ids)
                         global_weights = {
-                            fid: (float(scores_s.get(fid, 1.0 / n)) / total if total > 0 else 1.0 / n) for fid in available_ids
+                            fid: (
+                                float(scores_s.get(fid, 1.0 / n)) / total if total > 0 else 1.0 / n
+                            )
+                            for fid in available_ids
                         }
                     else:
                         n = len(available_ids)
@@ -1982,11 +1999,8 @@ def promote(config_path: Path) -> None:
 @_DB_DIR_OPTION
 def audit(env_name: str | None, db_dir: str) -> None:
     """Audit the factor registry for duplicates and prototype issues."""
-    from nautilus_quants.alpha.formatters import (
-        console as _console,
-        print_audit_duplicates,
-        print_audit_template_groups,
-    )
+    from nautilus_quants.alpha.formatters import console as _console
+    from nautilus_quants.alpha.formatters import print_audit_duplicates, print_audit_template_groups
     from nautilus_quants.alpha.registry.audit import (
         find_expression_duplicates,
         suggest_prototype_groups,
@@ -2018,9 +2032,8 @@ def backfill(execute: bool, env_name: str | None, db_dir: str) -> None:
     2. Fix prototype from builtin libraries (ta_factors.py).
     3. Extract numbers via expression_template → {p0, p1, ...} parameters.
     """
-    from nautilus_quants.alpha.registry.audit import backfill_factors
-
     from nautilus_quants.alpha.formatters import print_backfill_result
+    from nautilus_quants.alpha.registry.audit import backfill_factors
 
     dry_run = not execute
     repo, db = _open_repo(env_name, db_dir)
@@ -2049,9 +2062,8 @@ def dedup(
     db_dir: str,
 ) -> None:
     """Remove duplicate factors by expression hash."""
-    from nautilus_quants.alpha.registry.audit import dedup_factors
-
     from nautilus_quants.alpha.formatters import print_dedup_result
+    from nautilus_quants.alpha.registry.audit import dedup_factors
 
     actual_dry_run = not execute
     repo, db = _open_repo(env_name, db_dir)
@@ -2081,10 +2093,7 @@ def repair(
     (caused by LLM mining name collisions) and either splits them into
     separate factors or deletes orphaned metrics.
     """
-    from nautilus_quants.alpha.registry.audit import (
-        find_conflicting_factors,
-        repair_factors,
-    )
+    from nautilus_quants.alpha.registry.audit import find_conflicting_factors, repair_factors
 
     dry_run = not execute
     repo, db = _open_repo(env_name, db_dir)
@@ -2100,9 +2109,17 @@ def repair(
         for c in conflicts:
             n_orphans = sum(len(g.run_ids) for g in c.orphan_groups)
             total_orphan_runs += n_orphans
-            click.echo(f"  {c.factor_id} — " f"{len(c.orphan_groups)} orphan group(s), " f"{n_orphans} orphan run(s)")
+            click.echo(
+                f"  {c.factor_id} — "
+                f"{len(c.orphan_groups)} orphan group(s), "
+                f"{n_orphans} orphan run(s)"
+            )
             for g in c.orphan_groups:
-                click.echo(f"    hash={g.expression_hash[:8]}  " f"runs={len(g.run_ids)}  " f"metrics={g.metric_count}")
+                click.echo(
+                    f"    hash={g.expression_hash[:8]}  "
+                    f"runs={len(g.run_ids)}  "
+                    f"metrics={g.metric_count}"
+                )
                 click.echo(f"    expr: {g.expression[:90]}")
 
         click.echo(f"\nTotal: {len(conflicts)} factors, " f"{total_orphan_runs} orphan runs")
@@ -2116,7 +2133,9 @@ def repair(
 
         for a in actions:
             if a.action in ("split", "merge"):
-                click.echo(f"  {a.action}: {a.factor_id} → {a.new_factor_id} " f"({len(a.run_ids)} runs)")
+                click.echo(
+                    f"  {a.action}: {a.factor_id} → {a.new_factor_id} " f"({len(a.run_ids)} runs)"
+                )
             else:
                 click.echo(f"  {a.action}: {a.factor_id} — {a.detail}")
 
@@ -2135,8 +2154,12 @@ def repair(
     type=int,
     help="Factors to generate per round (default: from config or 8).",
 )
-@click.option("--model", default=None, help="Claude model (sonnet/opus, default: from config or sonnet).")
-@click.option("--hypothesis", default=None, help="Initial hypothesis direction for factor generation.")
+@click.option(
+    "--model", default=None, help="Claude model (sonnet/opus, default: from config or sonnet)."
+)
+@click.option(
+    "--hypothesis", default=None, help="Initial hypothesis direction for factor generation."
+)
 @click.option("--no-analyze", is_flag=True, help="Generate factors only, skip IC analysis.")
 def mine(
     config_file: Path,
@@ -2249,6 +2272,25 @@ def mine(
     help="Skip writing variants to the registry (dry-run).",
 )
 @click.option(
+    "--skip-already-tuned",
+    is_flag=True,
+    default=False,
+    help="Skip prototypes/factors that already have register_top_k tune "
+    "variants in the registry (identified by tag='tuned'). Useful for "
+    "resuming after a crashed batch.",
+)
+@click.option(
+    "--resume-from-dir",
+    type=click.Path(exists=True, path_type=Path, file_okay=False),
+    default=None,
+    help="Scan an earlier tune run directory and skip every prototype/factor "
+    "whose proto_NNN_{label}/registration_summary.json exists there. "
+    "More precise than --skip-already-tuned because it relies on the same "
+    "artefact write that `write_factor_artefacts` produces after a "
+    "successful register_tuned_variants call. Combine with "
+    "--skip-already-tuned for maximum safety (both filters applied).",
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -2269,6 +2311,8 @@ def tune(
     enable_operators: bool | None,
     enable_variables: bool | None,
     no_register: bool,
+    skip_already_tuned: bool,
+    resume_from_dir: Path | None,
     verbose: bool,
     env_name: str | None,
     db_dir: str,
@@ -2280,6 +2324,8 @@ def tune(
     registry. Downstream ``alpha promote`` decides which variants ship to
     ``dev``.
     """
+    import logging
+
     from nautilus_quants.alpha.analysis.config import load_analysis_config
     from nautilus_quants.alpha.analysis.evaluator import FactorEvaluator
     from nautilus_quants.alpha.data_loader import CatalogDataLoader
@@ -2290,23 +2336,14 @@ def tune(
         print_variable_comparison,
     )
     from nautilus_quants.alpha.registry.models import FactorRecord
-    from nautilus_quants.alpha.tuning.config import (
-        TrialResult,
-        TuneResult,
-    )
+    from nautilus_quants.alpha.tuning.config import TrialResult, TuneResult
     from nautilus_quants.alpha.tuning.config_loader import load_tune_config
     from nautilus_quants.alpha.tuning.eligibility import (
         filter_tune_eligible,
         group_eligible_by_prototype,
     )
-    from nautilus_quants.alpha.tuning.objective import (
-        compute_forward_returns_panel,
-        build_cv_folds,
-    )
-    from nautilus_quants.alpha.tuning.optimizer import (
-        OptimizeInputs,
-        optimize_factor,
-    )
+    from nautilus_quants.alpha.tuning.objective import build_cv_folds, compute_forward_returns_panel
+    from nautilus_quants.alpha.tuning.optimizer import OptimizeInputs, optimize_factor
     from nautilus_quants.alpha.tuning.report import (
         build_factor_dir,
         build_run_dir,
@@ -2320,6 +2357,8 @@ def tune(
     )
     from nautilus_quants.backtest.utils.reporting import generate_run_id
     from nautilus_quants.factors.config import load_factor_config
+
+    logger = logging.getLogger(__name__)
 
     start_time = time.time()
 
@@ -2509,121 +2548,205 @@ def tune(
             click.echo("No eligible factors — nothing to tune.")
             return
 
+        # Build the set of labels to skip. Union of:
+        #   --skip-already-tuned → DB-based (tag="tuned" count >= register_top_k)
+        #   --resume-from-dir    → run_dir-based (registration_summary.json exists)
+        # Both are independently applied; union is safer than intersection.
+        skip_labels: set[str] = set()
+        if skip_already_tuned:
+            from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+            _, db_skipped = filter_already_tuned(
+                report.eligible_factors,
+                repo,
+                by_prototype=tune_config.by_prototype,
+                register_top_k=tune_config.register_top_k,
+            )
+            # For by_prototype mode db_skipped holds prototype names; for
+            # by_factor mode it holds factor_ids. The loop body below uses
+            # the appropriate key when checking skip_labels.
+            skip_labels.update(db_skipped)
+            click.echo(
+                f"--skip-already-tuned: {len(db_skipped)} "
+                f"{'prototype(s)' if tune_config.by_prototype else 'factor(s)'} "
+                f"already fully tuned in DB"
+            )
+        if resume_from_dir is not None:
+            from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+            dir_skipped = labels_completed_in_dir(resume_from_dir)
+            skip_labels.update(dir_skipped)
+            click.echo(
+                f"--resume-from-dir: {len(dir_skipped)} prototype(s) with "
+                f"registration_summary.json in {resume_from_dir}"
+            )
+        if skip_labels:
+            click.echo(f"Total skip set: {len(skip_labels)} label(s) " f"(union of resume sources)")
+
         all_results: list[tuple[str, TuneResult, RegistrationSummary | None]] = []
+        failed_labels: list[str] = []
 
         if tune_config.by_prototype:
             grouped = group_eligible_by_prototype(report)
             for idx, (proto_name, group_factors) in enumerate(sorted(grouped.items()), start=1):
-                # Pick a representative: the factor with strongest existing ICIR.
-                representative = _pick_representative(repo, group_factors)
-                # Enrich panel with representative's derived variables so the
-                # expression can reference them (returns/vwap/btc_beta/...).
-                rep_panel = _enrich_panel_with_factor_variables(
-                    panel_fields,
-                    representative.variables,
-                    representative.parameters,
-                )
-                from dataclasses import replace as _replace_inputs
+                if proto_name in skip_labels:
+                    click.echo(f"[{idx}/{len(grouped)}] {proto_name}: skipped (resume)")
+                    continue
+                try:
+                    # Pick a representative: the factor with strongest existing ICIR.
+                    representative = _pick_representative(repo, group_factors)
+                    # Enrich panel with representative's derived variables so the
+                    # expression can reference them (returns/vwap/btc_beta/...).
+                    rep_panel = _enrich_panel_with_factor_variables(
+                        panel_fields,
+                        representative.variables,
+                        representative.parameters,
+                    )
+                    from dataclasses import replace as _replace_inputs
 
-                rep_inputs = _replace_inputs(inputs, panel_fields=rep_panel)
-                result = optimize_factor(
-                    expression=representative.expression,
-                    inputs=rep_inputs,
-                    tune_config=tune_config,
-                    parameters=dict(representative.parameters),
-                    available_vars=set(rep_panel.keys()),
-                    derived_vars=set(factor_config.variables.keys()),
-                )
-                registration = None
-                if not no_register:
-                    registration = register_tuned_variants(
-                        tune_result=result,
-                        source_factor=representative,
-                        repo=repo,
-                        panel_fields=rep_panel,
-                        pricing=pricing,
-                        periods=tuple(analysis_config.periods),
+                    rep_inputs = _replace_inputs(inputs, panel_fields=rep_panel)
+                    result = optimize_factor(
+                        expression=representative.expression,
+                        inputs=rep_inputs,
                         tune_config=tune_config,
-                        run_id=run_id,
-                        timeframe=analysis_config.bar_spec,
-                        quantiles=analysis_config.quantiles,
-                        filter_zscore=analysis_config.filter_zscore,
-                        max_loss=analysis_config.max_loss,
-                        output_dir=str(run_dir),
+                        parameters=dict(representative.parameters),
+                        available_vars=set(rep_panel.keys()),
+                        derived_vars=set(factor_config.variables.keys()),
                     )
+                    registration = None
+                    if not no_register:
+                        registration = register_tuned_variants(
+                            tune_result=result,
+                            source_factor=representative,
+                            repo=repo,
+                            panel_fields=rep_panel,
+                            pricing=pricing,
+                            periods=tuple(analysis_config.periods),
+                            tune_config=tune_config,
+                            run_id=run_id,
+                            timeframe=analysis_config.bar_spec,
+                            quantiles=analysis_config.quantiles,
+                            filter_zscore=analysis_config.filter_zscore,
+                            max_loss=analysis_config.max_loss,
+                            output_dir=str(run_dir),
+                        )
 
-                label = proto_name
-                if verbose:
-                    print_tune_result(result, label=label, registration=registration)
-                else:
+                    label = proto_name
+                    if verbose:
+                        print_tune_result(result, label=label, registration=registration)
+                    else:
+                        click.echo(
+                            f"[{idx}/{len(grouped)}] {proto_name}: "
+                            f"best ICIR CV={result.best_icir_cv:.4f} "
+                            f"holdout={result.holdout_icir}"
+                        )
+
+                    factor_dir = build_factor_dir(run_dir, proto_name, index=idx)
+                    write_factor_artefacts(factor_dir, result, registration)
+                    if tune_config.charts:
+                        generate_charts(factor_dir, result, tune_config.charts)
+                    all_results.append((label, result, registration))
+                except Exception as exc:  # noqa: BLE001
+                    failed_labels.append(proto_name)
                     click.echo(
-                        f"[{idx}/{len(grouped)}] {proto_name}: "
-                        f"best ICIR CV={result.best_icir_cv:.4f} "
-                        f"holdout={result.holdout_icir}"
+                        f"[{idx}/{len(grouped)}] {proto_name}: FAILED — {exc}",
+                        err=True,
                     )
-
-                factor_dir = build_factor_dir(run_dir, proto_name, index=idx)
-                write_factor_artefacts(factor_dir, result, registration)
-                if tune_config.charts:
-                    generate_charts(factor_dir, result, tune_config.charts)
-                all_results.append((label, result, registration))
+                    logger.error(
+                        "Tune failed for prototype %s: %s",
+                        proto_name,
+                        exc,
+                        exc_info=True,
+                    )
+                    continue
         else:
             for idx, factor in enumerate(report.eligible_factors, start=1):
-                # Enrich panel with this factor's derived variables.
-                f_panel = _enrich_panel_with_factor_variables(
-                    panel_fields, factor.variables, factor.parameters,
-                )
-                from dataclasses import replace as _replace_inputs
-
-                f_inputs = _replace_inputs(inputs, panel_fields=f_panel)
-                result = optimize_factor(
-                    expression=factor.expression,
-                    inputs=f_inputs,
-                    tune_config=tune_config,
-                    parameters=dict(factor.parameters),
-                    available_vars=set(f_panel.keys()),
-                    derived_vars=set(factor_config.variables.keys()),
-                )
-                registration = None
-                if not no_register:
-                    registration = register_tuned_variants(
-                        tune_result=result,
-                        source_factor=factor,
-                        repo=repo,
-                        panel_fields=f_panel,
-                        pricing=pricing,
-                        periods=tuple(analysis_config.periods),
-                        tune_config=tune_config,
-                        run_id=run_id,
-                        timeframe=analysis_config.bar_spec,
-                        quantiles=analysis_config.quantiles,
-                        filter_zscore=analysis_config.filter_zscore,
-                        max_loss=analysis_config.max_loss,
-                        output_dir=str(run_dir),
-                    )
-
-                label = factor.factor_id
-                if verbose:
-                    print_tune_result(result, label=label, registration=registration)
-                else:
+                if factor.factor_id in skip_labels:
                     click.echo(
                         f"[{idx}/{len(report.eligible_factors)}] "
-                        f"{factor.factor_id}: "
-                        f"best ICIR CV={result.best_icir_cv:.4f}"
+                        f"{factor.factor_id}: skipped (resume)"
                     )
+                    continue
+                try:
+                    # Enrich panel with this factor's derived variables.
+                    f_panel = _enrich_panel_with_factor_variables(
+                        panel_fields,
+                        factor.variables,
+                        factor.parameters,
+                    )
+                    from dataclasses import replace as _replace_inputs
 
-                factor_dir = build_factor_dir(run_dir, label)
-                write_factor_artefacts(factor_dir, result, registration)
-                if tune_config.charts:
-                    generate_charts(factor_dir, result, tune_config.charts)
-                all_results.append((label, result, registration))
+                    f_inputs = _replace_inputs(inputs, panel_fields=f_panel)
+                    result = optimize_factor(
+                        expression=factor.expression,
+                        inputs=f_inputs,
+                        tune_config=tune_config,
+                        parameters=dict(factor.parameters),
+                        available_vars=set(f_panel.keys()),
+                        derived_vars=set(factor_config.variables.keys()),
+                    )
+                    registration = None
+                    if not no_register:
+                        registration = register_tuned_variants(
+                            tune_result=result,
+                            source_factor=factor,
+                            repo=repo,
+                            panel_fields=f_panel,
+                            pricing=pricing,
+                            periods=tuple(analysis_config.periods),
+                            tune_config=tune_config,
+                            run_id=run_id,
+                            timeframe=analysis_config.bar_spec,
+                            quantiles=analysis_config.quantiles,
+                            filter_zscore=analysis_config.filter_zscore,
+                            max_loss=analysis_config.max_loss,
+                            output_dir=str(run_dir),
+                        )
+
+                    label = factor.factor_id
+                    if verbose:
+                        print_tune_result(result, label=label, registration=registration)
+                    else:
+                        click.echo(
+                            f"[{idx}/{len(report.eligible_factors)}] "
+                            f"{factor.factor_id}: "
+                            f"best ICIR CV={result.best_icir_cv:.4f}"
+                        )
+
+                    factor_dir = build_factor_dir(run_dir, label)
+                    write_factor_artefacts(factor_dir, result, registration)
+                    if tune_config.charts:
+                        generate_charts(factor_dir, result, tune_config.charts)
+                    all_results.append((label, result, registration))
+                except Exception as exc:  # noqa: BLE001
+                    failed_labels.append(factor.factor_id)
+                    click.echo(
+                        f"[{idx}/{len(report.eligible_factors)}] "
+                        f"{factor.factor_id}: FAILED — {exc}",
+                        err=True,
+                    )
+                    logger.error(
+                        "Tune failed for factor %s: %s",
+                        factor.factor_id,
+                        exc,
+                        exc_info=True,
+                    )
+                    continue
 
         write_run_summary(
             run_dir,
             tune_config=tune_config,
             results=all_results,
         )
-        click.echo(f"Done in {time.time() - start_time:.1f}s; " f"{len(all_results)} groups tuned. Artefacts in {run_dir}")
+        summary_line = (
+            f"Done in {time.time() - start_time:.1f}s; "
+            f"{len(all_results)} groups tuned. Artefacts in {run_dir}"
+        )
+        if failed_labels:
+            summary_line += f" — {len(failed_labels)} FAILED: {failed_labels[:5]}" + (
+                f" ... +{len(failed_labels) - 5} more" if len(failed_labels) > 5 else ""
+            )
+        click.echo(summary_line)
     finally:
         db.close()
 
@@ -2728,7 +2851,9 @@ def _enrich_panel_with_factor_variables(
         except Exception as exc:
             logger.warning(
                 "Variable '%s' (= '%s') failed to evaluate during tune setup: %s",
-                var_name, var_expr, exc,
+                var_name,
+                var_expr,
+                exc,
             )
     return enriched
 
