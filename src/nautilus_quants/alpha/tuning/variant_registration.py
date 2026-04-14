@@ -33,7 +33,11 @@ from typing import TYPE_CHECKING, Any, Iterable
 import pandas as pd
 
 from nautilus_quants.alpha.analysis.evaluator import run_alphalens_with_forward_returns
-from nautilus_quants.alpha.analysis.report import build_analysis_metrics, compute_all_factor_metrics, compute_ic_summary
+from nautilus_quants.alpha.analysis.report import (
+    build_analysis_metrics,
+    compute_all_factor_metrics,
+    compute_ic_summary,
+)
 from nautilus_quants.alpha.registry.models import AnalysisMetrics, FactorRecord
 from nautilus_quants.alpha.registry.repository import FactorRepository
 from nautilus_quants.alpha.tuning.config import TuneConfig, TuneResult
@@ -151,7 +155,8 @@ def _rename_period_columns(
     except (ValueError, TypeError):
         try:
             bar_td = pd.Timedelta(
-                pd.tseries.frequencies.to_offset(inferred_freq).nanos, unit="ns",
+                pd.tseries.frequencies.to_offset(inferred_freq).nanos,
+                unit="ns",
             )
         except Exception:
             return df
@@ -253,7 +258,8 @@ def analyze_variant(
         except Exception as exc:  # noqa: BLE001
             logger.debug(
                 "compute_forward_returns failed on variant '%s': %s",
-                expression, exc,
+                expression,
+                exc,
             )
             return None
 
@@ -270,15 +276,16 @@ def analyze_variant(
                 used_max_loss = attempt_max_loss
                 if attempt_max_loss != max_loss:
                     logger.warning(
-                        "Variant '%s' triggered max_loss fallback "
-                        "(retried with max_loss=1.0)",
+                        "Variant '%s' triggered max_loss fallback " "(retried with max_loss=1.0)",
                         expression,
                     )
                 break
             except Exception as exc:  # noqa: BLE001
                 logger.debug(
                     "Alphalens failed on variant '%s' at max_loss=%.2f: %s",
-                    expression, attempt_max_loss, exc,
+                    expression,
+                    attempt_max_loss,
+                    exc,
                 )
                 continue
 
@@ -313,15 +320,15 @@ def analyze_variant(
         # ICIR (e.g. 1.37 from 3 samples) that fool downstream `promote`.
         # Better to write nothing than write a misleading metric.
         FALLBACK_MIN_IC_ROWS = 100  # ~17 days of 4h bars
-        max_per_period_rows = max(
-            int(ic_df[col].notna().sum()) for col in ic_df.columns
-        )
+        max_per_period_rows = max(int(ic_df[col].notna().sum()) for col in ic_df.columns)
         if max_per_period_rows < FALLBACK_MIN_IC_ROWS:
             logger.warning(
                 "Variant '%s': fallback produced only %d valid IC rows "
                 "(< %d required); skipping registration to avoid noisy "
                 "small-sample ICIR (likely degenerate clip/normalize bounds)",
-                expression, max_per_period_rows, FALLBACK_MIN_IC_ROWS,
+                expression,
+                max_per_period_rows,
+                FALLBACK_MIN_IC_ROWS,
             )
             return None
         logger.warning(
@@ -337,26 +344,43 @@ def analyze_variant(
             n_samples=int(ic_df.notna().sum().sum()),
         )
 
-    ic_summary = compute_ic_summary(ic_df)
-    total_timestamps = len(pricing.index)
-    total_assets = len(pricing.columns)
+    # Top-level guard: a single pathological variant (e.g. sparse IC with
+    # only 1-2 valid rows per period) must not kill the whole tune batch.
+    # compute_ic_summary can raise from downstream scipy/pandas quirks we
+    # don't control; if that happens we skip registration for this variant
+    # rather than propagate the exception up to the CLI batch loop.
     try:
-        factor_metrics = compute_all_factor_metrics(
-            factor_data,
-            ic_df,
-            total_timestamps,
-            total_assets,
+        ic_summary = compute_ic_summary(ic_df)
+        total_timestamps = len(pricing.index)
+        total_assets = len(pricing.columns)
+        try:
+            factor_metrics = compute_all_factor_metrics(
+                factor_data,
+                ic_df,
+                total_timestamps,
+                total_assets,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Extended metrics failed on variant '%s': %s",
+                expression,
+                exc,
+            )
+            factor_metrics = None
+
+        return VariantAnalysis(
+            expression=expression,
+            ic_summary=ic_summary,
+            factor_metrics=factor_metrics,
+            n_samples=len(factor_data),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.debug("Extended metrics failed on variant '%s': %s", expression, exc)
-        factor_metrics = None
-
-    return VariantAnalysis(
-        expression=expression,
-        ic_summary=ic_summary,
-        factor_metrics=factor_metrics,
-        n_samples=len(factor_data),
-    )
+        logger.warning(
+            "Variant '%s': ic_summary computation failed (%s); " "skipping registration",
+            expression,
+            exc,
+        )
+        return None
 
 
 def _ic_fallback_from_forward_returns(
@@ -469,7 +493,10 @@ def register_tuned_variants(
         )
 
         # Upsert FactorRecord.
-        description = f"Tuned variant (rank {rank}) of {source_factor.factor_id} — " f"ICIR CV {trial.mean_icir:+.4f}"
+        description = (
+            f"Tuned variant (rank {rank}) of {source_factor.factor_id} — "
+            f"ICIR CV {trial.mean_icir:+.4f}"
+        )
         tags = list(dict.fromkeys([*source_factor.tags, "tuned"]))
 
         # Build parameters from the *tuned* expression so they stay in sync
@@ -480,9 +507,7 @@ def register_tuned_variants(
         # in ``alpha inspect`` and only fixed downstream by ``alpha backfill``.
         # Mirrors ``audit.backfill_factors`` so the two paths agree.
         try:
-            from nautilus_quants.factors.expression.normalize import (
-                expression_template,
-            )
+            from nautilus_quants.factors.expression.normalize import expression_template
 
             _, vals = expression_template(expression)
             extracted = {f"p{i}": float(v) for i, v in enumerate(vals)}
