@@ -89,6 +89,102 @@ mining:
       tags: [volatility, range, regime]
       rounds: 3
 
+tune:
+  enabled: true
+  source: "alpha_tune_llm_claude_diversified_ta"
+  output_dir: "logs/alpha_tune_llm_claude_diversified_ta"
+
+  # Pull only SanAPI-mined factors from the registry — avoid wasting trials on
+  # OG Bybit factors that have no SanAPI variables to substitute.
+  candidates:
+    env: test
+    source: 
+      - "llm_diversified"
+      - "llm_claude"
+    status: candidate
+    tags: []
+    eligibility:
+      # Per-period AND gates; cross-period OR (any qualifying period passes
+      # the factor). Tuned to skip noise but keep "potential" factors that
+      # could realistically improve 2-3x with parameter / operator search.
+      icir_abs_min: 0.05               # ↑ from 0.02 — 0.02 is essentially noise
+      t_stat_nw_abs_min: 1.5           # 1.5σ one-tailed; rules out spurious peaks
+      coverage_min: 0.30
+      n_samples_min: 1000              # SanAPI window is 1 yr ≈ 2190 4h bars
+      min_valid_periods: 2             # ≥1 period must clear all gates above
+
+  # 3-dim search: SanAPI variables open up rich substitution opportunities
+  # (san_funding_rate ↔ funding_rate is intentionally NOT in any group — they
+  # come from different sources / time spans, never substitutable).
+  dimensions:
+    numeric: true
+    operators: true        # cs_rank → cs_zscore / winsorize / clip_quantile
+    variables: true        # btc_close ↔ eth_close, btc_beta ↔ eth_beta, etc.
+
+  by_prototype: true
+  algorithm: "tpe"
+  trials: 200              # 3-dim search needs more trials than 1-dim
+  # Parallel Optuna trials within one study. Objective is DB-free so threads
+  # only share immutable panel data — safe without locks. 4 is the sweet spot
+  # on 10+ core machines: ~2.2x speedup, past which GIL (Python AST walk)
+  # caps returns. Set to 1 for strictly reproducible results.
+  n_jobs: 4
+  # Convergence early-stop: if this many consecutive trials sample the same
+  # parameter tuple, stop the study — TPE has converged and further trials
+  # are redundant. Set to 0 to disable. Typical saving: 30-50% trials per
+  # factor when TPE locks onto a sharp optimum.
+  early_stop_patience: 20
+  early_stop_min_trials: 30  # don't check for convergence before TPE has
+                             # explored the space (warm-up)
+  timeout: 3600
+  seed: 42
+  register_top_k: 3
+
+  cv:
+    method: "expanding"
+    n_folds: 3
+    test_ratio: 0.167      # ~60 days per fold given 1-yr SanAPI window
+    holdout_ratio: 0.167
+    gap_bars: 0
+
+  stability_min: 0.5
+  correction_method: "bonferroni"
+  significance_alpha: 0.05
+
+  # Forward-return horizon in **bar units**. MUST match the strategy's
+  # ``rebalance_interval`` (see config/cs/backtest.yaml) — misalignment
+  # makes tune score diverge from live PnL:
+  #   horizon = rebalance  → IC measures the exact holding-period return ✅
+  #   horizon < rebalance  → signal decays before next rebalance → tune score inflated
+  #   horizon > rebalance  → strategy exits before signal realises → tune score depressed
+  # Current pairing: bar_spec=4h × forward_horizon_bars=2 = 8h holding period,
+  # which matches rebalance_interval=2 in config/cs/backtest.yaml.
+  forward_horizon_bars: 2
+
+  # Composite objective: score = |mean_icir| + ic_mean_weight · |mean_ic|.
+  # 2026-04-13 ablation (4 factors × {w=0, w=0.5}, 8h horizon, 200 trials):
+  #   1/4 factors GAINED significance with w=0.5 (oi_surge_rank: adj_p 0.48→0.04)
+  #   2/4 factors LOST significance (san_xex_volume_premium: 0.007→0.022;
+  #        social_volume_cv: 0.146→0.477) — TPE chose high-IC but
+  #        holdout-fragile variants
+  #   1/4 factor was a tie (simple structure, ICIR/IC 100% correlated)
+  # Net contribution was NEGATIVE on this panel: here |IC|/|ICIR| ≈ 1.17
+  # (vs ~0.1 on equity data), so IC estimation noise exceeds its tie-breaker
+  # signal. Kept at 0.0 pending a more robust IC estimator (e.g. t-stat on IC,
+  # or rank-IC stability across folds). Dimensionality reference:
+  #   0.0 → pure ICIR (legacy)
+  #   0.1 → IC contributes ~10% on this panel (very light regulariser)
+  #   0.5 → IC contributes ~37% on this panel (shown harmful in ablation)
+  #   3-5 → IC dominates score
+  ic_mean_weight: 0.0
+
+  charts: []
+  # charts:
+  #   - optimization_history
+  #   - parameter_importance
+  #   - operator_comparison
+  #   - variable_comparison
+
 # ── Charts ──
 charts:
   - quantile_returns_bar

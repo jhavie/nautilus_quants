@@ -151,7 +151,7 @@ class FactorRepository:
     def list_factors(
         self,
         status: str | None = None,
-        source: str | None = None,
+        source: str | tuple[str, ...] | None = None,
         prototype: str | None = None,
         tag: str | None = None,
         sort_by: str = "factor_id",
@@ -165,8 +165,13 @@ class FactorRepository:
             clauses.append("status = ?")
             params.append(status)
         if source is not None:
-            clauses.append("source = ?")
-            params.append(source)
+            if isinstance(source, tuple):
+                placeholders = ",".join(["?"] * len(source))
+                clauses.append(f"source IN ({placeholders})")
+                params.extend(source)
+            else:
+                clauses.append("source = ?")
+                params.append(source)
         if prototype is not None:
             clauses.append("prototype = ?")
             params.append(prototype)

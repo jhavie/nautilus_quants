@@ -90,10 +90,17 @@ def build_tune_config(
         n_samples_min=int(eligibility_raw.get("n_samples_min", 1000)),
         min_valid_periods=int(eligibility_raw.get("min_valid_periods", 1)),
     )
+    raw_source = cand_raw.get("source")
+    if raw_source is None:
+        source: str | tuple[str, ...] | None = None
+    elif isinstance(raw_source, list):
+        source = tuple(str(s) for s in raw_source)
+    else:
+        source = str(raw_source)
     candidates = CandidatesConfig(
         env=str(cand_raw.get("env", "test")),
         prototype=cand_raw.get("prototype"),
-        source=cand_raw.get("source"),
+        source=source,
         status=cand_raw.get("status", "candidate"),
         tags=tuple(cand_raw.get("tags", []) or ()),
         eligibility=eligibility,
