@@ -62,6 +62,10 @@ class RiskModelOutput:
     factor_covariance: np.ndarray | None = None
     specific_variance: np.ndarray | None = None
     model_type: str = "statistical"
+    # Optional instrument → sector mapping, set by Fundamental model for
+    # downstream consumers (SnapshotAggregator) that want to compute
+    # sector-level exposures without re-reading portfolio.yaml.
+    sector_map: dict[str, str] | None = None
 
     @property
     def is_decomposed(self) -> bool:
@@ -115,6 +119,7 @@ def serialize_risk_output(output: RiskModelOutput) -> bytes:
             output.specific_variance.tolist() if output.specific_variance is not None else None
         ),
         "model_type": output.model_type,
+        "sector_map": dict(output.sector_map) if output.sector_map else None,
     }
     return json.dumps(payload).encode("utf-8")
 
@@ -154,4 +159,5 @@ def deserialize_risk_output(payload: bytes) -> RiskModelOutput:
             else None
         ),
         model_type=str(data.get("model_type", "statistical")),
+        sector_map=dict(data["sector_map"]) if data.get("sector_map") else None,
     )

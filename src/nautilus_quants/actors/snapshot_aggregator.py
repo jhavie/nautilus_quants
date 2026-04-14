@@ -36,11 +36,7 @@ from nautilus_trader.model.objects import Currency
 
 from nautilus_quants.execution.post_limit.state import OrderExecutionStateStore
 from nautilus_quants.factors.factor_values import FactorValues
-from nautilus_quants.portfolio.monitor.exposure import (
-    check_factor_limits,
-    check_sector_limits,
-    compute_portfolio_exposure,
-)
+from nautilus_quants.portfolio.monitor.exposure import compute_portfolio_exposure
 from nautilus_quants.portfolio.types import deserialize_risk_output
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 from nautilus_quants.utils.cache_keys import (
@@ -94,14 +90,6 @@ class SnapshotAggregatorActorConfig(ActorConfig, frozen=True):
     strategy_ids: list[str] = []
     log_directory: str = "logs"
     max_log_entries: int = 50
-    # --- Risk exposure monitoring (feature/047) ---
-    # Optional: if the pipeline includes a RiskModelActor, these map directly
-    # to portfolio.yaml constraints (factor_limits / sector_limits). Provide
-    # them here so the aggregator reports per-factor/sector breaches in
-    # snapshot:risk. Grafana reads from Redis and handles alerting.
-    risk_factor_limits: dict[str, float] | None = None
-    risk_sector_limits: dict[str, float] | None = None
-    risk_sector_map: dict[str, str] | None = None
 
 
 class SnapshotAggregatorActor(Actor):
@@ -133,15 +121,6 @@ class SnapshotAggregatorActor(Actor):
         self._log_file_path: str = ""
         self._log_file_offset: int = 0
         self._error_buffer: list[dict[str, str]] = []
-
-        # Risk monitor lazy caches (feature/047)
-        self._cached_sector_map: dict[str, str] | None = None
-        self._sector_map_fallback: dict[str, str] | None = (
-            dict(config.risk_sector_map) if config.risk_sector_map else None
-        )
-        self._cached_factor_limits: dict[str, float] | None = None
-        self._cached_sector_limits: dict[str, float] | None = None
-        self._limits_loaded: bool = False
 
     def on_start(self) -> None:
         """Subscribe to data and start snapshot timer."""
@@ -473,10 +452,15 @@ class SnapshotAggregatorActor(Actor):
         Returns None if no RiskModelActor is active (no cache payload),
         allowing the aggregator to run without portfolio/risk stack.
 
-        Exposure and breach checks use ``portfolio.monitor.exposure`` pure
-        functions. Factor-level exposure is only published when the active
-        risk model is interpretable (Fundamental / named factors); Statistical
-        (PCA) snapshots contribute only covariance diagnostics.
+        Outputs raw exposure data only — no limit-breach detection lives here.
+        Grafana reads the ``snapshot:risk`` JSON from Redis and defines its
+        own alert rules (thresholds, ratios, composite conditions), avoiding
+        duplicate alerting channels.
+
+        Sector aggregation uses ``RiskModelOutput.sector_map`` populated by
+        FundamentalRiskModel. Statistical (PCA) snapshots contribute only
+        covariance diagnostics (factor_exposures is empty because PC_i names
+        are not interpretable).
         """
         payload = self.cache.get(RISK_MODEL_STATE_CACHE_KEY)
         if payload is None:
@@ -487,10 +471,11 @@ class SnapshotAggregatorActor(Actor):
             self.log.warning(f"Failed to deserialize risk snapshot: {exc}")
             return None
 
-        # Collect current portfolio weights by equity share.
+        # Current portfolio weights by equity share (signed: long>0, short<0)
         weights = self._collect_position_weights()
+        exposure = compute_portfolio_exposure(weights, output)
 
-        snapshot: dict[str, Any] = {
+        return {
             "ts_ns": ts_wall,
             "model_type": output.model_type,
             "model_timestamp_ns": output.timestamp_ns,
@@ -499,29 +484,18 @@ class SnapshotAggregatorActor(Actor):
             "is_interpretable": output.is_interpretable,
             "is_decomposed": output.is_decomposed,
             "covariance_trace": float(output.covariance.trace()),
-            "weights_sum_abs": float(sum(abs(w) for w in weights.values())),
-            "weights_sum_net": float(sum(weights.values())),
+            # Portfolio-level statistics from compute_portfolio_exposure
+            "gross": exposure["gross"],
+            "net": exposure["net"],
+            "long": exposure["long"],
+            "short": exposure["short"],
+            # Named-factor and sector exposures (Grafana defines alert rules)
+            "factor_exposures": exposure["factor_exposures"],
+            "sector_exposures": exposure["sector_exposures"],
         }
 
-        if output.is_interpretable:
-            factor_exposures = compute_portfolio_exposure(weights, output)
-            snapshot["factor_exposures"] = factor_exposures
-
-            factor_breaches = check_factor_limits(factor_exposures, self._risk_factor_limits())
-            sector_breaches = check_sector_limits(
-                weights, self._sector_map(), self._risk_sector_limits()
-            )
-            breaches = [
-                {"kind": b.kind, "name": b.name, "limit": b.limit, "actual": b.actual}
-                for b in (factor_breaches + sector_breaches)
-            ]
-            snapshot["breaches"] = breaches
-            # Grafana reads Redis and handles alerting via its own rule engine;
-            # we intentionally do not log warnings here to avoid duplicate alerts.
-        return snapshot
-
     def _collect_position_weights(self) -> dict[str, float]:
-        """Compute current portfolio weights as fraction of equity."""
+        """Compute current portfolio weights as fraction of equity (signed)."""
         equity = compute_mtm_equity(self.portfolio, self._venue, self._currency)
         if equity is None or equity <= 0:
             return {}
@@ -536,44 +510,6 @@ class SnapshotAggregatorActor(Actor):
             signed = notional if pos.is_long else -notional
             weights[inst_id] = weights.get(inst_id, 0.0) + signed / equity
         return weights
-
-    def _sector_map(self) -> dict[str, str]:
-        """Load sector map lazily from portfolio_config (cached)."""
-        if self._cached_sector_map is not None:
-            return self._cached_sector_map
-        self._cached_sector_map = self._load_portfolio_sector_map()
-        return self._cached_sector_map
-
-    def _risk_factor_limits(self) -> dict[str, float] | None:
-        self._load_portfolio_limits()
-        return self._cached_factor_limits
-
-    def _risk_sector_limits(self) -> dict[str, float] | None:
-        self._load_portfolio_limits()
-        return self._cached_sector_limits
-
-    def _load_portfolio_sector_map(self) -> dict[str, str]:
-        """Read ``risk_model:state`` decomposition to inspect interpretability.
-
-        Portfolio.yaml isn't loaded here (aggregator shouldn't hard-depend on
-        the portfolio config path). Sector map is instead fetched indirectly
-        from the risk snapshot's factor_names (sector_ prefix convention)
-        and on-the-fly from positions. This keeps the aggregator decoupled
-        from portfolio config loading.
-        """
-        return self._sector_map_fallback or {}
-
-    def _load_portfolio_limits(self) -> None:
-        """Limits are provided via config.risk_factor_limits / risk_sector_limits.
-
-        See config extension fields on SnapshotAggregatorActorConfig.
-        """
-        if self._limits_loaded:
-            return
-        self._limits_loaded = True
-        # Read from config (already typed)
-        self._cached_factor_limits = dict(self.config.risk_factor_limits or {}) or None
-        self._cached_sector_limits = dict(self.config.risk_sector_limits or {}) or None
 
     # -------------------------------------------------------------------------
     # Health snapshot (log tail)

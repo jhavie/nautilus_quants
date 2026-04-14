@@ -1,44 +1,26 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-Portfolio exposure computation — pure functions, no side effects.
+Portfolio exposure computation — pure function, no side effects, no alerting.
 
-Used by SnapshotAggregatorActor to produce the ``snapshot:risk`` JSON
-alongside its existing 5 monitoring snapshots (venue/execution/factor/
-strategy/health). No new Actor needed — monitoring flows through the
-existing Cache → Grafana pipeline.
+Produces raw exposure data for the ``snapshot:risk`` JSON that
+SnapshotAggregatorActor writes to Nautilus Cache. Grafana reads from Redis
+and handles alerting via its own rule engine — there is intentionally no
+limit-breach check in this module.
+
+Exposure breadcrumbs (returned as plain Python dicts, Grafana-friendly):
+- factor_exposures: portfolio signed exposure per named risk factor (X' w)
+- sector_exposures: per-sector gross exposure (sum of |w_i| inside each sector)
+- gross, net, long, short: top-level portfolio statistics
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 
 from nautilus_quants.portfolio.types import RiskModelOutput
-
-
-@dataclass(frozen=True)
-class Breach:
-    """A constraint breach record for risk alerting.
-
-    Attributes
-    ----------
-    kind : str
-        "factor" | "sector" | "net" | "leverage" | "single_weight".
-    name : str
-        Specific factor or sector name (e.g. "btc_beta", "L1").
-    limit : float
-        Threshold that was exceeded.
-    actual : float
-        Observed value.
-    """
-
-    kind: str
-    name: str
-    limit: float
-    actual: float
 
 
 def _align_weights_to_instruments(
@@ -52,99 +34,58 @@ def _align_weights_to_instruments(
 def compute_portfolio_exposure(
     weights: dict[str, float],
     output: RiskModelOutput,
-) -> dict[str, float]:
-    """Compute per-factor portfolio exposure: exposure_k = X_k' w.
-
-    Only meaningful for interpretable (Fundamental) risk models. For Statistical
-    (PCA) models, factor names are synthetic ("PC_0", "PC_1", ...) and callers
-    should check ``output.is_interpretable`` before displaying or alerting.
+) -> dict[str, object]:
+    """Compute raw portfolio exposure breadcrumbs for monitoring.
 
     Parameters
     ----------
     weights : dict[str, float]
-        Current portfolio weights keyed by instrument ID.
+        Current portfolio weights keyed by instrument ID (signed: long>0, short<0).
     output : RiskModelOutput
-        Latest risk model output containing factor_exposures (N, K).
+        Latest risk model output. factor_exposures (N, K) required for
+        named-factor exposures; sector_map required for sector aggregation.
 
     Returns
     -------
-    dict[str, float]
-        Factor name → portfolio signed exposure. Empty if no decomposition.
+    dict[str, object]
+        Structure for direct JSON serialization:
+
+        ``{
+            "gross": float,           # sum(|w_i|)
+            "net": float,             # sum(w_i)
+            "long": float,            # sum(max(w_i, 0))
+            "short": float,           # sum(min(w_i, 0))
+            "factor_exposures": {factor_name: signed_exposure, ...},
+            "sector_exposures": {sector_name: gross_exposure, ...},
+        }``
+
+        ``factor_exposures`` is empty for non-interpretable (PCA) outputs;
+        ``sector_exposures`` is empty if ``output.sector_map`` is None.
     """
-    if not output.is_decomposed or output.factor_exposures is None or not output.factor_names:
-        return {}
-    w = _align_weights_to_instruments(weights, output.instruments)
-    exposures = output.factor_exposures.T @ w  # (K,) = X' w
-    return {name: float(val) for name, val in zip(output.factor_names, exposures)}
+    gross = float(sum(abs(w) for w in weights.values()))
+    net = float(sum(weights.values()))
+    long = float(sum(w for w in weights.values() if w > 0))
+    short = float(sum(w for w in weights.values() if w < 0))
 
+    factor_exposures: dict[str, float] = {}
+    if output.is_decomposed and output.factor_exposures is not None and output.factor_names:
+        w_vec = _align_weights_to_instruments(weights, output.instruments)
+        exposures = output.factor_exposures.T @ w_vec  # (K,) = X' w
+        factor_exposures = {name: float(val) for name, val in zip(output.factor_names, exposures)}
 
-def check_factor_limits(
-    exposures: dict[str, float],
-    limits: dict[str, float] | None,
-) -> list[Breach]:
-    """Detect breaches where |exposure| > limit.
+    sector_exposures: dict[str, float] = {}
+    if output.sector_map:
+        for inst, w in weights.items():
+            sector = output.sector_map.get(inst)
+            if sector is None:
+                continue
+            sector_exposures[sector] = sector_exposures.get(sector, 0.0) + abs(float(w))
 
-    Parameters
-    ----------
-    exposures : dict[str, float]
-        Factor name → signed exposure (from compute_portfolio_exposure).
-    limits : dict[str, float] | None
-        Factor name → max allowed absolute exposure. None disables all checks.
-
-    Returns
-    -------
-    list[Breach]
-        All factor breaches (empty if none or limits is None).
-    """
-    if not limits:
-        return []
-    breaches: list[Breach] = []
-    for name, value in exposures.items():
-        limit = limits.get(name)
-        if limit is None:
-            continue
-        if abs(value) > limit:
-            breaches.append(Breach(kind="factor", name=name, limit=limit, actual=value))
-    return breaches
-
-
-def check_sector_limits(
-    weights: dict[str, float],
-    sector_map: dict[str, str],
-    limits: dict[str, float] | None,
-) -> list[Breach]:
-    """Detect per-sector gross-exposure breaches.
-
-    Sector exposure is defined as sum(|w_i| for i in sector) — gross weight
-    inside the sector. Use ``limits`` like {"L1": 0.4, "DeFi": 0.3, ...}.
-
-    Parameters
-    ----------
-    weights : dict[str, float]
-        Current portfolio weights.
-    sector_map : dict[str, str]
-        Instrument ID → sector name mapping.
-    limits : dict[str, float] | None
-        Sector name → max gross exposure. None disables checks.
-
-    Returns
-    -------
-    list[Breach]
-        Sector exposure breaches.
-    """
-    if not limits:
-        return []
-    totals: dict[str, float] = {}
-    for inst, w in weights.items():
-        sector = sector_map.get(inst)
-        if sector is None:
-            continue
-        totals[sector] = totals.get(sector, 0.0) + abs(float(w))
-    breaches: list[Breach] = []
-    for sector, total in totals.items():
-        limit = limits.get(sector)
-        if limit is None:
-            continue
-        if total > limit:
-            breaches.append(Breach(kind="sector", name=sector, limit=limit, actual=total))
-    return breaches
+    return {
+        "gross": gross,
+        "net": net,
+        "long": long,
+        "short": short,
+        "factor_exposures": factor_exposures,
+        "sector_exposures": sector_exposures,
+    }

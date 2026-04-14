@@ -172,6 +172,7 @@ class FundamentalRiskModel(RiskModel):
             factor_covariance=cov_b,
             specific_variance=var_u,
             model_type="fundamental",
+            sector_map=dict(cfg.sector_map) if cfg.sector_map else None,
         )
 
     @property
