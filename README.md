@@ -214,6 +214,50 @@ python -m nautilus_quants.alpha list --env test --source llm_mining
 python -m nautilus_quants.alpha promote --source-env test --target-env dev
 ```
 
+#### Alpha Factor Tuning (Optuna)
+
+Three-dimensional search (parameters / operators / variables) over eligible
+factors pulled from the registry. Writes `register_top_k` variants per
+prototype into `test.duckdb`; downstream `alpha promote` decides which ones
+ship to `dev`.
+
+```bash
+# Tune all eligible factors (batch mode; config selects candidates + search space)
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml
+
+# Tune a single ad-hoc expression (no registry lookup)
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --expression 'ts_mean(returns, 10)' --trials 50
+
+# Tune only factors sharing one prototype
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --prototype alpha044
+
+# Dry-run (optimize + preview, no DB writes)
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --no-register -v
+
+# Resume after a crashed batch run — skip already-completed prototypes
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --resume-from-dir logs/alpha_tune_xxx/20260414_004445 \
+  --skip-already-tuned -v
+```
+
+**Resume options** (for long batches that may crash midway):
+
+- `--resume-from-dir PATH`: Skip every prototype whose
+  `proto_NNN_{label}/registration_summary.json` exists in an earlier run
+  directory. This file is only written after `register_tuned_variants`
+  returns successfully, so its presence is a precise signal of completion.
+- `--skip-already-tuned`: Skip prototypes that already have
+  `register_top_k` registered tune variants (`tag="tuned"` DB query,
+  independent of any run directory). Use together with `--resume-from-dir`
+  for maximum safety — the skip set is the **union** of both sources.
+- Both are idempotent: partially-completed prototypes (fewer variants than
+  `register_top_k`) are automatically retained so the missing ranks get
+  filled in on the next run. `find_by_expression_hash` inside
+  `register_tuned_variants` ensures no duplicate writes.
+
 ## Configuration
 
 All parameters are YAML-driven. No hardcoded values in source code.

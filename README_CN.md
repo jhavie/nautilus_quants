@@ -234,6 +234,47 @@ mining:
   output_dir: "logs/alpha_mining"
 ```
 
+#### Alpha 因子调参（Optuna）
+
+三维搜索（参数 / 算子 / 变量）优化从 registry 拉取的候选因子。每个 prototype
+写入 `register_top_k` 个变体到 `test.duckdb`；下游 `alpha promote` 决定
+哪些变体晋升到 `dev`。
+
+```bash
+# 批量调参所有 eligible 因子（batch 模式；config 决定候选和搜索空间）
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml
+
+# 调单个 ad-hoc 表达式（不走 registry）
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --expression 'ts_mean(returns, 10)' --trials 50
+
+# 只调指定 prototype 下的因子
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --prototype alpha044
+
+# Dry-run（只跑优化 + 预览,不写 DB）
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --no-register -v
+
+# 从崩溃的 batch 继续跑 — 跳过已完成的 prototype
+python -m nautilus_quants.alpha tune config/cs/alpha_mining_diversified.yaml \
+  --resume-from-dir logs/alpha_tune_xxx/20260414_004445 \
+  --skip-already-tuned -v
+```
+
+**续跑选项**（长 batch 中途崩溃时使用）：
+
+- `--resume-from-dir PATH`：扫描历史 run 目录,跳过那些
+  `proto_NNN_{label}/registration_summary.json` 已存在的 prototype。该文件
+  只在 `register_tuned_variants` 成功返回后才由 `write_factor_artefacts`
+  写出,所以它是"已完整处理"的精确证据。
+- `--skip-already-tuned`：跳过 DB 中已有 `register_top_k` 个 tune 变体的
+  prototype(按 `tag="tuned"` 查询,不依赖 run 目录)。与
+  `--resume-from-dir` 同时使用最安全 — skip 集合取两者的**并集**。
+- 两者都是幂等的:部分完成的 prototype(变体数 < `register_top_k`)会被
+  自动保留,下次运行补齐缺失的 rank;`register_tuned_variants` 里的
+  `find_by_expression_hash` 确保不会重复写入同表达式的变体。
+
 ## 配置系统
 
 所有可调参数通过 YAML 配置文件管理，源码中不允许硬编码数值。
