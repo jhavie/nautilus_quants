@@ -1,10 +1,15 @@
 # Alpha Factor Mining Configuration
-# LLM-driven factor discovery via Claude Code CLI
+# LLM-driven factor discovery (via `alpha mine`) + parameter/operator/variable
+# tuning (via `alpha tune`). Both commands read the same YAML and write new
+# candidate factors into the `test` registry; downstream `alpha promote`
+# decides which variants migrate to `dev`.
 #
 # Usage:
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml --rounds 3
 #   python -m nautilus_quants.alpha mine config/cs/alpha_mining.yaml --hypothesis "volume divergence"
+#   python -m nautilus_quants.alpha tune config/cs/alpha_mining.yaml
+#   python -m nautilus_quants.alpha tune config/cs/alpha_mining.yaml -e "-correlation(high, rank(volume), 10)"
 
 registry:
   env: test
@@ -52,6 +57,94 @@ mining:
   #     variables: [close, volume, open_interest, funding_rate]
   #     tags: [onchain]
   #     rounds: 3
+
+# ── Tune settings (only used by `alpha tune`) ──
+# Parameter / operator / variable optimisation for already-registered factors.
+# Default disabled — flip `enabled: true` to include in a scheduled run.
+tune:
+  enabled: true
+  source: "alpha_tune"                       # source field of newly-registered variants
+  output_dir: "logs/alpha_tune"        # actual runs under output_dir/{run_id}/
+
+  # Which registered factors to tune (ANDed filters + eligibility gate).
+  candidates:
+    env: test
+    # prototype: null                 # specific prototype (e.g. "alpha044")
+    # source: null                    # e.g. "llm_claude" to tune only LLM output
+    status: candidate
+    tags: []
+    eligibility:
+      # Per-period AND gates; cross-period OR (any qualifying period passes).
+      # Tuned to skip noise but keep "potential" factors that could
+      # realistically improve 2-3x with parameter / operator search.
+      icir_abs_min: 0.05              # ↑ from 0.02 — 0.02 is essentially noise
+      t_stat_nw_abs_min: 1.5          # 1.5σ one-tailed; rules out spurious peaks
+      coverage_min: 0.30
+      n_samples_min: 1000
+      min_valid_periods: 1            # ≥2 for stricter cross-horizon consistency
+
+  # Search dimensions (start with numeric only; enable others as needed).
+  dimensions:
+    numeric: true
+    operators: false                  # outer cs_rank → cs_zscore / winsorize / ...
+    variables: false                  # high ↔ low, volume ↔ quote_volume, btc ↔ eth
+
+  # Search strategy.
+  by_prototype: true                  # tune once per prototype, not per factor
+  algorithm: "tpe"                    # "tpe" | "grid"
+  trials: 50
+  # Parallel Optuna trials per study. 4 is the sweet spot on 10+ core
+  # machines (~2.2x speedup); set to 1 for strictly reproducible runs.
+  n_jobs: 4
+  # Convergence early-stop: if this many consecutive trials sample the same
+  # parameter tuple, stop the study (TPE has converged). Set to 0 to disable.
+  early_stop_patience: 20
+  early_stop_min_trials: 30           # warm-up period before checking
+  timeout: 3600
+  seed: 42
+  register_top_k: 3                   # register top-K distinct variants per group
+
+  # Time-series cross-validation.
+  cv:
+    method: "expanding"               # "expanding" | "rolling"
+    n_folds: 3
+    test_ratio: 0.167
+    holdout_ratio: 0.167
+    gap_bars: 0
+
+  # Overfit guards.
+  stability_min: 0.5                  # warn when neighbour ICIR drops below this
+  correction_method: "bonferroni"     # "bonferroni" | "fdr_bh" | "none"
+  significance_alpha: 0.05
+
+  # Forward-return horizon in **bar units**. MUST match the strategy's
+  # ``rebalance_interval`` (see config/cs/backtest.yaml) — misalignment
+  # makes tune score diverge from live PnL:
+  #   horizon = rebalance  → IC measures the exact holding-period return ✅
+  #   horizon < rebalance  → signal decays before next rebalance → tune score inflated
+  #   horizon > rebalance  → strategy exits before signal realises → tune score depressed
+  # Current pairing: bar_spec=4h × forward_horizon_bars=2 = 8h holding period,
+  # which matches rebalance_interval=2 in config/cs/backtest.yaml.
+  forward_horizon_bars: 2
+
+  # Composite objective: score = |mean_icir| + ic_mean_weight · |mean_ic|.
+  # 2026-04-13 ablation on SanAPI panel (4 factors × {w=0, w=0.5}, 200 trials):
+  # net contribution was NEGATIVE — 2/4 factors saw adj_p get worse, only
+  # 1/4 improved. On this panel |IC|/|ICIR| ≈ 1.17 (vs ~0.1 on equity data),
+  # so IC noise overwhelms its tie-breaker signal. Kept at 0.0 until a more
+  # robust IC estimator (e.g. t-stat on IC, fold-level stability) is in place.
+  #   0.0 → pure ICIR (default / legacy)
+  #   0.1 → IC contributes ~10% on this panel (very light regulariser)
+  #   0.5 → IC contributes ~37% on this panel (shown harmful in ablation)
+  ic_mean_weight: 0.0
+
+  # Charts (empty = skip all matplotlib work for speed).
+  charts: []
+  # charts:
+  #   - optimization_history
+  #   - parameter_importance
+  #   - operator_comparison
+  #   - variable_comparison
 
 # Charts (only these 6; empty list = no charts)
 charts:
