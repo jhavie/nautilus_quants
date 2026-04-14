@@ -74,34 +74,22 @@ class PolicySectionConfig:
 
 
 @dataclass(frozen=True)
-class MonitorSectionConfig:
-    """Parsed ``monitor`` section — exposure reporting config.
-
-    Attributes
-    ----------
-    enabled : bool
-        Whether SnapshotAggregator writes ``snapshot:risk``.
-    alert_on_breach : bool
-        Log a warning when any factor/sector limit is breached.
-    """
-
-    enabled: bool = True
-    alert_on_breach: bool = True
-
-
-@dataclass(frozen=True)
 class PortfolioConfig:
     """Top-level parsed portfolio.yaml.
 
     Loaded once at actor startup; all runtime parameters accessible as
     typed fields. No hidden defaults (per Constitution II).
+
+    Note: risk exposure monitoring is not configured here. The existing
+    SnapshotAggregatorActor writes ``snapshot:risk`` automatically whenever
+    ``risk_model:state`` is present in the cache, and Grafana reads from
+    Redis for alerting (no code-level gate needed).
     """
 
     risk_model: RiskModelSectionConfig
     optimizer: MeanVarianceConfig
     constraints: OptimizerConstraints
     policy: PolicySectionConfig
-    monitor: MonitorSectionConfig
 
 
 def _parse_statistical(data: dict[str, Any]) -> StatisticalModelConfig:
@@ -196,13 +184,6 @@ def _parse_policy_section(data: dict[str, Any]) -> PolicySectionConfig:
     )
 
 
-def _parse_monitor_section(data: dict[str, Any]) -> MonitorSectionConfig:
-    return MonitorSectionConfig(
-        enabled=bool(data.get("enabled", True)),
-        alert_on_breach=bool(data.get("alert_on_breach", True)),
-    )
-
-
 def load_portfolio_config(path: str | Path) -> PortfolioConfig:
     """Load and parse portfolio.yaml into typed config dataclasses.
 
@@ -242,7 +223,6 @@ def load_portfolio_config(path: str | Path) -> PortfolioConfig:
         optimizer=_parse_optimizer_section(raw.get("optimizer", {})),
         constraints=_parse_constraints_section(raw.get("constraints", {})),
         policy=_parse_policy_section(raw.get("policy", {})),
-        monitor=_parse_monitor_section(raw.get("monitor", {})),
     )
 
 

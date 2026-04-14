@@ -84,7 +84,7 @@ engine:
       config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
       config:
         portfolio_config_path: "config/portfolio/portfolio.yaml"
-        update_interval_bars: 6       # daily recompute at 4h bars
+        update_interval_bars: 2       # daily recompute at 4h bars
         returns_variable: "returns"   # defined in factors_alpha101.yaml
 
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"

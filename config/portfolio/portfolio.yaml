@@ -117,10 +117,7 @@ policy:
   # positions unchanged. There is no fallback policy by design.
   max_snapshot_age_ns: 86_400_000_000_000
 
-
-monitor:
-  # Whether SnapshotAggregatorActor writes `snapshot:risk` JSON for Grafana
-  enabled: true
-
-  # Log a WARNING when any factor_limits or sector_limits is breached
-  alert_on_breach: true
+# NOTE: No `monitor:` section — risk exposure monitoring is handled by the
+# existing SnapshotAggregatorActor, which automatically writes `snapshot:risk`
+# to the cache whenever `risk_model:state` is present. Grafana reads from
+# Redis and handles alerting via its own rule engine.

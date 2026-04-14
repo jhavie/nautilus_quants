@@ -97,11 +97,11 @@ class SnapshotAggregatorActorConfig(ActorConfig, frozen=True):
     # --- Risk exposure monitoring (feature/047) ---
     # Optional: if the pipeline includes a RiskModelActor, these map directly
     # to portfolio.yaml constraints (factor_limits / sector_limits). Provide
-    # them here so the aggregator can flag breaches independently.
+    # them here so the aggregator reports per-factor/sector breaches in
+    # snapshot:risk. Grafana reads from Redis and handles alerting.
     risk_factor_limits: dict[str, float] | None = None
     risk_sector_limits: dict[str, float] | None = None
     risk_sector_map: dict[str, str] | None = None
-    risk_alert_on_breach: bool = True
 
 
 class SnapshotAggregatorActor(Actor):
@@ -142,7 +142,6 @@ class SnapshotAggregatorActor(Actor):
         self._cached_factor_limits: dict[str, float] | None = None
         self._cached_sector_limits: dict[str, float] | None = None
         self._limits_loaded: bool = False
-        self._risk_alert_on_breach: bool = config.risk_alert_on_breach
 
     def on_start(self) -> None:
         """Subscribe to data and start snapshot timer."""
@@ -517,9 +516,8 @@ class SnapshotAggregatorActor(Actor):
                 for b in (factor_breaches + sector_breaches)
             ]
             snapshot["breaches"] = breaches
-
-            if breaches and self._risk_alert_on_breach:
-                self.log.warning(f"Risk breach detected: {len(breaches)} limit(s) exceeded")
+            # Grafana reads Redis and handles alerting via its own rule engine;
+            # we intentionally do not log warnings here to avoid duplicate alerts.
         return snapshot
 
     def _collect_position_weights(self) -> dict[str, float]:
