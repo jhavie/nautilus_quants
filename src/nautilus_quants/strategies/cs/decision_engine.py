@@ -57,41 +57,6 @@ _SELECTION_POLICIES: dict[str, type] = {
 }
 
 
-def _build_basic_selection_policy(
-    config: DecisionEngineActorConfig,
-) -> SelectionPolicy:
-    """Build non-Optimized selection policies (no cache dependency).
-
-    OptimizedSelectionPolicy requires self.cache and is built inside
-    DecisionEngineActor.on_start() instead.
-    """
-    policy_name = config.selection_policy
-    if policy_name == "TopKDropoutSelectionPolicy":
-        for field in ("topk_long", "topk_short", "n_drop_long", "n_drop_short"):
-            if getattr(config, field) is None:
-                raise ValueError(f"{field} required for TopKDropoutSelectionPolicy")
-        return TopKDropoutSelectionPolicy(
-            config.topk_long,  # type: ignore[arg-type]
-            config.topk_short,  # type: ignore[arg-type]
-            config.n_drop_long,  # type: ignore[arg-type]
-            config.n_drop_short,  # type: ignore[arg-type]
-        )
-    if policy_name == "WorldQuantSelectionPolicy":
-        return WorldQuantSelectionPolicy(
-            delay=config.delay,
-            decay=config.decay,
-            neutralization=config.neutralization,
-            truncation=config.truncation,
-            enable_long=config.enable_long,
-            enable_short=config.enable_short,
-        )
-    if policy_name == "FMZSelectionPolicy":
-        return FMZSelectionPolicy(config.n_long, config.n_short)
-    raise ValueError(
-        f"Unknown selection_policy: {policy_name}. " f"Available: {list(_SELECTION_POLICIES)}"
-    )
-
-
 class DecisionEngineActor(Actor):
     """
     Decision engine: FactorValues → RebalanceOrders.
@@ -105,19 +70,20 @@ class DecisionEngineActor(Actor):
         super().__init__(config)
         self._signal_count: int = 0
         self._bars_until_rebalance: int = 0
-        # OptimizedSelectionPolicy requires self.cache (available only after
-        # registration), so we defer it to on_start(). Other policies are safe
-        # to build eagerly here.
-        if config.selection_policy == "OptimizedSelectionPolicy":
-            self._selection_policy: SelectionPolicy | None = None  # type: ignore[assignment]
-        else:
-            self._selection_policy = _build_basic_selection_policy(config)
+        # OptimizedSelectionPolicy needs cache/clock from the Actor lifecycle;
+        # _build_selection_policy returns None for that case and we retry in
+        # on_start once self.cache / self.clock are available.
+        self._selection_policy: SelectionPolicy | None = self._build_selection_policy(config)
 
     def on_start(self) -> None:
         """Subscribe to FactorValues on start (and late-bind Optimized policy)."""
-        # Late-bind OptimizedSelectionPolicy now that self.cache is available.
+        # Late-bind OptimizedSelectionPolicy now that cache/clock are available.
         if self._selection_policy is None:
-            self._selection_policy = self._build_optimized_policy(self.config)
+            self._selection_policy = self._build_selection_policy(
+                self.config,
+                cache=self.cache,
+                clock=self.clock,
+            )
 
         self.subscribe_data(DataType(FactorValues), client_id=ClientId(self.id.value))
         policy_name = self.config.selection_policy
@@ -143,36 +109,66 @@ class DecisionEngineActor(Actor):
         }
         self.cache.add(STRATEGY_CONFIG_CACHE_KEY, json.dumps(config_meta).encode())
 
-    def _build_optimized_policy(
-        self,
+    @staticmethod
+    def _build_selection_policy(
         config: DecisionEngineActorConfig,
-    ) -> SelectionPolicy:
-        """Construct OptimizedSelectionPolicy with self.cache (on_start hook).
+        cache: Any = None,
+        clock: Any = None,
+    ) -> SelectionPolicy | None:
+        """Construct the configured selection policy.
 
-        Reads portfolio.yaml via optimized_portfolio_config_path, builds the
-        optimizer, and passes self.cache so the policy can read
-        RISK_MODEL_STATE_CACHE_KEY written by RiskModelActor.
-
-        On snapshot missing/stale/infeasible, the policy returns None and
-        DecisionEngineActor holds current positions unchanged (no fallback).
+        Single builder for all policy types. Non-Optimized policies have no
+        Actor-lifecycle dependencies and are built eagerly in ``__init__``.
+        ``OptimizedSelectionPolicy`` needs ``cache`` (for risk snapshot reads)
+        and ``clock`` (for staleness checks); when those are ``None`` the
+        method returns ``None`` so the caller can retry from ``on_start``.
         """
-        from nautilus_quants.portfolio.config import build_optimizer, load_portfolio_config
-
-        if not config.optimized_portfolio_config_path:
-            raise ValueError(
-                "optimized_portfolio_config_path required for OptimizedSelectionPolicy"
+        policy_name = config.selection_policy
+        if policy_name == "TopKDropoutSelectionPolicy":
+            for field in ("topk_long", "topk_short", "n_drop_long", "n_drop_short"):
+                if getattr(config, field) is None:
+                    raise ValueError(f"{field} required for TopKDropoutSelectionPolicy")
+            return TopKDropoutSelectionPolicy(
+                config.topk_long,  # type: ignore[arg-type]
+                config.topk_short,  # type: ignore[arg-type]
+                config.n_drop_long,  # type: ignore[arg-type]
+                config.n_drop_short,  # type: ignore[arg-type]
             )
-        portfolio_cfg = load_portfolio_config(config.optimized_portfolio_config_path)
-        optimizer = build_optimizer(portfolio_cfg.optimizer)
+        if policy_name == "WorldQuantSelectionPolicy":
+            return WorldQuantSelectionPolicy(
+                delay=config.delay,
+                decay=config.decay,
+                neutralization=config.neutralization,
+                truncation=config.truncation,
+                enable_long=config.enable_long,
+                enable_short=config.enable_short,
+            )
+        if policy_name == "FMZSelectionPolicy":
+            return FMZSelectionPolicy(config.n_long, config.n_short)
+        if policy_name == "OptimizedSelectionPolicy":
+            if cache is None:
+                return None  # defer to on_start
+            from nautilus_quants.portfolio.config import (
+                build_optimizer,
+                load_portfolio_config,
+            )
 
-        return OptimizedSelectionPolicy(
-            cache=self.cache,
-            optimizer=optimizer,
-            constraints=portfolio_cfg.constraints,
-            sector_map=portfolio_cfg.risk_model.fundamental.sector_map,
-            clock=self.clock,
-            fallback_policy=None,
-            max_snapshot_age_ns=config.optimized_max_snapshot_age_ns,
+            if not config.optimized_portfolio_config_path:
+                raise ValueError(
+                    "optimized_portfolio_config_path required for OptimizedSelectionPolicy"
+                )
+            portfolio_cfg = load_portfolio_config(config.optimized_portfolio_config_path)
+            return OptimizedSelectionPolicy(
+                cache=cache,
+                optimizer=build_optimizer(portfolio_cfg.optimizer),
+                constraints=portfolio_cfg.constraints,
+                sector_map=portfolio_cfg.risk_model.fundamental.sector_map,
+                clock=clock,
+                fallback_policy=None,
+                max_snapshot_age_ns=config.optimized_max_snapshot_age_ns,
+            )
+        raise ValueError(
+            f"Unknown selection_policy: {policy_name}. " f"Available: {list(_SELECTION_POLICIES)}"
         )
 
     def on_data(self, data: object) -> None:
