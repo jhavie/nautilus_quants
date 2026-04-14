@@ -9,8 +9,8 @@ import pytest
 
 from nautilus_quants.alpha.analysis.config import AlphaAnalysisConfig
 from nautilus_quants.alpha.analysis.report import (
-    AnalysisReportGenerator,
     CHART_REGISTRY,
+    AnalysisReportGenerator,
     compute_ic_summary,
 )
 
@@ -315,6 +315,28 @@ class TestComputeIcSummary:
                 err_msg=f"Mismatch in {col}",
             )
 
+    def test_sparse_series_two_valid_rows_does_not_crash(self):
+        """IC with only 2 non-NaN rows must not crash compute_ic_summary.
+
+        Regression: a tune variant with degenerate distribution (e.g.
+        clip_quantile + aggressive normalize bounds) can leave an IC
+        column with 1-2 valid rows. Previously _newey_west_tstat →
+        _infer_bars_per_day → pd.infer_freq raised ValueError("Need at
+        least 3 dates"), killing the entire tune batch.
+        """
+        n_rows = 50
+        vals = [np.nan] * n_rows
+        vals[10] = 0.02
+        vals[30] = -0.01
+        ic_df = pd.DataFrame(
+            {"1h": vals},
+            index=pd.date_range("2024-01-01", periods=n_rows, freq="4h"),
+        )
+        table = compute_ic_summary(ic_df)  # must not raise
+        assert table.loc["1h", "N"] == 2
+        # NW stats may be NaN for such small samples — but no exception
+        assert "t-stat(NW)" in table.columns
+
 
 class TestNeweyWestTstat:
     """Test _newey_west_tstat helper function."""
@@ -338,6 +360,7 @@ class TestNeweyWestTstat:
 
         # Raw t-stat
         from scipy import stats as scipy_stats
+
         raw_t, raw_p = scipy_stats.ttest_1samp(x, 0)
 
         # NW should reduce significance (smaller |t|)
@@ -358,12 +381,13 @@ class TestNeweyWestTstat:
         nw_t, _, n_eff = _newey_west_tstat(series)
 
         from scipy import stats as scipy_stats
+
         raw_t, _ = scipy_stats.ttest_1samp(x, 0)
 
         # Should be roughly similar (within 30%)
-        assert abs(nw_t - raw_t) / max(abs(raw_t), 1e-10) < 0.3, (
-            f"NW ({nw_t:.2f}) and raw ({raw_t:.2f}) should be similar for i.i.d."
-        )
+        assert (
+            abs(nw_t - raw_t) / max(abs(raw_t), 1e-10) < 0.3
+        ), f"NW ({nw_t:.2f}) and raw ({raw_t:.2f}) should be similar for i.i.d."
 
     def test_insufficient_data(self):
         """Should return NaN for data with fewer than 2 observations."""
@@ -436,3 +460,42 @@ class TestInferBarsPerDay:
 
         idx = pd.RangeIndex(100)
         assert _infer_bars_per_day(idx) == 1
+
+    def test_two_dates_does_not_crash(self):
+        """pd.infer_freq requires >=3 dates — len==2 must not trigger it.
+
+        Regression: _infer_bars_per_day previously guarded only against
+        ``len(index) < 2``, so a 2-date index slipped into pd.infer_freq
+        and raised ValueError("Need at least 3 dates to infer frequency"),
+        killing the entire tune batch when one variant had only 2 valid IC
+        rows.
+        """
+        from nautilus_quants.alpha.analysis.report import _infer_bars_per_day
+
+        idx = pd.DatetimeIndex(["2024-01-01 00:00", "2024-01-01 04:00"])
+        # 4h spacing → median diff = 4h → 24 / 4 = 6 bars/day
+        assert _infer_bars_per_day(idx) == 6
+
+    def test_irregular_index_falls_back_to_median_diff(self):
+        """pd.infer_freq raises on irregular spacing — must gracefully fall back."""
+        from nautilus_quants.alpha.analysis.report import _infer_bars_per_day
+
+        # Irregular spacing: 1h, 2h, 1h, 3h → median diff ≈ 1.5h → 24 / 1.5 = 16
+        idx = pd.DatetimeIndex(
+            [
+                "2024-01-01 00:00",
+                "2024-01-01 01:00",
+                "2024-01-01 03:00",
+                "2024-01-01 04:00",
+                "2024-01-01 07:00",
+            ]
+        )
+        result = _infer_bars_per_day(idx)
+        assert result >= 1  # never crash; exact value is impl-dependent
+
+    def test_three_dates_regular_uses_infer_freq(self):
+        """With 3+ regular dates pd.infer_freq succeeds — classic path still works."""
+        from nautilus_quants.alpha.analysis.report import _infer_bars_per_day
+
+        idx = pd.date_range("2024-01-01", periods=3, freq="4h")
+        assert _infer_bars_per_day(idx) == 6  # 24h / 4h
