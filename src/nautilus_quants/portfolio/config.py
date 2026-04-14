@@ -113,11 +113,7 @@ def _parse_fundamental(data: dict[str, Any]) -> FundamentalModelConfig:
     common = data.get("common", {})
     fund = data.get("fundamental", {})
     factor_specs = tuple(
-        FundamentalFactorSpec(
-            name=str(spec["name"]),
-            variable=str(spec["variable"]),
-            transform=str(spec.get("transform", "cs_zscore")),
-        )
+        FundamentalFactorSpec(name=str(spec["name"]), variable=str(spec["variable"]))
         for spec in fund.get("factors", [])
     )
     return FundamentalModelConfig(
@@ -133,6 +129,7 @@ def _parse_fundamental(data: dict[str, Any]) -> FundamentalModelConfig:
         winsorize_exposures_sigma=float(fund.get("winsorize_exposures_sigma", 3.0)),
         sector_constraint=bool(fund.get("sector_constraint", True)),
         shrink_specific=bool(fund.get("shrink_specific", True)),
+        market_cap_ewm_alpha=float(fund.get("market_cap_ewm_alpha", 0.1)),
     )
 
 
@@ -209,14 +206,14 @@ def load_portfolio_config(path: str | Path) -> PortfolioConfig:
     if not isinstance(raw, dict):
         raise ValueError(f"portfolio.yaml must be a mapping, got {type(raw).__name__}")
     # Optionally merge sector_map from external file.
-    # Path resolution: treated as relative to cwd (consistent with factor_config_path
-    # in backtest.yaml). Falls back to portfolio.yaml's parent dir if not found.
+    # Path is resolved relative to portfolio.yaml's parent directory
+    # (not cwd) so configs are self-contained and movable.
     fund = raw.get("risk_model", {}).get("fundamental", {})
     sector_map_path = fund.get("sector_map_path")
     if sector_map_path and "sector_map" not in fund:
         sp = Path(sector_map_path)
-        if not sp.is_absolute() and not sp.exists():
-            sp = p.parent / sp.name  # try sibling of portfolio.yaml
+        if not sp.is_absolute():
+            sp = p.parent / sp.name
         fund["sector_map"] = _load_sector_map(sp)
     return PortfolioConfig(
         risk_model=_parse_risk_model_section(raw.get("risk_model", {})),

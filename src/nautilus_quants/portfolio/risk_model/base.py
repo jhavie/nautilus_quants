@@ -77,19 +77,20 @@ class StatisticalModelConfig(RiskModelConfig):
 class FundamentalFactorSpec:
     """Single named risk factor specification (Fundamental model).
 
+    Exposures are always cross-sectionally z-scored and winsorized to
+    ``winsorize_exposures_sigma`` inside FundamentalRiskModel; no per-factor
+    transform override is supported today.
+
     Attributes
     ----------
     name : str
         Risk factor display name (e.g., "btc_beta", "size").
     variable : str
         Source variable name from FactorValues (computed by FactorEngine).
-    transform : str
-        Cross-sectional transform: "cs_zscore" | "cs_rank" | "none".
     """
 
     name: str
     variable: str
-    transform: str = "cs_zscore"
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,10 @@ class FundamentalModelConfig(RiskModelConfig):
         Enforce cap-weighted sum of sector factor returns = 0 (Barra constraint).
     shrink_specific : bool
         Apply Bayesian shrinkage to specific variances toward cap-decile means.
+    market_cap_ewm_alpha : float
+        EWMA smoothing coefficient applied by RiskModelActor when it maintains
+        a rolling market-cap proxy from ``quote_volume * close``. Higher = less
+        smoothing (closer to point-in-time). 0.1 ≈ 26h half-life at 4h bars.
     """
 
     factors: tuple[FundamentalFactorSpec, ...] = field(default_factory=tuple)
@@ -118,6 +123,7 @@ class FundamentalModelConfig(RiskModelConfig):
     winsorize_exposures_sigma: float = 3.0
     sector_constraint: bool = True
     shrink_specific: bool = True
+    market_cap_ewm_alpha: float = 0.1
 
 
 class RiskModel(Protocol):

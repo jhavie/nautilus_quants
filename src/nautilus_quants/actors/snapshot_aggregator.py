@@ -37,7 +37,7 @@ from nautilus_trader.model.objects import Currency
 from nautilus_quants.execution.post_limit.state import OrderExecutionStateStore
 from nautilus_quants.factors.factor_values import FactorValues
 from nautilus_quants.portfolio.monitor.exposure import compute_portfolio_exposure
-from nautilus_quants.portfolio.types import deserialize_risk_output
+from nautilus_quants.portfolio.types import RiskModelOutput, deserialize_risk_output
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 from nautilus_quants.utils.cache_keys import (
     EXECUTION_STATES_CACHE_KEY,
@@ -121,6 +121,10 @@ class SnapshotAggregatorActor(Actor):
         self._log_file_path: str = ""
         self._log_file_offset: int = 0
         self._error_buffer: list[dict[str, str]] = []
+
+        # Memoize the last-decoded RiskModelOutput to avoid re-deserializing
+        # a ~200 KB JSON payload on every 15s timer tick.
+        self._cached_risk_output: RiskModelOutput | None = None
 
     def on_start(self) -> None:
         """Subscribe to data and start snapshot timer."""
@@ -470,6 +474,15 @@ class SnapshotAggregatorActor(Actor):
         except Exception as exc:
             self.log.warning(f"Failed to deserialize risk snapshot: {exc}")
             return None
+
+        # Reuse the prior decoded instance if timestamp unchanged. RiskModelActor
+        # writes on its own cadence (daily by default) while this timer fires
+        # every 15s, so most ticks hit the memo.
+        cached = self._cached_risk_output
+        if cached is not None and cached.timestamp_ns == output.timestamp_ns:
+            output = cached
+        else:
+            self._cached_risk_output = output
 
         # Current portfolio weights by equity share (signed: long>0, short<0)
         weights = self._collect_position_weights()

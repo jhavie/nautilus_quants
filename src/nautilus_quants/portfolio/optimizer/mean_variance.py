@@ -139,7 +139,6 @@ class MeanVarianceOptimizer(Optimizer):
         return OptimizerResult(
             weights=np.zeros(n, dtype=np.float64),
             status="infeasible",
-            relaxed=relax_stages[-1],
         )
 
     # ------------------------------------------------------------------
@@ -207,10 +206,7 @@ class MeanVarianceOptimizer(Optimizer):
         objective = cp.Maximize(alpha @ w - cfg.risk_aversion * risk_term)
 
         prob = cp.Problem(objective, cons)
-        try:
-            prob.solve(solver=cfg.solver, warm_start=True)
-        except cp.error.SolverError:
-            raise
+        prob.solve(solver=cfg.solver, warm_start=True)
         if prob.status not in ("optimal", "optimal_inaccurate"):
             return None, None, None, None
 

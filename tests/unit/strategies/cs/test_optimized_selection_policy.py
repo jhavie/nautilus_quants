@@ -234,7 +234,7 @@ def test_current_positions_contribute_to_w0_for_turnover() -> None:
 
 @pytest.mark.unit
 def test_payload_cache_reuses_deserialize_result() -> None:
-    """Calling select twice with same cached payload must not re-deserialize."""
+    """Same-timestamp snapshot must reuse the decoded RiskModelOutput instance."""
     instruments = tuple(f"ASSET_{i}.BINANCE" for i in range(6))
     snapshot = _make_snapshot(instruments)
     payload = serialize_risk_output(snapshot)
@@ -248,11 +248,12 @@ def test_payload_cache_reuses_deserialize_result() -> None:
     )
     factor_values = {inst: float(i - 3) for i, inst in enumerate(instruments)}
     _ = policy.select(factor_values, set(), set())
-    first_id = policy._last_payload_id
-    # Call again with same cache
+    first_output = policy._cached_output
+    assert first_output is not None
+
+    # Second call with same cache payload → decoded instance is the same object
     _ = policy.select(factor_values, set(), set())
-    assert policy._last_payload_id == first_id
-    assert policy._cached_output is not None
+    assert policy._cached_output is first_output
 
 
 @pytest.mark.unit

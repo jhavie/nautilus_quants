@@ -37,15 +37,17 @@ risk_model:
 
   # FundamentalRiskModel (Barra-style WLS cross-sectional regression)
   fundamental:
-    # Named risk factor → FactorEngine variable name + CS transform
-    # Variables MUST be defined in factor_config_path (factors_alpha101.yaml)
+    # Named risk factor → FactorEngine variable name. All exposures are
+    # cross-sectionally z-scored + winsorized to ±winsorize_exposures_sigma
+    # (below) before the WLS regression. Variables MUST be defined in
+    # factor_config_path (factors_alpha101.yaml).
     factors:
-      - {name: "size",          variable: "log_market_cap", transform: "cs_zscore"}
-      - {name: "momentum",      variable: "momentum_14d",   transform: "cs_zscore"}
-      - {name: "volatility",    variable: "vol_30d",        transform: "cs_zscore"}
-      - {name: "btc_beta",      variable: "btc_beta",       transform: "cs_zscore"}
-      - {name: "funding_rate",  variable: "funding_rate",   transform: "cs_zscore"}
-      - {name: "oi_change",     variable: "oi_change",      transform: "cs_zscore"}
+      - {name: "size",          variable: "log_market_cap"}
+      - {name: "momentum",      variable: "momentum_14d"}
+      - {name: "volatility",    variable: "vol_30d"}
+      - {name: "btc_beta",      variable: "btc_beta"}
+      - {name: "funding_rate",  variable: "funding_rate"}
+      - {name: "oi_change",     variable: "oi_change"}
 
     # Path to sector classification YAML (flat file: sector → list of instrument ids)
     sector_map_path: "config/portfolio/sector_map.yaml"

@@ -85,13 +85,10 @@ class OptimizedSelectionPolicy:
         self._fallback = fallback_policy
         self._max_age_ns = max_snapshot_age_ns
 
-        # Cache-read optimization: reuse deserialize result when payload unchanged
-        self._last_payload_id: int | None = None
+        # Reuse deserialize result when the underlying snapshot's timestamp_ns
+        # hasn't advanced. Content-stable (works for both in-memory and
+        # DB-backed caches that may return fresh bytes objects each call).
         self._cached_output: RiskModelOutput | None = None
-
-    # ------------------------------------------------------------------
-    # SelectionPolicy Protocol
-    # ------------------------------------------------------------------
 
     def select(
         self,
@@ -142,26 +139,23 @@ class OptimizedSelectionPolicy:
         targets = self._to_targets(result.weights, factor_values, universe)
         return targets
 
-    # ------------------------------------------------------------------
-    # Internal: cache, alignment, sector dummies
-    # ------------------------------------------------------------------
-
     def _read_risk_snapshot(self, now_ns: int) -> RiskModelOutput | None:
-        """Read and deserialize latest risk snapshot with payload-id memoization."""
+        """Read and deserialize latest risk snapshot, memoized by timestamp_ns."""
         payload = self._cache.get(RISK_MODEL_STATE_CACHE_KEY)
         if payload is None:
             return None
-        pid = id(payload)
-        if pid != self._last_payload_id:
-            try:
-                self._cached_output = deserialize_risk_output(payload)
-            except Exception as exc:
-                logger.error("Failed to deserialize risk snapshot: %s", exc)
-                self._cached_output = None
-            self._last_payload_id = pid
-        output = self._cached_output
-        if output is None:
+        try:
+            output = deserialize_risk_output(payload)
+        except Exception as exc:
+            logger.error("Failed to deserialize risk snapshot: %s", exc)
             return None
+        # Reuse the prior decoded instance if the model's timestamp is unchanged
+        # (keeps downstream structures keyed on `id(output)` stable).
+        cached = self._cached_output
+        if cached is not None and cached.timestamp_ns == output.timestamp_ns:
+            output = cached
+        else:
+            self._cached_output = output
         if self._max_age_ns > 0 and now_ns > 0:
             age = now_ns - output.timestamp_ns
             if age > self._max_age_ns:
@@ -267,10 +261,6 @@ class OptimizedSelectionPolicy:
         # Sort by factor (matching other policies' convention)
         targets.sort(key=lambda t: t.factor)
         return targets
-
-    # ------------------------------------------------------------------
-    # Fallback
-    # ------------------------------------------------------------------
 
     def _call_fallback(
         self,

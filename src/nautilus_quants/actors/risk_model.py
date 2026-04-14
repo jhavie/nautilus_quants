@@ -98,10 +98,10 @@ class RiskModelActor(Actor):
         # exposures_buffer[ts][factor_name] = {inst_id: exposure_value}
         self._exposures_buffer: OrderedDict[int, dict[str, dict[str, float]]] = OrderedDict()
 
-        # Market cap proxy cache: inst_id → rolling (quote_volume * close) mean
-        # Simple exponentially weighted running estimate (updated on each bar).
+        # Market cap proxy cache: inst_id → rolling (quote_volume * close) mean.
+        # EWM α sourced from portfolio.yaml fundamental.market_cap_ewm_alpha.
         self._market_cap_proxy: dict[str, float] = {}
-        self._market_cap_ewm_alpha: float = 0.1
+        self._market_cap_ewm_alpha: float = 0.1  # populated from config in on_start
 
         self._bar_counter: int = 0
         self._last_recompute_ts: int = 0
@@ -124,6 +124,8 @@ class RiskModelActor(Actor):
             self._barra_model = FundamentalRiskModel(cfg.fundamental)
         if self._stat_model is None and self._barra_model is None:
             raise ValueError(f"invalid risk_model.type: {cfg.type!r}")
+
+        self._market_cap_ewm_alpha = cfg.fundamental.market_cap_ewm_alpha
 
         self.subscribe_data(
             DataType(FactorValues),
