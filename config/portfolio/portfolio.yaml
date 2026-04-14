@@ -1,0 +1,126 @@
+# Portfolio configuration: risk model + optimizer + constraints + monitor
+#
+# Loaded by:
+#   - RiskModelActor (risk_model section — writes cache)
+#   - OptimizedSelectionPolicy (optimizer + constraints sections — reads cache)
+#   - SnapshotAggregatorActor (monitor section — exposure reporting)
+#
+# This file ONLY configures portfolio behavior. Factor variable names referenced
+# in fundamental.factors must be defined in the FactorEngine's factor_config_path
+# (e.g. config/cs/factors_alpha101.yaml — risk-only variables were appended per
+# feature/047 Option A).
+#
+# See /Users/joe/.claude/plans/resilient-painting-star.md for full design.
+
+risk_model:
+  # "statistical" | "fundamental" | "parallel"
+  # parallel: runs both models each update; active_model selects which populates
+  # the main cache key that OptimizedSelectionPolicy reads.
+  type: "parallel"
+  active_model: "fundamental"
+
+  # Shared by both models; RiskModelConfig fields.
+  common:
+    lookback_bars: 240          # 40 days @ 4h
+    min_history_bars: 60        # 10 days warmup
+    winsorize_quantile: 0.025   # 2.5% / 97.5% tail clip (Qlib convention)
+    scale_return_pct: true      # multiply returns by 100 for numerical stability
+    assume_centered: false      # subtract cross-sectional mean before covariance
+    nan_option: "fill"          # "ignore" | "fill" | "mask"
+
+  # StatisticalRiskModel (PCA + Shrinkage, ported from Qlib)
+  statistical:
+    method: "pca"               # "pca" | "fa" | "shrink"
+    num_factors: 10             # Latent factor count for PCA/FA decomposition
+    shrinkage: "lw"             # "lw" | "oas" | float (only used when method="shrink")
+    shrink_target: "const_corr" # "const_var" | "const_corr" | "single_factor"
+
+  # FundamentalRiskModel (Barra-style WLS cross-sectional regression)
+  fundamental:
+    # Named risk factor → FactorEngine variable name + CS transform
+    # Variables MUST be defined in factor_config_path (factors_alpha101.yaml)
+    factors:
+      - {name: "size",          variable: "log_market_cap", transform: "cs_zscore"}
+      - {name: "momentum",      variable: "momentum_14d",   transform: "cs_zscore"}
+      - {name: "volatility",    variable: "vol_30d",        transform: "cs_zscore"}
+      - {name: "btc_beta",      variable: "btc_beta",       transform: "cs_zscore"}
+      - {name: "funding_rate",  variable: "funding_rate",   transform: "cs_zscore"}
+      - {name: "oi_change",     variable: "oi_change",      transform: "cs_zscore"}
+
+    # Path to sector classification YAML (flat file: sector → list of instrument ids)
+    sector_map_path: "config/portfolio/sector_map.yaml"
+
+    # WLS regression weights source
+    wls_weight_source: "market_cap"  # "market_cap" | "equal"
+
+    # Factor exposure cross-sectional winsorization (±sigma)
+    winsorize_exposures_sigma: 3.0
+
+    # Enforce cap-weighted sum of sector factor returns = 0 (Barra constraint)
+    sector_constraint: true
+
+    # Bayesian shrinkage of specific variance toward weighted cross-sectional mean
+    shrink_specific: true
+
+
+optimizer:
+  type: "mean_variance"         # Only MVO implemented in Phase 2
+  risk_aversion: 1.0            # λ coefficient on w'Σw
+  solver: "CLARABEL"            # cvxpy 1.4+ default; ECOS/SCS also available
+  epsilon: 5e-5                 # weights below this magnitude are zeroed
+  scale_return: true            # rescale alpha to match Σ's volatility scale
+  # Constraint relaxation order when infeasible:
+  fallback_relax: ["turnover", "sector", "factor"]
+
+
+constraints:
+  # Per-instrument absolute weight cap (|w_i| ≤ max_weight)
+  max_weight: 0.05
+
+  # Gross leverage cap (sum(|w|) ≤ max_leverage)
+  max_leverage: 2.0
+
+  # Net exposure band (near-market-neutral)
+  net_exposure: [-0.05, 0.05]
+
+  # L1 turnover cap (sum(|w - w0|)); null disables
+  turnover_limit: 0.30
+
+  # Minimum non-zero positions required for a valid solve
+  min_positions: 10
+
+  # Per-sector gross exposure caps (sum(|w_i| for i in sector) ≤ cap)
+  # Sector names must match keys in sector_map.yaml
+  sector_limits:
+    L1: 0.40
+    DeFi: 0.30
+    Meme: 0.20
+    Exchange: 0.15
+    Other: 0.50
+
+  # Per-named-factor signed exposure caps (|X_k' w| ≤ cap)
+  # Factor names must match fundamental.factors[*].name
+  factor_limits:
+    btc_beta: 0.30
+    size: 0.50
+    momentum: 0.50
+    volatility: 0.40
+
+
+policy:
+  # Maximum age (ns) of the cached risk snapshot to accept.
+  # Default: 24 bars × 4h = 86_400 seconds = 1 day
+  #
+  # When the snapshot is missing, stale, or the optimizer is infeasible
+  # across all relaxation stages, OptimizedSelectionPolicy.select returns None.
+  # DecisionEngineActor treats this as "no opinion" and holds current
+  # positions unchanged. There is no fallback policy by design.
+  max_snapshot_age_ns: 86_400_000_000_000
+
+
+monitor:
+  # Whether SnapshotAggregatorActor writes `snapshot:risk` JSON for Grafana
+  enabled: true
+
+  # Log a WARNING when any factor_limits or sector_limits is breached
+  alert_on_breach: true

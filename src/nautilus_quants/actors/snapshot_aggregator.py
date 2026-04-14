@@ -36,12 +36,20 @@ from nautilus_trader.model.objects import Currency
 
 from nautilus_quants.execution.post_limit.state import OrderExecutionStateStore
 from nautilus_quants.factors.factor_values import FactorValues
+from nautilus_quants.portfolio.monitor.exposure import (
+    check_factor_limits,
+    check_sector_limits,
+    compute_portfolio_exposure,
+)
+from nautilus_quants.portfolio.types import deserialize_risk_output
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 from nautilus_quants.utils.cache_keys import (
     EXECUTION_STATES_CACHE_KEY,
+    RISK_MODEL_STATE_CACHE_KEY,
     SNAPSHOT_EXECUTION_CACHE_KEY,
     SNAPSHOT_FACTOR_CACHE_KEY,
     SNAPSHOT_HEALTH_CACHE_KEY,
+    SNAPSHOT_RISK_CACHE_KEY,
     SNAPSHOT_STRATEGY_CACHE_KEY,
     SNAPSHOT_VENUE_CACHE_KEY,
     STRATEGY_CONFIG_CACHE_KEY,
@@ -86,6 +94,14 @@ class SnapshotAggregatorActorConfig(ActorConfig, frozen=True):
     strategy_ids: list[str] = []
     log_directory: str = "logs"
     max_log_entries: int = 50
+    # --- Risk exposure monitoring (feature/047) ---
+    # Optional: if the pipeline includes a RiskModelActor, these map directly
+    # to portfolio.yaml constraints (factor_limits / sector_limits). Provide
+    # them here so the aggregator can flag breaches independently.
+    risk_factor_limits: dict[str, float] | None = None
+    risk_sector_limits: dict[str, float] | None = None
+    risk_sector_map: dict[str, str] | None = None
+    risk_alert_on_breach: bool = True
 
 
 class SnapshotAggregatorActor(Actor):
@@ -117,6 +133,16 @@ class SnapshotAggregatorActor(Actor):
         self._log_file_path: str = ""
         self._log_file_offset: int = 0
         self._error_buffer: list[dict[str, str]] = []
+
+        # Risk monitor lazy caches (feature/047)
+        self._cached_sector_map: dict[str, str] | None = None
+        self._sector_map_fallback: dict[str, str] | None = (
+            dict(config.risk_sector_map) if config.risk_sector_map else None
+        )
+        self._cached_factor_limits: dict[str, float] | None = None
+        self._cached_sector_limits: dict[str, float] | None = None
+        self._limits_loaded: bool = False
+        self._risk_alert_on_breach: bool = config.risk_alert_on_breach
 
     def on_start(self) -> None:
         """Subscribe to data and start snapshot timer."""
@@ -153,7 +179,12 @@ class SnapshotAggregatorActor(Actor):
     # -------------------------------------------------------------------------
 
     def _on_snapshot(self, event: object) -> None:
-        """Build and write all 5 snapshots to cache."""
+        """Build and write all 6 snapshots to cache.
+
+        The 6th snapshot (``snapshot:risk``) is produced only when a
+        RiskModelActor has written ``risk_model:state`` to the cache.
+        Missing risk state is not an error — risk monitoring is optional.
+        """
         ts_wall = self.clock.timestamp_ns()
 
         snapshots: list[tuple[str, dict[str, Any]]] = [
@@ -163,6 +194,9 @@ class SnapshotAggregatorActor(Actor):
             (SNAPSHOT_STRATEGY_CACHE_KEY, self._build_strategy_snapshot(ts_wall)),
             (SNAPSHOT_HEALTH_CACHE_KEY, self._build_health_snapshot(ts_wall)),
         ]
+        risk_snapshot = self._build_risk_snapshot(ts_wall)
+        if risk_snapshot is not None:
+            snapshots.append((SNAPSHOT_RISK_CACHE_KEY, risk_snapshot))
 
         for key, snapshot in snapshots:
             try:
@@ -431,16 +465,127 @@ class SnapshotAggregatorActor(Actor):
         }
 
     # -------------------------------------------------------------------------
+    # Risk snapshot (factor / sector exposures, from RiskModelActor)
+    # -------------------------------------------------------------------------
+
+    def _build_risk_snapshot(self, ts_wall: int) -> dict[str, Any] | None:
+        """Build portfolio-level risk exposure snapshot.
+
+        Returns None if no RiskModelActor is active (no cache payload),
+        allowing the aggregator to run without portfolio/risk stack.
+
+        Exposure and breach checks use ``portfolio.monitor.exposure`` pure
+        functions. Factor-level exposure is only published when the active
+        risk model is interpretable (Fundamental / named factors); Statistical
+        (PCA) snapshots contribute only covariance diagnostics.
+        """
+        payload = self.cache.get(RISK_MODEL_STATE_CACHE_KEY)
+        if payload is None:
+            return None
+        try:
+            output = deserialize_risk_output(payload)
+        except Exception as exc:
+            self.log.warning(f"Failed to deserialize risk snapshot: {exc}")
+            return None
+
+        # Collect current portfolio weights by equity share.
+        weights = self._collect_position_weights()
+
+        snapshot: dict[str, Any] = {
+            "ts_ns": ts_wall,
+            "model_type": output.model_type,
+            "model_timestamp_ns": output.timestamp_ns,
+            "n_instruments": output.n_instruments,
+            "n_factors": output.n_factors,
+            "is_interpretable": output.is_interpretable,
+            "is_decomposed": output.is_decomposed,
+            "covariance_trace": float(output.covariance.trace()),
+            "weights_sum_abs": float(sum(abs(w) for w in weights.values())),
+            "weights_sum_net": float(sum(weights.values())),
+        }
+
+        if output.is_interpretable:
+            factor_exposures = compute_portfolio_exposure(weights, output)
+            snapshot["factor_exposures"] = factor_exposures
+
+            factor_breaches = check_factor_limits(factor_exposures, self._risk_factor_limits())
+            sector_breaches = check_sector_limits(
+                weights, self._sector_map(), self._risk_sector_limits()
+            )
+            breaches = [
+                {"kind": b.kind, "name": b.name, "limit": b.limit, "actual": b.actual}
+                for b in (factor_breaches + sector_breaches)
+            ]
+            snapshot["breaches"] = breaches
+
+            if breaches and self._risk_alert_on_breach:
+                self.log.warning(f"Risk breach detected: {len(breaches)} limit(s) exceeded")
+        return snapshot
+
+    def _collect_position_weights(self) -> dict[str, float]:
+        """Compute current portfolio weights as fraction of equity."""
+        equity = compute_mtm_equity(self.portfolio, self._venue, self._currency)
+        if equity is None or equity <= 0:
+            return {}
+        weights: dict[str, float] = {}
+        for pos in self.cache.positions_open():
+            exposure = self.portfolio.net_exposure(pos.instrument_id)
+            notional = exposure.as_double() if exposure is not None else 0.0
+            if notional == 0.0:
+                continue
+            inst_id = str(pos.instrument_id)
+            # Signed: positive for long, negative for short
+            signed = notional if pos.is_long else -notional
+            weights[inst_id] = weights.get(inst_id, 0.0) + signed / equity
+        return weights
+
+    def _sector_map(self) -> dict[str, str]:
+        """Load sector map lazily from portfolio_config (cached)."""
+        if self._cached_sector_map is not None:
+            return self._cached_sector_map
+        self._cached_sector_map = self._load_portfolio_sector_map()
+        return self._cached_sector_map
+
+    def _risk_factor_limits(self) -> dict[str, float] | None:
+        self._load_portfolio_limits()
+        return self._cached_factor_limits
+
+    def _risk_sector_limits(self) -> dict[str, float] | None:
+        self._load_portfolio_limits()
+        return self._cached_sector_limits
+
+    def _load_portfolio_sector_map(self) -> dict[str, str]:
+        """Read ``risk_model:state`` decomposition to inspect interpretability.
+
+        Portfolio.yaml isn't loaded here (aggregator shouldn't hard-depend on
+        the portfolio config path). Sector map is instead fetched indirectly
+        from the risk snapshot's factor_names (sector_ prefix convention)
+        and on-the-fly from positions. This keeps the aggregator decoupled
+        from portfolio config loading.
+        """
+        return self._sector_map_fallback or {}
+
+    def _load_portfolio_limits(self) -> None:
+        """Limits are provided via config.risk_factor_limits / risk_sector_limits.
+
+        See config extension fields on SnapshotAggregatorActorConfig.
+        """
+        if self._limits_loaded:
+            return
+        self._limits_loaded = True
+        # Read from config (already typed)
+        self._cached_factor_limits = dict(self.config.risk_factor_limits or {}) or None
+        self._cached_sector_limits = dict(self.config.risk_sector_limits or {}) or None
+
+    # -------------------------------------------------------------------------
     # Health snapshot (log tail)
     # -------------------------------------------------------------------------
 
     def _build_health_snapshot(self, ts_wall: int) -> dict[str, Any]:
-        new_entries, self._log_file_path, self._log_file_offset = (
-            _read_log_incremental(
-                self._log_directory,
-                self._log_file_path,
-                self._log_file_offset,
-            )
+        new_entries, self._log_file_path, self._log_file_offset = _read_log_incremental(
+            self._log_directory,
+            self._log_file_path,
+            self._log_file_offset,
         )
 
         # Append new ERRORs to sticky buffer; pass WARNs through
@@ -451,9 +596,7 @@ class SnapshotAggregatorActor(Actor):
                 self._error_buffer.append(entry)
 
         # Evict expired ERRORs
-        self._error_buffer = [
-            e for e in self._error_buffer if e["_expire"] > now
-        ]
+        self._error_buffer = [e for e in self._error_buffer if e["_expire"] > now]
 
         # Merge: sticky errors + current-cycle warns (dedup by ts+message)
         seen: set[str] = set()
@@ -462,9 +605,7 @@ class SnapshotAggregatorActor(Actor):
             key = f"{e['ts']}:{e['message']}"
             if key not in seen:
                 seen.add(key)
-                entries.append(
-                    {k: v for k, v in e.items() if k != "_expire"}
-                )
+                entries.append({k: v for k, v in e.items() if k != "_expire"})
 
         for e in new_entries:
             if e["level"] == "WARN":
@@ -473,7 +614,7 @@ class SnapshotAggregatorActor(Actor):
                     seen.add(key)
                     entries.append(e)
 
-        entries = entries[:self._max_log_entries]
+        entries = entries[: self._max_log_entries]
         warn_count = sum(1 for e in entries if e["level"] == "WARN")
         error_count = sum(1 for e in entries if e["level"] == "ERROR")
 

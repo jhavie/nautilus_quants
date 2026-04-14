@@ -31,11 +31,47 @@ parameters:
   w17b_8h: 40   # alpha017 ts_mean(volume): 20 x 8h = 40 x 4h bars
   w17c_8h: 10   # alpha017 ts_rank(vol_ratio): 5 x 8h = 10 x 4h bars
 
+  # ── Portfolio risk model windows (4h bars) ──
+  # NOTE: These are used by RiskModelActor (feature/047). Alpha factors above
+  # do not depend on them; they "pollute" this alpha config (user decision:
+  # Option A — zero-code-change in factor loader, accept coupling).
+  w_risk_short: 6    # 1 day (for fr_momentum / oi_change deltas)
+  w_risk_mid: 42     # 7 days (for beta / correlation windows)
+  w_risk_long: 180   # 30 days (for vol_30d rolling std)
+  w_momentum_14d: 84 # 14 days (for momentum_14d)
+  w_market_cap: 42   # 7 days (for rolling quote_volume avg → market_cap proxy)
+
 variables:
   # 8h synthetic OHLCV from 4h bars
   high_8h:   "ts_max(high, 2)"       # 8h high = max of 2 x 4h highs
   volume_8h: "ts_sum(volume, 2)"     # 8h volume = sum of 2 x 4h volumes
   open_8h:   "delay(open, 1)"        # 8h open = previous 4h bar's open
+
+  # ── Portfolio risk model variables (feature/047) ──
+  # Fed to RiskModelActor via FactorValues. Dependencies on extra_data fields
+  # (funding_rate, open_interest, btc_close, quote_volume) require the backtest
+  # to declare extra_data_path pointing to config/cs/extra_data.yaml.
+
+  # Base returns: used as RiskModelActor's returns_variable
+  returns: "delta(close, 1) / delay(close, 1)"
+
+  # Size factor proxy: log(market_cap); market_cap ≈ rolling quote_volume × close
+  log_market_cap: "log(ts_mean(quote_volume, w_market_cap) * close)"
+
+  # Momentum factor: 14-day cumulative return
+  momentum_14d: "delta(close, w_momentum_14d) / delay(close, w_momentum_14d)"
+
+  # Volatility factor: 30-day rolling std of returns
+  vol_30d: "ts_std(returns, w_risk_long)"
+
+  # Market factor (BTC beta): cov(r_i, r_btc) / var(r_btc)
+  # Requires extra_data_path to supply btc_close (broadcast source).
+  btc_returns: "delta(btc_close, 1) / delay(btc_close, 1)"
+  btc_vol: "ts_std(btc_returns, w_risk_mid)"
+  btc_beta: "covariance(returns, btc_returns, w_risk_mid) / replace_zero(power(btc_vol, 2))"
+
+  # OI change: relative change in open interest (requires extra_data open_interest)
+  oi_change: "delta(open_interest, 1) / replace_zero(delay(open_interest, 1))"
 
 factors:
   alpha044_8h:

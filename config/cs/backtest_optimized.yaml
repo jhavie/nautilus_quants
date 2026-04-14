@@ -1,0 +1,155 @@
+# CS Strategy Backtest — OptimizedSelectionPolicy (risk-model-driven MVO)
+#
+# Pipeline (feature/047):
+#   FactorEngineActor   → FactorValues (includes risk variables)
+#   RiskModelActor      → Nautilus Cache (RISK_MODEL_STATE_CACHE_KEY)
+#   DecisionEngineActor → OptimizedSelectionPolicy reads cache, solves MVO
+#                         → RebalanceOrders
+#   CSStrategy          → Execution
+#   SnapshotAggregator  → snapshot:risk (exposure monitoring)
+#
+# Distinct from backtest.yaml only in:
+#   - adds RiskModelActor to actors list
+#   - DecisionEngineActor selection_policy = "OptimizedSelectionPolicy"
+#   - references config/portfolio/portfolio.yaml
+#
+# All other sections inherited by convention (copy from backtest.yaml when
+# ready for real data paths; below uses the same universe for comparability).
+
+registry:
+  env: test
+  db_dir: logs/registry
+  enabled: true
+
+venues:
+  - name: "BINANCE"
+    oms_type: "NETTING"
+    account_type: "MARGIN"
+    base_currency: "USDT"
+    starting_balances:
+      - "10000 USDT"
+    default_leverage: 1
+
+data:
+  - catalog_path: "/Users/joe/Sync/nautilus_quants2/data/data_4years_4h/catalog"
+    data_cls: "nautilus_trader.model.data:Bar"
+    bar_spec: "4h"
+    instrument_ids: &instrument_ids
+      - "BTCUSDT.BINANCE"
+      - "ETHUSDT.BINANCE"
+      - "BNBUSDT.BINANCE"
+      - "SOLUSDT.BINANCE"
+      - "AVAXUSDT.BINANCE"
+      - "DOTUSDT.BINANCE"
+      - "ATOMUSDT.BINANCE"
+      - "NEARUSDT.BINANCE"
+      - "FTMUSDT.BINANCE"
+      - "ADAUSDT.BINANCE"
+      - "UNIUSDT.BINANCE"
+      - "AAVEUSDT.BINANCE"
+      - "MKRUSDT.BINANCE"
+      - "LINKUSDT.BINANCE"
+      - "SUSHIUSDT.BINANCE"
+      - "DOGEUSDT.BINANCE"
+      - "1000SHIBUSDT.BINANCE"
+      - "XRPUSDT.BINANCE"
+      - "LTCUSDT.BINANCE"
+      - "BCHUSDT.BINANCE"
+    start_time: "2022-01-01"
+    end_time: "2022-06-30"
+
+engine:
+  trader_id: "BACKTESTER-OPT-001"
+  logging:
+    log_level: "INFO"
+  risk_engine:
+    bypass: true
+
+  actors:
+    # 1. FactorEngine — computes alpha + risk variables (feature/047 Option A:
+    #    risk-only variables are appended to factors_alpha101.yaml).
+    - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
+      config_path: "nautilus_quants.actors.factor_engine:FactorEngineActorConfig"
+      config:
+        factor_config_path: "config/cs/factors_alpha101.yaml"
+        extra_data_path: "config/cs/extra_data.yaml"
+        factor_cache_path: "data/factor_cache/cache_alpha101_optimized"
+        interval: "4h"
+        signal_prefix: "factor"
+        max_history: 0
+        publish_signals: true
+
+    # 2. RiskModelActor — subscribes FactorValues, writes risk_model:state to cache.
+    - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
+      config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
+      config:
+        portfolio_config_path: "config/portfolio/portfolio.yaml"
+        update_interval_bars: 6       # daily recompute at 4h bars
+        returns_variable: "returns"   # defined in factors_alpha101.yaml
+
+    - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
+      config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"
+      config:
+        interval: "4h"
+        venue_name: "BINANCE"
+        currency: "USDT"
+
+    # 3. DecisionEngine — OptimizedSelectionPolicy reads cache, solves MVO.
+    #    NOTE: on_start / on_data code UNCHANGED vs baseline; cache injection
+    #    happens only in _build_selection_policy factory branch.
+    - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
+      config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
+      config:
+        composite_factor: "composite"
+        rebalance_interval: 2
+
+        selection_policy: "OptimizedSelectionPolicy"
+        position_mode: "weighted"
+        total_capital: 10000
+
+        optimized_portfolio_config_path: "config/portfolio/portfolio.yaml"
+        optimized_max_snapshot_age_ns: 86_400_000_000_000  # 1 day
+
+        # When risk snapshot is missing / stale / optimizer infeasible,
+        # OptimizedSelectionPolicy.select returns None and DecisionEngineActor
+        # treats it as "no opinion" — current positions are held as-is.
+
+  strategies:
+    - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
+      config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
+      config:
+        instrument_ids: *instrument_ids
+        execution_policy: "MarketExecutionPolicy"
+
+
+report:
+  output_dir: "logs/performance_optimized"
+  formats:
+    - csv
+    - html
+  tearsheet:
+    enabled: true
+    title: "CS Strategy Optimized (Risk Model + MVO)"
+    theme: "nautilus"
+    height: 1500
+    charts:
+      - run_info
+      - stats_table
+      - equity
+      - drawdown
+      - monthly_returns
+      - distribution
+      - rolling_sharpe
+      - yearly_returns
+  quantstats:
+    enabled: true
+    title: "CS Optimized QuantStats"
+    output_format:
+      - html
+      - png
+  position_viz:
+    enabled: true
+    title: "CS Optimized Position Timeline"
+    output_subdir: "echarts"
+    chart_height: 500
+    interval: "4h"
