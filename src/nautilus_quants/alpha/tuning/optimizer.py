@@ -601,13 +601,20 @@ def optimize_factor(
     # function is DB-free and only reads shared (immutable) panel data.
     # DuckDB writes are deferred to ``register_tuned_variants`` which runs
     # serially in the main thread after this call returns.
+    #
+    # ``gc_after_trial=True`` matters at batch scale: tuning 200+ prototypes
+    # in one process accumulates FrozenTrial objects (params, user_attrs,
+    # fold_ic_means etc.) in the in-memory storage. Observed on the SanAPI
+    # 288-prototype run: RSS climbed to ~2.9 GB after 9 h. The per-trial GC
+    # cost is negligible (<1 ms) compared with the per-trial objective work
+    # (~500 ms for typical factors).
     study.optimize(
         objective,
         n_trials=tune_config.trials,
         timeout=tune_config.timeout,
         n_jobs=max(1, tune_config.n_jobs),
         callbacks=callbacks,
-        gc_after_trial=False,
+        gc_after_trial=True,
         show_progress_bar=False,
     )
 
