@@ -50,6 +50,18 @@
             border: 1px solid #e9ecef;
             border-radius: 6px;
         }
+        .risk-charts-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        #risk-factor-chart, #risk-sector-chart {
+            flex: 1;
+            height: ${chart_height}px;
+            background: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+        }
         #equity-chart {
             width: 100%;
             height: 280px;
@@ -133,6 +145,12 @@
             <div id="pie-chart"></div>
         </div>
 
+        <!-- Risk exposure charts (only mounted when RiskModelActor was active) -->
+        <div class="risk-charts-row" id="risk-charts-row" style="display:none">
+            <div id="risk-factor-chart"></div>
+            <div id="risk-sector-chart"></div>
+        </div>
+
         <div class="table-container">
             <table id="positionTable">
                 <thead id="tableHead"></thead>
@@ -169,6 +187,11 @@
         };
         const columnConfig = data.columnConfig || [];
 
+        const hasRisk = !!rawData.chart.hasRisk;
+        const riskFactorNames = rawData.chart.riskFactorNames || [];
+        const riskSectorNames = rawData.chart.riskSectorNames || [];
+        const riskByIndex = rawData.risk || {};
+
         // Build table headers dynamically
         function buildTableHeaders() {
             const thead = document.getElementById('tableHead');
@@ -185,6 +208,15 @@
         const equityChart = echarts.init(document.getElementById('equity-chart'));
         const barChart = echarts.init(document.getElementById('bar-chart'));
         const pieChart = echarts.init(document.getElementById('pie-chart'));
+
+        // Risk charts initialized only when risk data is present.
+        let riskFactorChart = null;
+        let riskSectorChart = null;
+        if (hasRisk) {
+            document.getElementById('risk-charts-row').style.display = 'flex';
+            riskFactorChart = echarts.init(document.getElementById('risk-factor-chart'));
+            riskSectorChart = echarts.init(document.getElementById('risk-sector-chart'));
+        }
 
         // Calculate max values for color scaling
         const maxLong = Math.max(...data.longValues.filter(v => v > 0), 1);
@@ -488,6 +520,57 @@
             </tr>`;
 
             tbody.innerHTML = html;
+
+            // Risk exposure charts — populated only when RiskModelActor was active
+            if (hasRisk) {
+                const riskEntry = riskByIndex[index];
+                if (riskEntry) {
+                    // Factor exposures: horizontal bar (signed; green ≥0, red <0)
+                    const factorValues = riskFactorNames.map(name => riskEntry.factor[name] || 0);
+                    riskFactorChart.setOption({
+                        title: { text: 'Factor Exposures', left: 'center', textStyle: { fontSize: 14 } },
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'shadow' },
+                            formatter: p => p[0].name + ': ' + p[0].value.toFixed(4)
+                        },
+                        grid: { left: '20%', right: '10%', top: '40', bottom: '5%', containLabel: true },
+                        xAxis: { type: 'value', name: 'Exposure' },
+                        yAxis: { type: 'category', data: riskFactorNames, axisLabel: { fontSize: 11 } },
+                        series: [{
+                            type: 'bar',
+                            data: factorValues.map(v => ({
+                                value: v,
+                                itemStyle: { color: v >= 0 ? '#28a745' : '#dc3545' }
+                            })),
+                            label: {
+                                show: true,
+                                position: 'right',
+                                fontSize: 10,
+                                formatter: p => p.value.toFixed(3)
+                            }
+                        }]
+                    }, true);
+
+                    // Sector exposures: pie chart (gross magnitudes)
+                    const sectorData = riskSectorNames
+                        .map(name => ({ name: name, value: riskEntry.sector[name] || 0 }))
+                        .filter(d => d.value > 0);
+                    riskSectorChart.setOption({
+                        title: { text: 'Sector Exposures (Gross)', left: 'center', textStyle: { fontSize: 14 } },
+                        tooltip: {
+                            trigger: 'item',
+                            formatter: p => p.name + ': ' + p.value.toFixed(4) + ' (' + (p.percent || 0).toFixed(1) + '%)'
+                        },
+                        series: [{
+                            type: 'pie',
+                            data: sectorData,
+                            radius: ['30%', '60%'],
+                            label: { formatter: '{b}\n{d}%', fontSize: 11 }
+                        }]
+                    }, true);
+                }
+            }
         }
 
         // Initial update
@@ -515,6 +598,8 @@
             equityChart.resize();
             barChart.resize();
             pieChart.resize();
+            if (riskFactorChart) riskFactorChart.resize();
+            if (riskSectorChart) riskSectorChart.resize();
         });
     </script>
 </body>

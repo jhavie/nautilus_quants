@@ -42,3 +42,8 @@ STRATEGY_CONFIG_CACHE_KEY = "snapshot:strategy_config"
 RISK_MODEL_STATE_CACHE_KEY = "risk_model:state"
 RISK_MODEL_STATE_STATISTICAL_CACHE_KEY = "risk_model:state:statistical"
 RISK_MODEL_STATE_FUNDAMENTAL_CACHE_KEY = "risk_model:state:fundamental"
+
+# RiskModelActor → ReportGenerator: history of serialized RiskModelOutput
+# snapshots (one per successful recompute), pickled as list[(ts_ns, bytes)].
+# Mirrors FACTOR_VALUES_CACHE_KEY pattern for offline visualization.
+RISK_SNAPSHOTS_CACHE_KEY = "risk_snapshots"

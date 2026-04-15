@@ -13,6 +13,7 @@ from nautilus_quants.utils.cache_keys import (
     FACTOR_VALUES_CACHE_KEY,
     POSITION_MARKET_VALUES_CACHE_KEY,
     POSITION_METADATA_CACHE_KEY,
+    RISK_SNAPSHOTS_CACHE_KEY,
 )
 from nautilus_quants.utils.protocols import (
     BaseMetadataRenderer,
@@ -1084,6 +1085,116 @@ class ReportGenerator:
 
         return timeline_data
 
+    def _get_risk_timeline(
+        self,
+        timeline_data: list[dict],
+    ) -> list[dict | None] | None:
+        """Build risk-exposure timeline aligned to position timeline indices.
+
+        Reads RISK_SNAPSHOTS_CACHE_KEY (pickled list of (ts_ns, payload_bytes)
+        accumulated by RiskModelActor). For each position-timeline timestamp,
+        looks up the most recent risk snapshot with ts <= that timestamp
+        (forward-fill semantics) and computes signed factor exposures + gross
+        sector exposures from the current open positions.
+
+        Returns
+        -------
+        list[dict | None] | None
+            ``None`` when RiskModelActor is not configured (cache key missing
+            or unreadable). Otherwise a list aligned to ``timeline_data`` where
+            each entry is either a dict::
+
+                {
+                    "factor": {factor_name: signed_exposure, ...},
+                    "sector": {sector_name: gross_exposure, ...},
+                    "ts_ns": int  # the snapshot ts actually used
+                }
+
+            or ``None`` for warmup periods before the first risk snapshot.
+        """
+        import pickle
+        from bisect import bisect_right
+
+        from nautilus_quants.portfolio.monitor.exposure import compute_portfolio_exposure
+        from nautilus_quants.portfolio.types import deserialize_risk_output
+
+        try:
+            payload = self.engine.cache.get(RISK_SNAPSHOTS_CACHE_KEY)
+        except Exception:
+            return None
+        if payload is None:
+            return None
+        try:
+            snapshots: list[tuple[int, bytes]] = pickle.loads(payload)
+        except Exception:
+            return None
+        if not snapshots:
+            return None
+
+        snapshots = sorted(snapshots, key=lambda s: s[0])
+        decoded: list[tuple[int, Any]] = []
+        seen_ts: set[int] = set()
+        for ts_ns, raw in snapshots:
+            if ts_ns in seen_ts:
+                continue
+            seen_ts.add(ts_ns)
+            try:
+                decoded.append((ts_ns, deserialize_risk_output(raw)))
+            except Exception:
+                continue
+        if not decoded:
+            return None
+        snap_ts_arr = [d[0] for d in decoded]
+
+        # `positions` keys are venue-stripped instrument ids (e.g. "BTCUSDT" —
+        # see _get_position_timeline_data). RiskModelOutput uses full ids
+        # ("BTCUSDT.BINANCE"); match by stripping the venue.
+        risk_timeline: list[dict | None] = []
+        last_key: tuple | None = None
+        last_entry: dict | None = None
+        for entry in timeline_data:
+            ts_ns = int(pd.Timestamp(entry["timestamp"]).value)
+            idx = bisect_right(snap_ts_arr, ts_ns) - 1
+            if idx < 0:
+                risk_timeline.append(None)
+                continue
+            snap_ts, output = decoded[idx]
+
+            positions = entry.get("positions") or {}
+            equity = entry.get("equity") or 0.0
+            if equity <= 0 or not positions:
+                risk_timeline.append({"factor": {}, "sector": {}, "ts_ns": snap_ts})
+                continue
+
+            weights: dict[str, float] = {}
+            for inst_id in output.instruments:
+                short = inst_id.split(".")[0] if "." in inst_id else inst_id
+                pos_info = positions.get(short)
+                if pos_info is None:
+                    continue
+                value = pos_info.get("value", 0.0) or 0.0
+                if value == 0:
+                    continue
+                signed = value if pos_info.get("side") == "LONG" else -value
+                weights[inst_id] = signed / equity
+
+            # Memoize: forward-fill regions reuse same (snapshot, weights) pair
+            # — matrix multiply in compute_portfolio_exposure is the hot spot.
+            cache_key = (snap_ts, tuple(sorted(weights.items())))
+            if cache_key == last_key:
+                risk_timeline.append(last_entry)
+                continue
+
+            exposure = compute_portfolio_exposure(weights, output)
+            last_entry = {
+                "factor": exposure["factor_exposures"],
+                "sector": exposure["sector_exposures"],
+                "ts_ns": snap_ts,
+            }
+            last_key = cache_key
+            risk_timeline.append(last_entry)
+        return risk_timeline
+
     def _generate_echarts_html(self, timeline_data: list[dict], viz_config: "PositionVisualizationConfig") -> str:
         """Generate ECharts HTML content with bar chart and pie chart.
 
@@ -1142,7 +1253,42 @@ class ReportGenerator:
                     "long_total_value": round(d["long_total_value"], 2),
                     "short_total_value": round(d["short_total_value"], 2),
                 }
-        data_json = json.dumps({"chart": chart_data, "detail": detail_data})
+
+        risk_timeline = self._get_risk_timeline(timeline_data)
+        risk_detail: dict[int, dict] = {}
+        risk_factor_names: list[str] = []
+        risk_sector_names: list[str] = []
+        if risk_timeline is not None:
+            factor_names_seen: list[str] = []
+            sector_names_seen: list[str] = []
+            for i, entry in enumerate(risk_timeline):
+                if entry is None:
+                    continue
+                fac = entry.get("factor") or {}
+                sec = entry.get("sector") or {}
+                if not fac and not sec:
+                    continue
+                # Keep first-seen ordering for stable chart axis labels
+                for n in fac:
+                    if n not in factor_names_seen:
+                        factor_names_seen.append(n)
+                for n in sec:
+                    if n not in sector_names_seen:
+                        sector_names_seen.append(n)
+                risk_detail[i] = {
+                    "factor": {k: round(float(v), 4) for k, v in fac.items()},
+                    "sector": {k: round(float(v), 4) for k, v in sec.items()},
+                }
+            risk_factor_names = factor_names_seen
+            risk_sector_names = sector_names_seen
+
+        chart_data["hasRisk"] = bool(risk_detail)
+        chart_data["riskFactorNames"] = risk_factor_names
+        chart_data["riskSectorNames"] = risk_sector_names
+
+        data_json = json.dumps(
+            {"chart": chart_data, "detail": detail_data, "risk": risk_detail}
+        )
 
         # Load template file
         template_path = files("nautilus_quants.backtest.templates").joinpath("position_timeline.html")

@@ -36,6 +36,7 @@ Constitution Compliance:
 from __future__ import annotations
 
 import logging
+import pickle
 from collections import OrderedDict
 from pathlib import Path
 
@@ -66,6 +67,7 @@ from nautilus_quants.utils.cache_keys import (
     RISK_MODEL_STATE_CACHE_KEY,
     RISK_MODEL_STATE_FUNDAMENTAL_CACHE_KEY,
     RISK_MODEL_STATE_STATISTICAL_CACHE_KEY,
+    RISK_SNAPSHOTS_CACHE_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,12 @@ class RiskModelActor(BarSubscriptionMixin, Actor):
         self._last_recompute_ts: int = 0
         self._warned_no_returns: bool = False
 
+        # Snapshot history for offline visualization (echarts risk pies).
+        # Each entry: (ts_ns, serialized_active_payload). Pickled to
+        # RISK_SNAPSHOTS_CACHE_KEY on stop. Mirrors FactorEngineActor's
+        # _factor_snapshots → FACTOR_VALUES_CACHE_KEY pattern.
+        self._risk_snapshots: list[tuple[int, bytes]] = []
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -207,11 +215,28 @@ class RiskModelActor(BarSubscriptionMixin, Actor):
             self._pending_ts = 0
         self._cancel_flush_alert()
 
+        # Persist snapshot history so ReportGenerator can render the risk pies.
+        # Mirrors FactorEngineActor._serialize_factor_snapshots: pickle a list
+        # of (ts_ns, bytes) tuples under RISK_SNAPSHOTS_CACHE_KEY.
+        if self._risk_snapshots:
+            try:
+                self.cache.add(
+                    RISK_SNAPSHOTS_CACHE_KEY,
+                    pickle.dumps(self._risk_snapshots),
+                )
+                self.log.info(
+                    f"Cached {len(self._risk_snapshots)} risk snapshots "
+                    f"({RISK_SNAPSHOTS_CACHE_KEY})"
+                )
+            except Exception as exc:
+                self.log.warning(f"Failed to cache risk snapshots: {exc}")
+
         self.log.info(
             f"RiskModelActor stopped. "
             f"flush_count={self._flush_counter}, "
             f"last_recompute_ts={self._last_recompute_ts}, "
-            f"returns_buffer_len={len(self._returns_buffer)}"
+            f"returns_buffer_len={len(self._returns_buffer)}, "
+            f"risk_snapshots={len(self._risk_snapshots)}"
         )
 
     # ------------------------------------------------------------------
@@ -535,6 +560,7 @@ class RiskModelActor(BarSubscriptionMixin, Actor):
         if active_payload is not None:
             self.cache.add(RISK_MODEL_STATE_CACHE_KEY, active_payload)
             self._last_recompute_ts = ts
+            self._risk_snapshots.append((ts, active_payload))
             self.log.info(
                 f"Risk model updated @ ts={ts}, "
                 f"active={cfg.active_model}, "
