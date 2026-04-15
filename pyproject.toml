@@ -23,6 +23,7 @@ dependencies = [
     "rich>=13.0.0",
     "lark>=1.1.0",
     "scipy>=1.11.0",  # Used by factors/operators/cross_sectional.py
+    "cvxpy>=1.4.0",   # Portfolio MVO optimizer (CLARABEL solver requires 1.4+)
 ]
 
 [project.optional-dependencies]
