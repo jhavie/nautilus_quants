@@ -37,23 +37,73 @@ risk_model:
 
   # FundamentalRiskModel (Barra-style WLS cross-sectional regression)
   fundamental:
-    # Named risk factor → FactorEngine variable name. All exposures are
-    # cross-sectionally z-scored + winsorized to ±winsorize_exposures_sigma
-    # (below) before the WLS regression. Variables MUST be defined in
-    # factor_config_path (factors_alpha101.yaml).
+    # Risk variable expressions — computed by RiskModelActor's embedded
+    # FactorEngine (independent of the alpha factor config). Schema matches
+    # config/cs/factors_alpha101.yaml factors block (expression + description).
+    # Registration order = YAML insertion order = dependency order.
+    variables:
+      returns:
+        expression: "delta(close, 1) / delay(close, 1)"
+        description: "Period-to-period simple returns"
+        tags: ["base"]
+
+      btc_returns:
+        expression: "delta(btc_close, 1) / delay(btc_close, 1)"
+        description: "BTC broadcast returns (from extra_data btc_close)"
+        tags: ["market"]
+
+      btc_vol:
+        expression: "ts_std(btc_returns, 42)"
+        description: "BTC 7-day rolling volatility (42 bars @ 4h)"
+        tags: ["market"]
+
+      btc_beta:
+        expression: "covariance(returns, btc_returns, 42) / replace_zero(power(btc_vol, 2))"
+        description: "CAPM beta vs BTC over 7 days"
+        tags: ["risk"]
+
+      vol_30d:
+        expression: "ts_std(returns, 180)"
+        description: "30-day rolling return volatility (180 bars @ 4h)"
+        tags: ["risk"]
+
+      momentum_14d:
+        expression: "delta(close, 84) / delay(close, 84)"
+        description: "14-day cumulative return (84 bars @ 4h)"
+        tags: ["risk"]
+
+      log_market_cap:
+        expression: "log(ts_mean(quote_volume, 42) * close)"
+        description: "log(market cap) size proxy"
+        tags: ["risk"]
+
+      oi_change:
+        expression: "delta(open_interest, 1) / replace_zero(delay(open_interest, 1))"
+        description: "Period-to-period OI relative change"
+        tags: ["risk"]
+
+      market_cap:
+        expression: "ts_mean(quote_volume, 42) * close"
+        description: "Point-in-time market cap proxy for WLS regression weights"
+        tags: ["weights"]
+
+    # Named risk factor → variable name (or extra_data field name).
+    # All exposures are cross-sectionally z-scored + winsorized to
+    # ±winsorize_exposures_sigma before the WLS regression.
     factors:
-      - {name: "size",          variable: "log_market_cap"}
-      - {name: "momentum",      variable: "momentum_14d"}
-      - {name: "volatility",    variable: "vol_30d"}
-      - {name: "btc_beta",      variable: "btc_beta"}
-      - {name: "funding_rate",  variable: "funding_rate"}
-      - {name: "oi_change",     variable: "oi_change"}
+      - {name: "size",          variable: "log_market_cap",  description: "Log market cap"}
+      - {name: "momentum",      variable: "momentum_14d",    description: "14-day cumulative return"}
+      - {name: "volatility",    variable: "vol_30d",         description: "30-day return volatility"}
+      - {name: "btc_beta",      variable: "btc_beta",        description: "CAPM beta vs BTC"}
+      - {name: "funding_rate",  variable: "funding_rate",    description: "Perpetual funding rate (extra_data)"}
+      - {name: "oi_change",     variable: "oi_change",       description: "OI relative change"}
 
     # Path to sector classification YAML (flat file: sector → list of instrument ids)
     sector_map_path: "config/portfolio/sector_map.yaml"
 
-    # WLS regression weights source
-    wls_weight_source: "market_cap"  # "market_cap" | "equal"
+    # WLS regression weights source. When "market_cap", RiskModelActor reads
+    # variables["market_cap"] directly; "equal" → uniform weights.
+    wls_weight_source: "market_cap"
 
     # Factor exposure cross-sectional winsorization (±sigma)
     winsorize_exposures_sigma: 3.0

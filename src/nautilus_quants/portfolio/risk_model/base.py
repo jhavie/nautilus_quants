@@ -15,6 +15,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
+from nautilus_quants.factors.config import FactorDefinition
 from nautilus_quants.portfolio.types import RiskModelOutput
 
 
@@ -99,31 +100,34 @@ class FundamentalModelConfig(RiskModelConfig):
 
     Attributes
     ----------
+    variables : tuple[FactorDefinition, ...]
+        Portfolio-defined risk variable expressions. Computed by RiskModelActor's
+        embedded FactorEngine (not by the alpha FactorEngineActor). Registration
+        order = YAML insertion order = dependency order.
     factors : tuple[FundamentalFactorSpec, ...]
-        Named risk factors. Must reference variables that FactorEngine publishes.
+        Named risk factors. Each ``factor.variable`` must name one of the
+        ``variables`` above (or be an extra_data field name like
+        ``funding_rate``).
     sector_map : dict[str, str]
         Instrument → sector mapping (e.g., "BTCUSDT.BINANCE" → "L1").
     wls_weight_source : str
-        "market_cap" | "equal". WLS regression weights.
+        "market_cap" | "equal". When "market_cap", RiskModelActor reads
+        ``variables["market_cap"]`` for WLS weights.
     winsorize_exposures_sigma : float
         Cross-sectional winsorize threshold for factor exposures (±σ). 3.0 matches Barra.
     sector_constraint : bool
         Enforce cap-weighted sum of sector factor returns = 0 (Barra constraint).
     shrink_specific : bool
         Apply Bayesian shrinkage to specific variances toward cap-decile means.
-    market_cap_ewm_alpha : float
-        EWMA smoothing coefficient applied by RiskModelActor when it maintains
-        a rolling market-cap proxy from ``quote_volume * close``. Higher = less
-        smoothing (closer to point-in-time). 0.1 ≈ 26h half-life at 4h bars.
     """
 
+    variables: tuple[FactorDefinition, ...] = field(default_factory=tuple)
     factors: tuple[FundamentalFactorSpec, ...] = field(default_factory=tuple)
     sector_map: dict[str, str] = field(default_factory=dict)
     wls_weight_source: str = "market_cap"
     winsorize_exposures_sigma: float = 3.0
     sector_constraint: bool = True
     shrink_specific: bool = True
-    market_cap_ewm_alpha: float = 0.1
 
 
 class RiskModel(Protocol):

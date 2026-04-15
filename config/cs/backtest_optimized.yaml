@@ -56,7 +56,7 @@ data:
       - "LTCUSDT.BINANCE"
       - "BCHUSDT.BINANCE"
     start_time: "2022-01-01"
-    end_time: "2022-06-30"
+    end_time: "2022-03-31"
 
 engine:
   trader_id: "BACKTESTER-OPT-001"
@@ -79,13 +79,17 @@ engine:
         max_history: 0
         publish_signals: true
 
-    # 2. RiskModelActor — subscribes FactorValues, writes risk_model:state to cache.
+    # 2. RiskModelActor — subscribes bars directly (same pattern as
+    #    FactorEngineActor) and runs its own embedded FactorEngine on the
+    #    portfolio.yaml risk variables. Independent of the alpha pipeline.
     - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
       config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
       config:
         portfolio_config_path: "config/portfolio/portfolio.yaml"
-        update_interval_bars: 2       # daily recompute at 4h bars
-        returns_variable: "returns"   # defined in factors_alpha101.yaml
+        update_interval_bars: 6          # daily recompute at 4h bars
+        extra_data_path: "config/cs/extra_data.yaml"  # shared with FactorEngineActor
+        max_history: 240                  # = fundamental.common.lookback_bars
+        flush_timeout_secs: 5
 
     - actor_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActor"
       config_path: "nautilus_quants.actors.equity_snapshot:EquitySnapshotActorConfig"

@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from nautilus_quants.factors.config import FactorDefinition
 from nautilus_quants.portfolio.optimizer.base import OptimizerConstraints
 from nautilus_quants.portfolio.optimizer.mean_variance import (
     MeanVarianceConfig,
@@ -109,9 +110,38 @@ def _parse_statistical(data: dict[str, Any]) -> StatisticalModelConfig:
     )
 
 
+def _parse_risk_variables(
+    raw: dict[str, Any] | None,
+) -> tuple[FactorDefinition, ...]:
+    """Parse fundamental.variables block.
+
+    Schema identical to `factors_alpha101.yaml` factors block — each entry is
+    a nested dict with ``expression`` / ``description`` / ``tags`` / ``prototype``.
+    YAML insertion order is preserved (Python 3.7+) and defines dependency
+    registration order inside the RiskModelActor's embedded FactorEngine.
+    """
+    if not raw:
+        return ()
+    defs: list[FactorDefinition] = []
+    for name, entry in raw.items():
+        if entry is None:
+            continue
+        defs.append(
+            FactorDefinition(
+                name=str(name),
+                expression=str(entry.get("expression", "")),
+                description=str(entry.get("description", "")),
+                tags=list(entry.get("tags", [])),
+                prototype=str(entry.get("prototype", "")),
+            )
+        )
+    return tuple(defs)
+
+
 def _parse_fundamental(data: dict[str, Any]) -> FundamentalModelConfig:
     common = data.get("common", {})
     fund = data.get("fundamental", {})
+    variables = _parse_risk_variables(fund.get("variables"))
     factor_specs = tuple(
         FundamentalFactorSpec(name=str(spec["name"]), variable=str(spec["variable"]))
         for spec in fund.get("factors", [])
@@ -123,13 +153,13 @@ def _parse_fundamental(data: dict[str, Any]) -> FundamentalModelConfig:
         scale_return_pct=bool(common.get("scale_return_pct", True)),
         assume_centered=bool(common.get("assume_centered", False)),
         nan_option=str(common.get("nan_option", "fill")),
+        variables=variables,
         factors=factor_specs,
         sector_map=dict(fund.get("sector_map", {})),
         wls_weight_source=str(fund.get("wls_weight_source", "market_cap")),
         winsorize_exposures_sigma=float(fund.get("winsorize_exposures_sigma", 3.0)),
         sector_constraint=bool(fund.get("sector_constraint", True)),
         shrink_specific=bool(fund.get("shrink_specific", True)),
-        market_cap_ewm_alpha=float(fund.get("market_cap_ewm_alpha", 0.1)),
     )
 
 
