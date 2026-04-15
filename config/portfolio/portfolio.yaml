@@ -77,10 +77,10 @@ risk_model:
         description: "log(market cap) size proxy"
         tags: ["risk"]
 
-      oi_change:
-        expression: "delta(open_interest, 1) / replace_zero(delay(open_interest, 1))"
-        description: "Period-to-period OI relative change"
-        tags: ["risk"]
+      # oi_change:
+      #   expression: "delta(open_interest, 1) / replace_zero(delay(open_interest, 1))"
+      #   description: "Period-to-period OI relative change"
+      #   tags: ["risk"]
 
       market_cap:
         expression: "ts_mean(quote_volume, 42) * close"
@@ -95,8 +95,8 @@ risk_model:
       - {name: "momentum",      variable: "momentum_14d",    description: "14-day cumulative return"}
       - {name: "volatility",    variable: "vol_30d",         description: "30-day return volatility"}
       - {name: "btc_beta",      variable: "btc_beta",        description: "CAPM beta vs BTC"}
-      - {name: "funding_rate",  variable: "funding_rate",    description: "Perpetual funding rate (extra_data)"}
-      - {name: "oi_change",     variable: "oi_change",       description: "OI relative change"}
+      # - {name: "funding_rate",  variable: "funding_rate",    description: "Perpetual funding rate (extra_data)"}
+      # - {name: "oi_change",     variable: "oi_change",       description: "OI relative change"}
 
     # Path to sector classification YAML (flat file: sector → list of instrument ids)
     sector_map_path: "config/portfolio/sector_map.yaml"
@@ -141,14 +141,17 @@ constraints:
   # Minimum non-zero positions required for a valid solve
   min_positions: 10
 
-  # Per-sector gross exposure caps (sum(|w_i| for i in sector) ≤ cap)
-  # Sector names must match keys in sector_map.yaml
+  # Per-sector gross exposure caps (sum(|w_i| for i in sector) ≤ cap).
+  # Sector names must match keys in sector_map.yaml (7-sector + Other).
   sector_limits:
-    L1: 0.40
-    DeFi: 0.30
-    Meme: 0.20
-    Exchange: 0.15
-    Other: 0.50
+    L1:     0.40   # Layer-1 blockchains — dominant, highest cap
+    L2:     0.20   # Rollups / scaling (5 coins; avoid single-name dominance)
+    DEFI:   0.30   # Lending / AMM / derivatives
+    INFRA:  0.25   # Oracles / storage / indexing / nodes
+    GAMEFI: 0.20   # Gaming / NFT / metaverse (high vol)
+    AI:     0.10   # Sparse in 2022; raise when more AI tokens added
+    MEME:   0.15   # Sentiment-driven, control blast radius
+    Other:  0.20   # Catch-all; expected 0 hits given the sector_map coverage
 
   # Per-named-factor signed exposure caps (|X_k' w| ≤ cap)
   # Factor names must match fundamental.factors[*].name
