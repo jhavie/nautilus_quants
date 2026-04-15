@@ -75,10 +75,11 @@ def compute_portfolio_exposure(
 
     sector_exposures: dict[str, float] = {}
     if output.sector_map:
+        # Mirror fundamental.py._assemble_sector_dummies: unmapped → "Other".
+        # Keeping the two defaults in sync ensures the sector pie chart shows
+        # the same buckets the risk model itself used for cov/constraint.
         for inst, w in weights.items():
-            sector = output.sector_map.get(inst)
-            if sector is None:
-                continue
+            sector = output.sector_map.get(inst, "Other")
             sector_exposures[sector] = sector_exposures.get(sector, 0.0) + abs(float(w))
 
     return {

@@ -124,6 +124,14 @@ class MeanVarianceOptimizer(Optimizer):
             # Numerical cleanup
             weights = np.where(np.abs(weights) < cfg.epsilon, 0.0, weights)
             status = "optimal" if not relax else "optimal_fallback"
+            if relax:
+                # Surface fallback at INFO so silent constraint relaxation
+                # (e.g. turnover release → 12x commission blowup) is visible.
+                logger.info(
+                    "MVO fallback: relaxed=%s last_error=%s",
+                    relax,
+                    last_error,
+                )
             turnover = float(np.sum(np.abs(weights - w0)))
             return OptimizerResult(
                 weights=weights,

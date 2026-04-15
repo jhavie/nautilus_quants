@@ -218,7 +218,13 @@ class OptimizedSelectionPolicy:
         return snapshot.factor_exposures[rows, :].copy()
 
     def _build_sector_dummies(self, universe: list[str]) -> np.ndarray | None:
-        """Build (N, S) one-hot sector matrix aligned to constraints.sector_limits."""
+        """Build (N, S) one-hot sector matrix aligned to constraints.sector_limits.
+
+        Unmapped instruments fall into the "Other" bucket (mirroring
+        fundamental.py._assemble_sector_dummies). If `sector_limits` does not
+        declare "Other", unmapped instruments remain unconstrained — that's an
+        explicit choice the user makes by omitting the key.
+        """
         limits = self._constraints.sector_limits
         if not limits or not self._sector_map:
             return None
@@ -227,10 +233,10 @@ class OptimizedSelectionPolicy:
         n = len(universe)
         dummies = np.zeros((n, len(sector_names)), dtype=np.float64)
         for i, inst in enumerate(universe):
-            sector = self._sector_map.get(inst)
-            if sector is None or sector not in s_to_idx:
-                continue
-            dummies[i, s_to_idx[sector]] = 1.0
+            sector = self._sector_map.get(inst, "Other")
+            idx = s_to_idx.get(sector)
+            if idx is not None:
+                dummies[i, idx] = 1.0
         return dummies
 
     def _to_targets(
