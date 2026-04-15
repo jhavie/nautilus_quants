@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 import matplotlib
+
 matplotlib.use("Agg")  # Non-interactive backend for chart generation
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,9 +35,7 @@ def _render_dataframe_as_table(df: pd.DataFrame, title: str = "") -> None:
     if title:
         ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
 
-    cell_text = df.map(
-        lambda x: f"{x:.4f}" if isinstance(x, float) else str(x)
-    ).values
+    cell_text = df.map(lambda x: f"{x:.4f}" if isinstance(x, float) else str(x)).values
     table = ax.table(
         cellText=cell_text,
         colLabels=df.columns.tolist(),
@@ -52,16 +51,32 @@ def _render_dataframe_as_table(df: pd.DataFrame, title: str = "") -> None:
 def _infer_bars_per_day(index: pd.Index) -> int:
     """Infer the number of observations per day from a DatetimeIndex.
 
-    Falls back to 1 (daily) when frequency cannot be determined.
+    Falls back to 1 (daily) when frequency cannot be determined. Handles
+    three edge cases seen in tuning's degenerate-distribution variants:
+    - ``len(index) == 2`` — pd.infer_freq requires >=3 dates; skip to
+      median-diff fallback instead of raising ``ValueError``.
+    - Irregular spacing — pd.infer_freq raises ``ValueError`` with
+      message "Need at least 3 dates"; catch and fall back.
+    - Non-fixed offset (``"B"`` / ``"M"`` / ``"BH"`` etc.) — ``to_offset``
+      returns an offset whose ``Timedelta`` conversion raises
+      ``TypeError``; catch and fall back.
     """
     if not isinstance(index, pd.DatetimeIndex) or len(index) < 2:
         return 1
-    freq = index.freq or pd.infer_freq(index[:min(len(index), 100)])
+    freq = index.freq
+    if freq is None and len(index) >= 3:
+        try:
+            freq = pd.infer_freq(index[: min(len(index), 100)])
+        except ValueError:
+            freq = None
     if freq is not None:
-        td = pd.Timedelta(pd.tseries.frequencies.to_offset(freq))  # type: ignore[arg-type]
-        if td.total_seconds() > 0:
+        try:
+            td = pd.Timedelta(pd.tseries.frequencies.to_offset(freq))  # type: ignore[arg-type]
+        except (ValueError, TypeError):
+            td = None
+        if td is not None and td.total_seconds() > 0:
             return max(int(pd.Timedelta(days=1) / td), 1)
-    # Fallback: median diff
+    # Fallback: median diff (works for len==2 too — one diff → one median)
     median_diff = pd.Series(index).diff().dropna().median()
     if pd.notna(median_diff) and median_diff.total_seconds() > 0:
         return max(int(pd.Timedelta(days=1) / median_diff), 1)
@@ -160,12 +175,8 @@ def compute_ic_summary(ic_df: pd.DataFrame) -> pd.DataFrame:
         table.loc[col, "t-stat(NW)"] = nw_t
         table.loc[col, "p-value(NW)"] = nw_p
         table.loc[col, "N_eff"] = n_eff
-        table.loc[col, "IC Skew"] = (
-            float(scipy_stats.skew(col_clean)) if n >= 3 else np.nan
-        )
-        table.loc[col, "IC Kurtosis"] = (
-            float(scipy_stats.kurtosis(col_clean)) if n >= 4 else np.nan
-        )
+        table.loc[col, "IC Skew"] = float(scipy_stats.skew(col_clean)) if n >= 3 else np.nan
+        table.loc[col, "IC Kurtosis"] = float(scipy_stats.kurtosis(col_clean)) if n >= 4 else np.nan
         table.loc[col, "N"] = n
     nan_count = ic_df.isna().sum()
     if nan_count.any():
@@ -306,7 +317,9 @@ def _fit_ic_half_life(ic_series: pd.Series) -> float:
 
     try:
         popt, _ = curve_fit(
-            _exp_decay, lags_clean, ac_clean,
+            _exp_decay,
+            lags_clean,
+            ac_clean,
             p0=[ac_clean[0], 10.0],
             bounds=([0, 0.1], [2.0, max_lag * 5]),
             maxfev=2000,
@@ -345,8 +358,6 @@ def compute_monotonicity(factor_data: pd.DataFrame) -> pd.Series:
     return pd.Series(result)
 
 
-
-
 # ── Result Dataclasses ──
 
 
@@ -354,13 +365,12 @@ def compute_monotonicity(factor_data: pd.DataFrame) -> pd.Series:
 class FactorMetricsResult:
     """Result container for factor signal quality metrics."""
 
-    win_rate: pd.Series        # period → float [0, 1]
-    coverage: float            # [0, 1]
-    ic_half_life: pd.Series    # period → float (bars), NaN if fit fails
-    monotonicity: pd.Series    # period → float [-1, 1]
-    ic_linearity: pd.Series    # period → float [0, 1] (R² of cumulative IC)
-    ic_ar1: pd.Series          # period → float (lag-1 autocorrelation)
-
+    win_rate: pd.Series  # period → float [0, 1]
+    coverage: float  # [0, 1]
+    ic_half_life: pd.Series  # period → float (bars), NaN if fit fails
+    monotonicity: pd.Series  # period → float [-1, 1]
+    ic_linearity: pd.Series  # period → float [0, 1] (R² of cumulative IC)
+    ic_ar1: pd.Series  # period → float (lag-1 autocorrelation)
 
 
 def compute_all_factor_metrics(
@@ -385,7 +395,6 @@ def compute_all_factor_metrics(
         ic_linearity=compute_ic_linearity(ic_df),
         ic_ar1=compute_ic_ar1(ic_df),
     )
-
 
 
 def build_analysis_metrics(
@@ -441,33 +450,35 @@ def build_analysis_metrics(
                 )
             cov_val = _safe_float(metrics_result.coverage)
 
-        result.append(AnalysisMetrics(
-            run_id=run_id,
-            factor_id=factor_id,
-            period=str(period_label),
-            ic_mean=_safe_float(row.get("IC Mean")),
-            ic_std=_safe_float(row.get("IC Std.")),
-            icir=_safe_float(row.get("Risk-Adjusted IC")),
-            t_stat_ic=_safe_float(row.get("t-stat(IC)")),
-            p_value_ic=_safe_float(row.get("p-value(IC)")),
-            t_stat_nw=_safe_float(row.get("t-stat(NW)")),
-            p_value_nw=_safe_float(row.get("p-value(NW)")),
-            n_eff=_safe_int(row.get("N_eff")),
-            ic_skew=_safe_float(row.get("IC Skew")),
-            ic_kurtosis=_safe_float(row.get("IC Kurtosis")),
-            n_samples=_safe_int(row.get("N")),
-            win_rate=win_rate_val,
-            monotonicity=mono_val,
-            ic_half_life=hl_val,
-            ic_linearity=lin_val,
-            ic_ar1=ar1_val,
-            coverage=cov_val,
-            factor_config_id=factor_config_id,
-            analysis_config_id=analysis_config_id,
-            output_dir=output_dir,
-            timeframe=timeframe,
-            created_at=now,
-        ))
+        result.append(
+            AnalysisMetrics(
+                run_id=run_id,
+                factor_id=factor_id,
+                period=str(period_label),
+                ic_mean=_safe_float(row.get("IC Mean")),
+                ic_std=_safe_float(row.get("IC Std.")),
+                icir=_safe_float(row.get("Risk-Adjusted IC")),
+                t_stat_ic=_safe_float(row.get("t-stat(IC)")),
+                p_value_ic=_safe_float(row.get("p-value(IC)")),
+                t_stat_nw=_safe_float(row.get("t-stat(NW)")),
+                p_value_nw=_safe_float(row.get("p-value(NW)")),
+                n_eff=_safe_int(row.get("N_eff")),
+                ic_skew=_safe_float(row.get("IC Skew")),
+                ic_kurtosis=_safe_float(row.get("IC Kurtosis")),
+                n_samples=_safe_int(row.get("N")),
+                win_rate=win_rate_val,
+                monotonicity=mono_val,
+                ic_half_life=hl_val,
+                ic_linearity=lin_val,
+                ic_ar1=ar1_val,
+                coverage=cov_val,
+                factor_config_id=factor_config_id,
+                analysis_config_id=analysis_config_id,
+                output_dir=output_dir,
+                timeframe=timeframe,
+                created_at=now,
+            )
+        )
 
     return result
 
@@ -524,7 +535,8 @@ def _chart_quantile_spread(factor_data: pd.DataFrame, period: str, **kwargs: Any
 
     mean_ret, std_err = perf.mean_return_by_quantile(factor_data, by_date=True)
     spread, spread_std = perf.compute_mean_returns_spread(
-        mean_ret, upper_quant=factor_data["factor_quantile"].max(),
+        mean_ret,
+        upper_quant=factor_data["factor_quantile"].max(),
         lower_quant=factor_data["factor_quantile"].min(),
         std_err=std_err,
     )
@@ -555,11 +567,13 @@ def _chart_ic_histogram(factor_data: pd.DataFrame, period: str, **kwargs: Any) -
         ax.set(title=f"{period_num} Period IC", xlabel="IC")
         ax.set_xlim([-1, 1])
         ax.text(
-            0.05, 0.95,
+            0.05,
+            0.95,
             f"Mean {col.mean():.3f} \n Std. {col.std():.3f}",
             fontsize=16,
             bbox={"facecolor": "white", "alpha": 1, "pad": 5},
-            transform=ax.transAxes, verticalalignment="top",
+            transform=ax.transAxes,
+            verticalalignment="top",
         )
         ax.axvline(col.mean(), color="w", linestyle="dashed", linewidth=2)
 
@@ -581,13 +595,13 @@ def _chart_turnover(factor_data: pd.DataFrame, period: str, **kwargs: Any) -> No
 
     quantile_factor = factor_data["factor_quantile"]
     quantiles = quantile_factor.sort_values().unique()
-    turnover = pd.DataFrame(
-        {q: perf.quantile_turnover(quantile_factor, q) for q in quantiles}
-    )
+    turnover = pd.DataFrame({q: perf.quantile_turnover(quantile_factor, q) for q in quantiles})
     plotting.plot_top_bottom_quantile_turnover(turnover)
 
 
-def _chart_factor_rank_autocorrelation(factor_data: pd.DataFrame, period: str, **kwargs: Any) -> None:
+def _chart_factor_rank_autocorrelation(
+    factor_data: pd.DataFrame, period: str, **kwargs: Any
+) -> None:
     import alphalens.performance as perf
     import alphalens.plotting as plotting
 
@@ -603,12 +617,15 @@ def _chart_monthly_ic_heatmap(factor_data: pd.DataFrame, period: str, **kwargs: 
     import alphalens.plotting as plotting
 
     mean_monthly_ic = perf.mean_information_coefficient(
-        factor_data, by_time="M",
+        factor_data,
+        by_time="M",
     )
     plotting.plot_monthly_ic_heatmap(mean_monthly_ic)
 
 
-def _chart_cumulative_returns_long_short(factor_data: pd.DataFrame, period: str, **kwargs: Any) -> None:
+def _chart_cumulative_returns_long_short(
+    factor_data: pd.DataFrame, period: str, **kwargs: Any
+) -> None:
     import alphalens.performance as perf
     import alphalens.plotting as plotting
 
@@ -643,11 +660,15 @@ def _chart_event_study(factor_data: pd.DataFrame, period: str, **kwargs: Any) ->
         return
 
     avg_cum_ret = perf.average_cumulative_return_by_quantile(
-        factor_data, returns=pricing,
-        periods_before=10, periods_after=15,
+        factor_data,
+        returns=pricing,
+        periods_before=10,
+        periods_after=15,
     )
     plotting.plot_quantile_average_cumulative_return(
-        avg_cum_ret, by_quantile=True, std_bar=True,
+        avg_cum_ret,
+        by_quantile=True,
+        std_bar=True,
     )
 
 
@@ -930,40 +951,30 @@ class AnalysisReportGenerator:
             periods = list(m.win_rate.index)
             hdr = "  " + " " * 16 + "".join(f"{p:>10}" for p in periods)
             lines.append(hdr)
-            lines.append(
-                "  Win Rate        "
-                + "".join(f"{m.win_rate[p]:>9.1%} " for p in periods)
-            )
+            lines.append("  Win Rate        " + "".join(f"{m.win_rate[p]:>9.1%} " for p in periods))
             lines.append(
                 "  Monotonicity    "
-                + "".join(
-                    f"{m.monotonicity.get(p, np.nan):>9.2f} "
-                    for p in periods
-                )
+                + "".join(f"{m.monotonicity.get(p, np.nan):>9.2f} " for p in periods)
             )
             lines.append(
                 "  IC Half-Life    "
                 + "".join(
-                    f"{m.ic_half_life.get(p, np.nan):>7.0f} bars"
-                    if np.isfinite(m.ic_half_life.get(p, np.nan))
-                    else f"{'N/A':>10} "
+                    (
+                        f"{m.ic_half_life.get(p, np.nan):>7.0f} bars"
+                        if np.isfinite(m.ic_half_life.get(p, np.nan))
+                        else f"{'N/A':>10} "
+                    )
                     for p in periods
                 )
             )
             lines.append(
                 "  IC Linearity    "
-                + "".join(
-                    f"{m.ic_linearity.get(p, np.nan):>10.3f}" for p in periods
-                )
+                + "".join(f"{m.ic_linearity.get(p, np.nan):>10.3f}" for p in periods)
             )
             lines.append(
-                "  IC AR(1)        "
-                + "".join(
-                    f"{m.ic_ar1.get(p, np.nan):>10.3f}" for p in periods
-                )
+                "  IC AR(1)        " + "".join(f"{m.ic_ar1.get(p, np.nan):>10.3f}" for p in periods)
             )
             lines.append(f"  Coverage         {m.coverage:.1%}")
             lines.append("")
 
         return lines
-

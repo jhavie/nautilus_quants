@@ -15,13 +15,26 @@ IC analysis — the check is pure metadata lookup over the registry.
 
 from __future__ import annotations
 
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from nautilus_quants.alpha.registry.models import AnalysisMetrics, FactorRecord
 from nautilus_quants.alpha.registry.repository import FactorRepository
 from nautilus_quants.alpha.tuning.config import CandidatesConfig, EligibilityConfig
+
+# Matches a tune run dir's per-prototype subdir: ``proto_NNN_{label}``.
+# ``build_factor_dir`` uses ONE underscore between the zero-padded index and
+# the label; what looks like a double underscore in ``proto_001__solo_foo`` is
+# really ``proto_001_`` + ``_solo_foo`` (label starts with ``_`` for solo
+# factors keyed as ``_solo_{factor_id}`` by ``group_eligible_by_prototype``).
+_PROTO_DIR_RE = re.compile(r"^proto_\d{3}_(?P<label>.+)$")
+
+# Matches variant factor_ids produced by ``_make_variant_id``:
+# ``{safe_source_factor_id}_tune{rank}_{hash[:8]}``.
+_TUNED_ID_RE = re.compile(r"^(?P<src>.+)_tune\d+_[0-9a-f]{8}$")
 
 
 @dataclass(frozen=True)
@@ -278,3 +291,122 @@ def group_eligible_by_prototype(
             # prototype names by the leading underscore prefix.
             grouped[f"_solo_{factor.factor_id}"].append(factor)
     return dict(grouped)
+
+
+# ── Resume support ────────────────────────────────────────────────────────
+
+
+def filter_already_tuned(
+    eligible_factors: Iterable[FactorRecord],
+    repo: FactorRepository,
+    *,
+    by_prototype: bool,
+    register_top_k: int,
+) -> tuple[list[FactorRecord], list[str]]:
+    """Drop source factors whose tune variants already fill ``register_top_k``.
+
+    Returns ``(kept, skipped_labels)``. Used by ``alpha tune
+    --skip-already-tuned`` to resume after a crashed batch without rerunning
+    Optuna on prototypes that have already been fully processed.
+
+    Identification uses ``tag="tuned"`` (hardcoded by ``register_tuned_variants``)
+    rather than ``source=...`` because the latter is user-configurable via
+    ``tune_config.source`` and therefore unreliable.
+
+    ``by_prototype=True``
+        Group registered tune variants by their ``prototype`` field (which is
+        stably inherited from the source factor) and skip any eligible factor
+        whose prototype already has ``>= register_top_k`` variants registered.
+        Representative-choice drift between runs is irrelevant: prototype is
+        stable, so the partition survives.
+
+    ``by_prototype=False``
+        Reverse-match the ``{safe_source_id}_tune{rank}_{hash[:8]}`` pattern
+        produced by ``_make_variant_id`` to recover the originating source
+        factor_id. Skip when that bucket has ``>= register_top_k`` entries.
+
+    Partially-registered prototypes (count ``< register_top_k``) are retained:
+    rerunning lets ``find_by_expression_hash`` dedup the already-written
+    variants and only fill in the missing ranks. This protects against the
+    edge case where a crash left rank-1/rank-2 written but rank-3 missing.
+    """
+    from nautilus_quants.alpha.tuning.variant_registration import _SAFE_NAME_RE
+
+    tuned = repo.list_factors(tag="tuned")
+    kept: list[FactorRecord] = []
+    skipped_labels: list[str] = []
+
+    # Build both maps upfront — needed for the solo-factor fallback in
+    # by_prototype mode as well as the full by_factor mode.
+    proto_counts: Counter[str] = Counter()
+    tuned_by_source: Counter[str] = Counter()
+    for t in tuned:
+        if t.prototype:
+            proto_counts[t.prototype] += 1
+        m = _TUNED_ID_RE.match(t.factor_id)
+        if m is not None:
+            tuned_by_source[m.group("src")] += 1
+
+    if by_prototype:
+        complete_protos = {p for p, c in proto_counts.items() if c >= register_top_k}
+        for f in eligible_factors:
+            if f.prototype and f.prototype in complete_protos:
+                skipped_labels.append(f.prototype)
+                continue
+            # Solo factor (no prototype): tune variants inherit an empty
+            # prototype, so proto_counts will never catch them. Fall back to
+            # factor_id-prefix matching and emit the "_solo_{id}" label that
+            # `group_eligible_by_prototype` uses as the grouped-dict key.
+            if not f.prototype:
+                safe = _SAFE_NAME_RE.sub("_", f.factor_id)
+                if tuned_by_source.get(safe, 0) >= register_top_k:
+                    skipped_labels.append(f"_solo_{f.factor_id}")
+                    continue
+            kept.append(f)
+        return kept, sorted(set(skipped_labels))
+
+    # by_factor mode: reverse-match the _make_variant_id pattern.
+    for f in eligible_factors:
+        safe = _SAFE_NAME_RE.sub("_", f.factor_id)
+        if tuned_by_source.get(safe, 0) >= register_top_k:
+            skipped_labels.append(f.factor_id)
+        else:
+            kept.append(f)
+    return kept, skipped_labels
+
+
+def labels_completed_in_dir(run_dir: Path) -> set[str]:
+    """Scan a prior tune run dir for prototype/factor labels already completed.
+
+    Each fully-processed label produces a ``proto_NNN_{label}/`` subdir
+    containing ``registration_summary.json`` — this file is written by
+    ``write_factor_artefacts`` *after* ``register_tuned_variants`` returns
+    successfully (see ``alpha.cli.tune`` batch loop). Its absence therefore
+    identifies a prototype that either crashed mid-registration or never
+    started. Those labels are NOT returned so the caller still reprocesses
+    them.
+
+    Returns a set of label strings that match the keys produced by
+    ``group_eligible_by_prototype``:
+
+        - Real prototypes: ``"alpha044"``
+        - Solo factors:    ``"_solo_llm_claude_foo"`` (keeps the ``_`` prefix)
+
+    The regex captures the label verbatim from ``proto_\\d{3}_(.+)``; since
+    ``build_factor_dir`` joins the format ``proto_{idx:03d}_{label}`` with a
+    single underscore, a label that itself starts with ``_`` naturally yields
+    the ``"__"`` double-underscore pattern seen in on-disk directory names.
+    """
+    labels: set[str] = set()
+    if not run_dir.is_dir():
+        return labels
+    for child in run_dir.iterdir():
+        if not child.is_dir():
+            continue
+        m = _PROTO_DIR_RE.match(child.name)
+        if m is None:
+            continue
+        if not (child / "registration_summary.json").exists():
+            continue
+        labels.add(m.group("label"))
+    return labels

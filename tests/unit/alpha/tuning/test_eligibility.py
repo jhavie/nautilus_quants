@@ -309,3 +309,261 @@ class TestGroupByPrototype:
         assert len(groups["alpha044"]) == 2  # parameter variants collapse
         assert "_solo_llm_unique_signal" in groups
         assert len(groups["_solo_llm_unique_signal"]) == 1
+
+
+# ── Resume support (--skip-already-tuned / --resume-from-dir) ───────────────
+
+
+def _register_tuned_variant(
+    repo: FactorRepository,
+    factor_id: str,
+    *,
+    prototype: str = "",
+    source: str = "alpha_tune_test",
+) -> None:
+    """Register a tuned variant FactorRecord (tag='tuned') for resume tests."""
+    repo.upsert_factor(
+        FactorRecord(
+            factor_id=factor_id,
+            expression=f"expr_of_{factor_id}",
+            prototype=prototype,
+            source=source,
+            status="candidate",
+            tags=["tuned"],
+        )
+    )
+
+
+class TestFilterAlreadyTuned:
+    """filter_already_tuned — resume support."""
+
+    def test_skips_prototype_with_full_register_top_k(self, repo: FactorRepository) -> None:
+        from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+        # Register 3 tune variants for prototype "alpha044" (top_k=3 → complete)
+        for rank in (1, 2, 3):
+            _register_tuned_variant(
+                repo,
+                f"alpha044_v1_tune{rank}_abcdef01",
+                prototype="alpha044",
+            )
+        # Source candidate
+        eligible = [
+            FactorRecord(
+                factor_id="alpha044_v1",
+                expression="ts_mean(close, 5)",
+                prototype="alpha044",
+                source="alpha101",
+            ),
+        ]
+        kept, skipped = filter_already_tuned(
+            eligible,
+            repo,
+            by_prototype=True,
+            register_top_k=3,
+        )
+        assert kept == []
+        assert skipped == ["alpha044"]
+
+    def test_keeps_prototype_with_partial_variants(self, repo: FactorRepository) -> None:
+        """Prototype with fewer than top_k variants should be retained (allow retry)."""
+        from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+        # Only 1 out of 3 expected variants registered — crashed before finishing
+        _register_tuned_variant(
+            repo,
+            "alpha044_v1_tune1_abcdef01",
+            prototype="alpha044",
+        )
+        eligible = [
+            FactorRecord(
+                factor_id="alpha044_v1",
+                expression="ts_mean(close, 5)",
+                prototype="alpha044",
+                source="alpha101",
+            ),
+        ]
+        kept, skipped = filter_already_tuned(
+            eligible,
+            repo,
+            by_prototype=True,
+            register_top_k=3,
+        )
+        assert len(kept) == 1
+        assert skipped == []
+
+    def test_by_factor_mode_matches_source_prefix(self, repo: FactorRepository) -> None:
+        from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+        # 3 tune variants for source factor "llm_solo_foo"
+        for rank in (1, 2, 3):
+            _register_tuned_variant(
+                repo,
+                f"llm_solo_foo_tune{rank}_deadbeef",
+                prototype="",
+            )
+        eligible = [
+            FactorRecord(
+                factor_id="llm_solo_foo",
+                expression="ts_mean(close, 5)",
+                prototype="",
+                source="llm_mining",
+            ),
+            FactorRecord(
+                factor_id="llm_solo_bar",  # not tuned yet
+                expression="ts_std(close, 10)",
+                prototype="",
+                source="llm_mining",
+            ),
+        ]
+        kept, skipped = filter_already_tuned(
+            eligible,
+            repo,
+            by_prototype=False,
+            register_top_k=3,
+        )
+        assert [f.factor_id for f in kept] == ["llm_solo_bar"]
+        assert skipped == ["llm_solo_foo"]
+
+    def test_empty_db_keeps_all(self, repo: FactorRepository) -> None:
+        from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+        eligible = [
+            FactorRecord(
+                factor_id="foo",
+                expression="x",
+                prototype="P",
+                source="src",
+            ),
+            FactorRecord(
+                factor_id="bar",
+                expression="y",
+                prototype="Q",
+                source="src",
+            ),
+        ]
+        kept, skipped = filter_already_tuned(
+            eligible,
+            repo,
+            by_prototype=True,
+            register_top_k=3,
+        )
+        assert len(kept) == 2
+        assert skipped == []
+
+    def test_by_prototype_mode_skips_solo_factor_via_id_prefix(
+        self, repo: FactorRepository
+    ) -> None:
+        """Solo factors (no prototype) must still be skippable in by_prototype mode.
+
+        Tune variants derived from a solo source factor inherit an empty
+        prototype field, so pure prototype-match would miss them entirely.
+        The implementation falls back to factor_id-prefix matching for the
+        solo case and emits the ``_solo_{factor_id}`` label used by
+        ``group_eligible_by_prototype``.
+        """
+        from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+        # 3 tune variants for solo source factor "llm_solo_foo" (no prototype)
+        for rank in (1, 2, 3):
+            _register_tuned_variant(
+                repo,
+                f"llm_solo_foo_tune{rank}_deadbeef",
+                prototype="",  # inherited from solo source factor
+            )
+        eligible = [
+            FactorRecord(
+                factor_id="llm_solo_foo",
+                expression="ts_mean(close, 5)",
+                prototype="",
+                source="llm_mining",
+            ),
+            FactorRecord(
+                factor_id="llm_solo_bar",  # not tuned yet
+                expression="ts_std(close, 10)",
+                prototype="",
+                source="llm_mining",
+            ),
+        ]
+        kept, skipped = filter_already_tuned(
+            eligible, repo, by_prototype=True, register_top_k=3,
+        )
+        assert [f.factor_id for f in kept] == ["llm_solo_bar"]
+        # Skip label uses the "_solo_{factor_id}" form to match the key
+        # produced by group_eligible_by_prototype.
+        assert skipped == ["_solo_llm_solo_foo"]
+
+    def test_by_prototype_mode_solo_partial_variants_retained(
+        self, repo: FactorRepository
+    ) -> None:
+        """Solo factor with fewer than register_top_k variants must be retained."""
+        from nautilus_quants.alpha.tuning.eligibility import filter_already_tuned
+
+        # Only 1 of 3 variants registered — crashed mid-registration
+        _register_tuned_variant(repo, "llm_solo_foo_tune1_deadbeef", prototype="")
+        eligible = [
+            FactorRecord(
+                factor_id="llm_solo_foo",
+                expression="ts_mean(close, 5)",
+                prototype="",
+                source="llm_mining",
+            ),
+        ]
+        kept, skipped = filter_already_tuned(
+            eligible, repo, by_prototype=True, register_top_k=3,
+        )
+        assert len(kept) == 1
+        assert skipped == []
+
+
+class TestLabelsCompletedInDir:
+    """labels_completed_in_dir — resume from run_dir primary evidence."""
+
+    def test_prototype_named(self, tmp_path):
+        from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+        proto_dir = tmp_path / "proto_001_alpha044"
+        proto_dir.mkdir()
+        (proto_dir / "registration_summary.json").write_text("{}")
+        assert labels_completed_in_dir(tmp_path) == {"alpha044"}
+
+    def test_solo_factor_retains_leading_underscore(self, tmp_path):
+        from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+        # On-disk looks like proto_002__solo_foo because label = "_solo_foo"
+        proto_dir = tmp_path / "proto_002__solo_foo"
+        proto_dir.mkdir()
+        (proto_dir / "registration_summary.json").write_text("{}")
+        assert labels_completed_in_dir(tmp_path) == {"_solo_foo"}
+
+    def test_skips_crashed_without_summary(self, tmp_path):
+        from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+        proto_dir = tmp_path / "proto_003_alpha_crashed"
+        proto_dir.mkdir()
+        # No registration_summary.json -> treat as incomplete
+        assert labels_completed_in_dir(tmp_path) == set()
+
+    def test_mixed_completed_and_crashed(self, tmp_path):
+        from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+        (tmp_path / "proto_001_alpha044").mkdir()
+        (tmp_path / "proto_001_alpha044" / "registration_summary.json").write_text("{}")
+        (tmp_path / "proto_002__solo_foo").mkdir()
+        (tmp_path / "proto_002__solo_foo" / "registration_summary.json").write_text("{}")
+        (tmp_path / "proto_003_crashed").mkdir()  # no summary.json
+        assert labels_completed_in_dir(tmp_path) == {"alpha044", "_solo_foo"}
+
+    def test_missing_dir_returns_empty(self, tmp_path):
+        from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+        assert labels_completed_in_dir(tmp_path / "does_not_exist") == set()
+
+    def test_ignores_non_proto_entries(self, tmp_path):
+        from nautilus_quants.alpha.tuning.eligibility import labels_completed_in_dir
+
+        (tmp_path / "summary.json").write_text("{}")  # file, not a dir
+        (tmp_path / "some_other_dir").mkdir()  # dir but wrong prefix
+        (tmp_path / "proto_001_keep").mkdir()
+        (tmp_path / "proto_001_keep" / "registration_summary.json").write_text("{}")
+        assert labels_completed_in_dir(tmp_path) == {"keep"}

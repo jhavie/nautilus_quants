@@ -241,11 +241,14 @@ class CandidatesConfig:
 
     The four filters (``prototype``, ``source``, ``status``, ``tags``) AND
     together. ``eligibility`` is an additional metric-based gate.
+
+    ``source`` accepts a single string or a list of strings (YAML list syntax
+    is allowed). ``None`` means no source filter — all sources are included.
     """
 
     env: str = "test"
     prototype: str | None = None
-    source: str | None = None
+    source: str | tuple[str, ...] | None = None
     status: str | None = "candidate"
     tags: tuple[str, ...] = ()
     eligibility: EligibilityConfig = field(default_factory=EligibilityConfig)
