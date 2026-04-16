@@ -14,6 +14,9 @@ POSITION_MARKET_VALUES_CACHE_KEY = "position_market_values"
 # Cache key for FactorEngineActor → ReportGenerator factor values transfer
 FACTOR_VALUES_CACHE_KEY = "factor_values"
 
+# FactorEngineActor → SnapshotAggregatorActor: realized IC per factor (live only)
+FACTOR_IC_CACHE_KEY = "factor_values:ic"
+
 # Cache key for PostLimitExecAlgorithm → ReportGenerator execution states transfer
 EXECUTION_STATES_CACHE_KEY = "execution_states"
 

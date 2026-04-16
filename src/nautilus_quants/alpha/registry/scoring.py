@@ -440,12 +440,16 @@ def score_factors(
     weights = config.weights
     sub_w = config.sub_weights
 
-    # Collect all raw values for percentile ranking
-    all_icir: list[float] = []
-    all_ic_mean: list[float] = []
-    all_mono: list[float] = []
-
+    # Collect raw values per period for within-period percentile ranking.
+    # Ranking within each period avoids systematic bias where longer bars
+    # (e.g. 1d) have inherently higher ICIR than shorter bars (e.g. 4h),
+    # which would inflate 1d ranks and deflate 4h ranks when pooled.
     factor_period_data: dict[str, dict[str, dict[str, float]]] = {}
+    per_period_vals: dict[str, dict[str, list[tuple[str, float]]]] = {
+        "icir": {},
+        "ic_mean": {},
+        "mono": {},
+    }
 
     for factor_id in df.index:
         valid_pds = df.loc[factor_id, "valid_periods"]
@@ -463,20 +467,31 @@ def score_factors(
                 "ic_mean": ic_mean_val,
                 "mono": mono_val,
             }
-            all_icir.append(icir_val)
-            all_ic_mean.append(ic_mean_val)
-            all_mono.append(mono_val)
+            per_period_vals["icir"].setdefault(period, []).append(
+                (factor_id, icir_val),
+            )
+            per_period_vals["ic_mean"].setdefault(period, []).append(
+                (factor_id, ic_mean_val),
+            )
+            per_period_vals["mono"].setdefault(period, []).append(
+                (factor_id, mono_val),
+            )
 
     if not factor_period_data:
         return df
 
-    # Percentile ranks across all factor-period observations
-    rank_icir = _percentile_rank(np.array(all_icir))
-    rank_ic_mean = _percentile_rank(np.array(all_ic_mean))
-    rank_mono = _percentile_rank(np.array(all_mono))
+    # Percentile ranks within each period independently
+    rank_map: dict[str, dict[str, dict[str, float]]] = {}
+    for metric, period_items in per_period_vals.items():
+        rank_map[metric] = {}
+        for period, items in period_items.items():
+            arr = np.array([v for _, v in items])
+            ranks = _percentile_rank(arr)
+            rank_map[metric][period] = {
+                fid: float(r) for (fid, _), r in zip(items, ranks)
+            }
 
-    # Map back to factor-period scores
-    idx = 0
+    # Score each factor across its valid periods
     factor_scores: dict[str, dict[str, Any]] = {}
 
     for factor_id, period_data in factor_period_data.items():
@@ -488,9 +503,9 @@ def score_factors(
         raw_mono: list[float] = []
 
         for period, d in period_data.items():
-            r_icir = rank_icir[idx]
-            r_ic_mean = rank_ic_mean[idx]
-            r_mono = rank_mono[idx]
+            r_icir = rank_map["icir"][period][factor_id]
+            r_ic_mean = rank_map["ic_mean"][period][factor_id]
+            r_mono = rank_map["mono"][period][factor_id]
 
             pred = sub_w.pred_icir * r_icir + sub_w.pred_ic_mean * r_ic_mean
             mono = r_mono
@@ -503,7 +518,6 @@ def score_factors(
                 + weights.monotonicity * mono
             )
             per_period_scores.append(pp_score)
-            idx += 1
 
             raw_icir.append(d["icir"])
             raw_ic_mean.append(d["ic_mean"])
