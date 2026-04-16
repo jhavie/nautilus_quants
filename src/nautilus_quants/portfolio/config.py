@@ -169,10 +169,13 @@ def _parse_risk_model_section(data: dict[str, Any]) -> RiskModelSectionConfig:
 
 
 def _parse_optimizer_section(data: dict[str, Any]) -> Any:
-    # Lazy import: MeanVarianceConfig lives in mean_variance.py which imports
-    # cvxpy at module level. Deferring the import here prevents cvxpy from
-    # being required at startup when only the risk-model monitoring stack is used.
-    from nautilus_quants.portfolio.optimizer.mean_variance import MeanVarianceConfig
+    # Graceful degradation: cvxpy is only needed when OptimizedSelectionPolicy
+    # is active. For monitoring-only deployments (RiskModelActor without MVO),
+    # skip optimizer parsing entirely if cvxpy is not installed.
+    try:
+        from nautilus_quants.portfolio.optimizer.mean_variance import MeanVarianceConfig
+    except ImportError:
+        return None
 
     return MeanVarianceConfig(
         risk_aversion=float(data.get("risk_aversion", 1.0)),
