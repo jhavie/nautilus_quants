@@ -1,0 +1,143 @@
+# Crypto sector classification — 7-sector taxonomy covering the
+# backtest_optimized.yaml universe (108 symbols, 2022 Binance Perp survivors).
+#
+# Sectors:
+#   L1     — Layer-1 blockchains (own consensus, native token)
+#   L2     — Rollups / sidechains / scaling solutions
+#   DEFI   — Lending / AMM / derivatives / synthetics / payments
+#   INFRA  — Oracles / storage / indexing / nodes / identity / privacy
+#   GAMEFI — Gaming / NFT platforms / virtual worlds / fan tokens / streaming
+#   AI     — Data marketplaces / decentralized compute / ML-adjacent
+#   MEME   — Pure meme / community-driven tokens without concrete utility
+#
+# Unmapped instruments auto-fall into "Other" by portfolio/risk_model/fundamental.py.
+# Keep this file synced with `constraints.sector_limits` in portfolio.yaml.
+
+L1:
+  - BTCUSDT.BINANCE
+  - ETHUSDT.BINANCE
+  - BNBUSDT.BINANCE          # BSC L1 (also exchange token, but L1 dominant)
+  - SOLUSDT.BINANCE
+  - AVAXUSDT.BINANCE
+  - DOTUSDT.BINANCE
+  - ATOMUSDT.BINANCE
+  - NEARUSDT.BINANCE
+  - FTMUSDT.BINANCE
+  - ADAUSDT.BINANCE
+  - ALGOUSDT.BINANCE
+  - EGLDUSDT.BINANCE         # MultiversX / Elrond
+  - KLAYUSDT.BINANCE         # Klaytn
+  - HBARUSDT.BINANCE         # Hedera
+  - THETAUSDT.BINANCE        # Theta video L1
+  - CELOUSDT.BINANCE
+  - ONTUSDT.BINANCE          # Ontology
+  - QTUMUSDT.BINANCE
+  - IOTAUSDT.BINANCE
+  - NEOUSDT.BINANCE
+  - TRXUSDT.BINANCE
+  - XLMUSDT.BINANCE          # Stellar
+  - XRPUSDT.BINANCE
+  - LTCUSDT.BINANCE
+  - BCHUSDT.BINANCE
+  - ETCUSDT.BINANCE
+  - DASHUSDT.BINANCE
+  - ZECUSDT.BINANCE
+  - XMRUSDT.BINANCE          # Monero
+  - XTZUSDT.BINANCE          # Tezos
+  - ICXUSDT.BINANCE          # ICON
+  - ZENUSDT.BINANCE          # Horizen privacy L1
+  - KSMUSDT.BINANCE          # Kusama
+  - ROSEUSDT.BINANCE         # Oasis privacy L1
+  - WAVESUSDT.BINANCE
+  - VETUSDT.BINANCE          # VeChain IoT L1
+  - KAVAUSDT.BINANCE         # Cosmos zone L1 (DeFi-focused; classified L1 by base layer)
+  - ONEUSDT.BINANCE          # Harmony
+  - XEMUSDT.BINANCE          # NEM / Symbol
+  - IOSTUSDT.BINANCE
+  - RVNUSDT.BINANCE          # Ravencoin
+  - ZILUSDT.BINANCE          # Zilliqa
+  - DGBUSDT.BINANCE          # DigiByte
+
+L2:
+  - MATICUSDT.BINANCE        # Polygon PoS + zkEVM
+  - LRCUSDT.BINANCE          # Loopring zkRollup
+  - SKLUSDT.BINANCE          # SKALE
+  - CTSIUSDT.BINANCE         # Cartesi rollups
+  - CELRUSDT.BINANCE         # Celer cBridge + state-guardian
+
+DEFI:
+  - UNIUSDT.BINANCE
+  - AAVEUSDT.BINANCE
+  - MKRUSDT.BINANCE
+  - COMPUSDT.BINANCE
+  - CRVUSDT.BINANCE
+  - SUSHIUSDT.BINANCE
+  - YFIUSDT.BINANCE
+  - SNXUSDT.BINANCE          # Synthetix
+  - 1INCHUSDT.BINANCE        # DEX aggregator
+  - BALUSDT.BINANCE          # Balancer
+  - ALPHAUSDT.BINANCE        # Alpha Finance
+  - DYDXUSDT.BINANCE         # perp DEX
+  - BAKEUSDT.BINANCE         # BakerySwap
+  - RUNEUSDT.BINANCE         # THORChain cross-chain DEX
+  - REEFUSDT.BINANCE
+  - RENUSDT.BINANCE          # renBTC cross-chain
+  - SXPUSDT.BINANCE          # Swipe payment
+  - OGNUSDT.BINANCE          # Origin DeFi+NFT
+  - BELUSDT.BINANCE          # Bella Protocol
+  - DEFIUSDT.BINANCE         # DeFi index token
+  - FLMUSDT.BINANCE          # Flamingo
+  - ZRXUSDT.BINANCE          # 0x protocol
+  - OMGUSDT.BINANCE          # payment/scaling (DeFi-leaning)
+  - LINAUSDT.BINANCE         # Linear Finance
+  - RSRUSDT.BINANCE          # Reserve stablecoin
+  - MTLUSDT.BINANCE          # Metal payments
+  - C98USDT.BINANCE          # Coin98 wallet aggregator
+  - COTIUSDT.BINANCE         # payment/currency infrastructure
+  - SFPUSDT.BINANCE          # SafePal wallet
+  - STMXUSDT.BINANCE         # StormX shopping rewards
+
+INFRA:
+  - LINKUSDT.BINANCE         # Chainlink oracle
+  - BANDUSDT.BINANCE         # Band oracle
+  - TRBUSDT.BINANCE          # Tellor oracle
+  - FILUSDT.BINANCE          # Filecoin storage
+  - ARUSDT.BINANCE           # Arweave permanent storage
+  - STORJUSDT.BINANCE        # Storj storage
+  - BLZUSDT.BINANCE          # Bluzelle data
+  - GRTUSDT.BINANCE          # The Graph indexing
+  - ANKRUSDT.BINANCE         # node infrastructure
+  - DUSKUSDT.BINANCE         # privacy-focused infra
+  - HOTUSDT.BINANCE          # Holochain P2P
+  - DENTUSDT.BINANCE         # telecom
+  - IOTXUSDT.BINANCE         # IoTeX IoT platform
+  - LPTUSDT.BINANCE          # Livepeer video streaming
+  - ENSUSDT.BINANCE          # Ethereum Name Service
+  - MASKUSDT.BINANCE         # Mask Network social infrastructure
+  - ANTUSDT.BINANCE          # Aragon DAO platform
+  - ARPAUSDT.BINANCE         # privacy computation
+  - ATAUSDT.BINANCE          # Automata privacy middleware
+  - NKNUSDT.BINANCE          # P2P networking
+  - BATUSDT.BINANCE          # Basic Attention Token (Brave)
+  - GTCUSDT.BINANCE          # Gitcoin funding infrastructure
+
+GAMEFI:
+  - AXSUSDT.BINANCE          # Axie Infinity
+  - SANDUSDT.BINANCE         # The Sandbox
+  - MANAUSDT.BINANCE         # Decentraland
+  - GALAUSDT.BINANCE         # Gala Games
+  - ENJUSDT.BINANCE          # Enjin NFT
+  - CHZUSDT.BINANCE          # fan tokens
+  - ALICEUSDT.BINANCE        # MyNeighborAlice
+  - CHRUSDT.BINANCE          # Chromia gaming L1 platform
+  - AUDIOUSDT.BINANCE        # Audius music streaming
+
+AI:
+  - OCEANUSDT.BINANCE        # Ocean Protocol data marketplace for ML
+  - RLCUSDT.BINANCE          # iExec decentralized compute (AI/ML workloads)
+
+MEME:
+  - DOGEUSDT.BINANCE
+  - 1000SHIBUSDT.BINANCE
+  - PEOPLEUSDT.BINANCE       # ConstitutionDAO
+  - 1000XECUSDT.BINANCE      # eCash meme fork

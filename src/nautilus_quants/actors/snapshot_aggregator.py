@@ -36,12 +36,16 @@ from nautilus_trader.model.objects import Currency
 
 from nautilus_quants.execution.post_limit.state import OrderExecutionStateStore
 from nautilus_quants.factors.factor_values import FactorValues
+from nautilus_quants.portfolio.monitor.exposure import compute_portfolio_exposure
+from nautilus_quants.portfolio.types import RiskModelOutput, deserialize_risk_output
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 from nautilus_quants.utils.cache_keys import (
     EXECUTION_STATES_CACHE_KEY,
+    RISK_MODEL_STATE_CACHE_KEY,
     SNAPSHOT_EXECUTION_CACHE_KEY,
     SNAPSHOT_FACTOR_CACHE_KEY,
     SNAPSHOT_HEALTH_CACHE_KEY,
+    SNAPSHOT_RISK_CACHE_KEY,
     SNAPSHOT_STRATEGY_CACHE_KEY,
     SNAPSHOT_VENUE_CACHE_KEY,
     STRATEGY_CONFIG_CACHE_KEY,
@@ -118,6 +122,10 @@ class SnapshotAggregatorActor(Actor):
         self._log_file_offset: int = 0
         self._error_buffer: list[dict[str, str]] = []
 
+        # Memoize the last-decoded RiskModelOutput to avoid re-deserializing
+        # a ~200 KB JSON payload on every 15s timer tick.
+        self._cached_risk_output: RiskModelOutput | None = None
+
     def on_start(self) -> None:
         """Subscribe to data and start snapshot timer."""
         self.subscribe_data(
@@ -153,7 +161,12 @@ class SnapshotAggregatorActor(Actor):
     # -------------------------------------------------------------------------
 
     def _on_snapshot(self, event: object) -> None:
-        """Build and write all 5 snapshots to cache."""
+        """Build and write all 6 snapshots to cache.
+
+        The 6th snapshot (``snapshot:risk``) is produced only when a
+        RiskModelActor has written ``risk_model:state`` to the cache.
+        Missing risk state is not an error — risk monitoring is optional.
+        """
         ts_wall = self.clock.timestamp_ns()
 
         snapshots: list[tuple[str, dict[str, Any]]] = [
@@ -163,6 +176,9 @@ class SnapshotAggregatorActor(Actor):
             (SNAPSHOT_STRATEGY_CACHE_KEY, self._build_strategy_snapshot(ts_wall)),
             (SNAPSHOT_HEALTH_CACHE_KEY, self._build_health_snapshot(ts_wall)),
         ]
+        risk_snapshot = self._build_risk_snapshot(ts_wall)
+        if risk_snapshot is not None:
+            snapshots.append((SNAPSHOT_RISK_CACHE_KEY, risk_snapshot))
 
         for key, snapshot in snapshots:
             try:
@@ -431,16 +447,92 @@ class SnapshotAggregatorActor(Actor):
         }
 
     # -------------------------------------------------------------------------
+    # Risk snapshot (factor / sector exposures, from RiskModelActor)
+    # -------------------------------------------------------------------------
+
+    def _build_risk_snapshot(self, ts_wall: int) -> dict[str, Any] | None:
+        """Build portfolio-level risk exposure snapshot.
+
+        Returns None if no RiskModelActor is active (no cache payload),
+        allowing the aggregator to run without portfolio/risk stack.
+
+        Outputs raw exposure data only — no limit-breach detection lives here.
+        Grafana reads the ``snapshot:risk`` JSON from Redis and defines its
+        own alert rules (thresholds, ratios, composite conditions), avoiding
+        duplicate alerting channels.
+
+        Sector aggregation uses ``RiskModelOutput.sector_map`` populated by
+        FundamentalRiskModel. Statistical (PCA) snapshots contribute only
+        covariance diagnostics (factor_exposures is empty because PC_i names
+        are not interpretable).
+        """
+        payload = self.cache.get(RISK_MODEL_STATE_CACHE_KEY)
+        if payload is None:
+            return None
+        try:
+            output = deserialize_risk_output(payload)
+        except Exception as exc:
+            self.log.warning(f"Failed to deserialize risk snapshot: {exc}")
+            return None
+
+        # Reuse the prior decoded instance if timestamp unchanged. RiskModelActor
+        # writes on its own cadence (daily by default) while this timer fires
+        # every 15s, so most ticks hit the memo.
+        cached = self._cached_risk_output
+        if cached is not None and cached.timestamp_ns == output.timestamp_ns:
+            output = cached
+        else:
+            self._cached_risk_output = output
+
+        # Current portfolio weights by equity share (signed: long>0, short<0)
+        weights = self._collect_position_weights()
+        exposure = compute_portfolio_exposure(weights, output)
+
+        return {
+            "ts_ns": ts_wall,
+            "model_type": output.model_type,
+            "model_timestamp_ns": output.timestamp_ns,
+            "n_instruments": output.n_instruments,
+            "n_factors": output.n_factors,
+            "is_interpretable": output.is_interpretable,
+            "is_decomposed": output.is_decomposed,
+            "covariance_trace": float(output.covariance.trace()),
+            # Portfolio-level statistics from compute_portfolio_exposure
+            "gross": exposure["gross"],
+            "net": exposure["net"],
+            "long": exposure["long"],
+            "short": exposure["short"],
+            # Named-factor and sector exposures (Grafana defines alert rules)
+            "factor_exposures": exposure["factor_exposures"],
+            "sector_exposures": exposure["sector_exposures"],
+        }
+
+    def _collect_position_weights(self) -> dict[str, float]:
+        """Compute current portfolio weights as fraction of equity (signed)."""
+        equity = compute_mtm_equity(self.portfolio, self._venue, self._currency)
+        if equity is None or equity <= 0:
+            return {}
+        weights: dict[str, float] = {}
+        for pos in self.cache.positions_open():
+            exposure = self.portfolio.net_exposure(pos.instrument_id)
+            notional = exposure.as_double() if exposure is not None else 0.0
+            if notional == 0.0:
+                continue
+            inst_id = str(pos.instrument_id)
+            # Signed: positive for long, negative for short
+            signed = notional if pos.is_long else -notional
+            weights[inst_id] = weights.get(inst_id, 0.0) + signed / equity
+        return weights
+
+    # -------------------------------------------------------------------------
     # Health snapshot (log tail)
     # -------------------------------------------------------------------------
 
     def _build_health_snapshot(self, ts_wall: int) -> dict[str, Any]:
-        new_entries, self._log_file_path, self._log_file_offset = (
-            _read_log_incremental(
-                self._log_directory,
-                self._log_file_path,
-                self._log_file_offset,
-            )
+        new_entries, self._log_file_path, self._log_file_offset = _read_log_incremental(
+            self._log_directory,
+            self._log_file_path,
+            self._log_file_offset,
         )
 
         # Append new ERRORs to sticky buffer; pass WARNs through
@@ -451,9 +543,7 @@ class SnapshotAggregatorActor(Actor):
                 self._error_buffer.append(entry)
 
         # Evict expired ERRORs
-        self._error_buffer = [
-            e for e in self._error_buffer if e["_expire"] > now
-        ]
+        self._error_buffer = [e for e in self._error_buffer if e["_expire"] > now]
 
         # Merge: sticky errors + current-cycle warns (dedup by ts+message)
         seen: set[str] = set()
@@ -462,9 +552,7 @@ class SnapshotAggregatorActor(Actor):
             key = f"{e['ts']}:{e['message']}"
             if key not in seen:
                 seen.add(key)
-                entries.append(
-                    {k: v for k, v in e.items() if k != "_expire"}
-                )
+                entries.append({k: v for k, v in e.items() if k != "_expire"})
 
         for e in new_entries:
             if e["level"] == "WARN":
@@ -473,7 +561,7 @@ class SnapshotAggregatorActor(Actor):
                     seen.add(key)
                     entries.append(e)
 
-        entries = entries[:self._max_log_entries]
+        entries = entries[: self._max_log_entries]
         warn_count = sum(1 for e in entries if e["level"] == "WARN")
         error_count = sum(1 for e in entries if e["level"] == "ERROR")
 

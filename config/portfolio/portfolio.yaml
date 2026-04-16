@@ -1,0 +1,178 @@
+# Portfolio configuration: risk model + optimizer + constraints + monitor
+#
+# Loaded by:
+#   - RiskModelActor (risk_model section — writes cache)
+#   - OptimizedSelectionPolicy (optimizer + constraints sections — reads cache)
+#   - SnapshotAggregatorActor (monitor section — exposure reporting)
+#
+# This file ONLY configures portfolio behavior. Factor variable names referenced
+# in fundamental.factors must be defined in the FactorEngine's factor_config_path
+# (e.g. config/cs/factors_alpha101.yaml — risk-only variables were appended per
+# feature/047 Option A).
+#
+# See /Users/joe/.claude/plans/resilient-painting-star.md for full design.
+
+risk_model:
+  # "statistical" | "fundamental" | "parallel"
+  # parallel: runs both models each update; active_model selects which populates
+  # the main cache key that OptimizedSelectionPolicy reads.
+  type: "parallel"
+  active_model: "fundamental"
+
+  # Shared by both models; RiskModelConfig fields.
+  common:
+    lookback_bars: 240          # 40 days @ 4h
+    min_history_bars: 60        # 10 days warmup
+    winsorize_quantile: 0.025   # 2.5% / 97.5% tail clip (Qlib convention)
+    scale_return_pct: true      # multiply returns by 100 for numerical stability
+    assume_centered: false      # subtract cross-sectional mean before covariance
+    nan_option: "fill"          # "ignore" | "fill" | "mask"
+
+  # StatisticalRiskModel (PCA + Shrinkage, ported from Qlib)
+  statistical:
+    method: "pca"               # "pca" | "fa" | "shrink"
+    num_factors: 10             # Latent factor count for PCA/FA decomposition
+    shrinkage: "lw"             # "lw" | "oas" | float (only used when method="shrink")
+    shrink_target: "const_corr" # "const_var" | "const_corr" | "single_factor"
+
+  # FundamentalRiskModel (Barra-style WLS cross-sectional regression)
+  fundamental:
+    # Risk variable expressions — computed by RiskModelActor's embedded
+    # FactorEngine (independent of the alpha factor config). Schema matches
+    # config/cs/factors_alpha101.yaml factors block (expression + description).
+    # Registration order = YAML insertion order = dependency order.
+    variables:
+      returns:
+        expression: "delta(close, 1) / delay(close, 1)"
+        description: "Period-to-period simple returns"
+        tags: ["base"]
+
+      btc_returns:
+        expression: "delta(btc_close, 1) / delay(btc_close, 1)"
+        description: "BTC broadcast returns (from extra_data btc_close)"
+        tags: ["market"]
+
+      btc_vol:
+        expression: "ts_std(btc_returns, 42)"
+        description: "BTC 7-day rolling volatility (42 bars @ 4h)"
+        tags: ["market"]
+
+      btc_beta:
+        expression: "covariance(returns, btc_returns, 42) / replace_zero(power(btc_vol, 2))"
+        description: "CAPM beta vs BTC over 7 days"
+        tags: ["risk"]
+
+      vol_30d:
+        expression: "ts_std(returns, 180)"
+        description: "30-day rolling return volatility (180 bars @ 4h)"
+        tags: ["risk"]
+
+      momentum_14d:
+        expression: "delta(close, 84) / delay(close, 84)"
+        description: "14-day cumulative return (84 bars @ 4h)"
+        tags: ["risk"]
+
+      log_market_cap:
+        expression: "log(ts_mean(quote_volume, 42) * close)"
+        description: "log(market cap) size proxy"
+        tags: ["risk"]
+
+      # oi_change:
+      #   expression: "delta(open_interest, 1) / replace_zero(delay(open_interest, 1))"
+      #   description: "Period-to-period OI relative change"
+      #   tags: ["risk"]
+
+      market_cap:
+        expression: "ts_mean(quote_volume, 42) * close"
+        description: "Point-in-time market cap proxy for WLS regression weights"
+        tags: ["weights"]
+
+    # Named risk factor → variable name (or extra_data field name).
+    # All exposures are cross-sectionally z-scored + winsorized to
+    # ±winsorize_exposures_sigma before the WLS regression.
+    factors:
+      - {name: "size",          variable: "log_market_cap",  description: "Log market cap"}
+      - {name: "momentum",      variable: "momentum_14d",    description: "14-day cumulative return"}
+      - {name: "volatility",    variable: "vol_30d",         description: "30-day return volatility"}
+      - {name: "btc_beta",      variable: "btc_beta",        description: "CAPM beta vs BTC"}
+      # - {name: "funding_rate",  variable: "funding_rate",    description: "Perpetual funding rate (extra_data)"}
+      # - {name: "oi_change",     variable: "oi_change",       description: "OI relative change"}
+
+    # Path to sector classification YAML (flat file: sector → list of instrument ids)
+    sector_map_path: "config/portfolio/sector_map.yaml"
+
+    # WLS regression weights source. When "market_cap", RiskModelActor reads
+    # variables["market_cap"] directly; "equal" → uniform weights.
+    wls_weight_source: "market_cap"
+
+    # Factor exposure cross-sectional winsorization (±sigma)
+    winsorize_exposures_sigma: 3.0
+
+    # Enforce cap-weighted sum of sector factor returns = 0 (Barra constraint)
+    sector_constraint: true
+
+    # Bayesian shrinkage of specific variance toward weighted cross-sectional mean
+    shrink_specific: true
+
+
+optimizer:
+  type: "mean_variance"         # Only MVO implemented in Phase 2
+  risk_aversion: 1.0            # λ coefficient on w'Σw
+  solver: "CLARABEL"            # cvxpy 1.4+ default; ECOS/SCS also available
+  epsilon: 5e-5                 # weights below this magnitude are zeroed
+  scale_return: true            # rescale alpha to match Σ's volatility scale
+  # Constraint relaxation order when infeasible:
+  fallback_relax: ["turnover", "sector", "factor"]
+
+
+constraints:
+  # Per-instrument absolute weight cap (|w_i| ≤ max_weight)
+  max_weight: 0.05
+
+  # Gross leverage cap (sum(|w|) ≤ max_leverage)
+  max_leverage: 2.0
+
+  # Net exposure band (near-market-neutral)
+  net_exposure: [-0.05, 0.05]
+
+  # L1 turnover cap (sum(|w - w0|)); null disables
+  turnover_limit: 0.30
+
+  # Minimum non-zero positions required for a valid solve
+  min_positions: 10
+
+  # Per-sector gross exposure caps (sum(|w_i| for i in sector) ≤ cap).
+  # Sector names must match keys in sector_map.yaml (7-sector + Other).
+  sector_limits:
+    L1:     0.40   # Layer-1 blockchains — dominant, highest cap
+    L2:     0.20   # Rollups / scaling (5 coins; avoid single-name dominance)
+    DEFI:   0.30   # Lending / AMM / derivatives
+    INFRA:  0.25   # Oracles / storage / indexing / nodes
+    GAMEFI: 0.20   # Gaming / NFT / metaverse (high vol)
+    AI:     0.10   # Sparse in 2022; raise when more AI tokens added
+    MEME:   0.15   # Sentiment-driven, control blast radius
+    Other:  0.20   # Catch-all; expected 0 hits given the sector_map coverage
+
+  # Per-named-factor signed exposure caps (|X_k' w| ≤ cap)
+  # Factor names must match fundamental.factors[*].name
+  factor_limits:
+    btc_beta: 0.30
+    size: 0.50
+    momentum: 0.50
+    volatility: 0.40
+
+
+policy:
+  # Maximum age (ns) of the cached risk snapshot to accept.
+  # Default: 24 bars × 4h = 86_400 seconds = 1 day
+  #
+  # When the snapshot is missing, stale, or the optimizer is infeasible
+  # across all relaxation stages, OptimizedSelectionPolicy.select returns None.
+  # DecisionEngineActor treats this as "no opinion" and holds current
+  # positions unchanged. There is no fallback policy by design.
+  max_snapshot_age_ns: 86_400_000_000_000
+
+# NOTE: No `monitor:` section — risk exposure monitoring is handled by the
+# existing SnapshotAggregatorActor, which automatically writes `snapshot:risk`
+# to the cache whenever `risk_model:state` is present. Grafana reads from
+# Redis and handles alerting via its own rule engine.

@@ -3,7 +3,6 @@
 """Configuration classes for CS strategy components."""
 
 import msgspec
-
 from nautilus_trader.config import ActorConfig, StrategyConfig
 
 
@@ -87,6 +86,11 @@ class DecisionEngineActorConfig(ActorConfig, frozen=True):
     truncation: float = 0.0
     enable_long: bool = True
     enable_short: bool = True
+    # OptimizedSelectionPolicy params (cache-backed risk model).
+    # On snapshot missing / stale / solver infeasible, the policy returns None
+    # and DecisionEngineActor holds current positions (no fallback policy by design).
+    optimized_portfolio_config_path: str | None = None
+    optimized_max_snapshot_age_ns: int = 24 * 4 * 3_600_000_000_000  # 24 × 4h
 
 
 class BracketConfig(msgspec.Struct, frozen=True):
