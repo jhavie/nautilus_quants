@@ -18,8 +18,10 @@ Constitution Compliance:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.common.config import ActorConfig
@@ -27,13 +29,8 @@ from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.model.data import Bar, BarType, DataType, FundingRateUpdate
 from nautilus_trader.model.identifiers import InstrumentId
 
-from nautilus_quants.utils.cache_keys import FACTOR_VALUES_CACHE_KEY
 from nautilus_quants.common.bar_subscription import BarSubscriptionMixin
-from nautilus_quants.factors.config import (
-    FactorConfig,
-    load_factor_config,
-    validate_factor_config,
-)
+from nautilus_quants.factors.config import FactorConfig, load_factor_config, validate_factor_config
 from nautilus_quants.factors.engine.extra_data import (
     ExtraDataConfig,
     load_extra_data_config,
@@ -41,6 +38,8 @@ from nautilus_quants.factors.engine.extra_data import (
 )
 from nautilus_quants.factors.engine.factor_engine import FactorEngine
 from nautilus_quants.factors.types import FactorValues
+from nautilus_quants.portfolio.monitor.factor import compute_factor_ic
+from nautilus_quants.utils.cache_keys import FACTOR_IC_CACHE_KEY, FACTOR_VALUES_CACHE_KEY
 
 # Timer name for the hot-reload check.
 _HOT_RELOAD_TIMER = "factor_config_hot_reload"
@@ -241,6 +240,9 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         self._cached_results: dict[int, dict[str, dict[str, float]]] | None = None
         self._flush_count: int = 0
         self._factors_mtime: float = 0.0
+
+        # Previous factor results for realized IC computation (live only)
+        self._prev_results: dict[str, dict[str, float]] | None = None
 
         # Funding rate: cache latest rate per instrument (forward-fill)
         self._latest_funding_rates: dict[str, float] = {}
@@ -529,9 +531,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         # Auto-detect extra bar fields on first BinanceBar
         if not self._extra_fields_detected:
             try:
-                from nautilus_trader.adapters.binance.common.types import (
-                    BinanceBar as _BinanceBar,
-                )
+                from nautilus_trader.adapters.binance.common.types import BinanceBar as _BinanceBar
 
                 if isinstance(bar, _BinanceBar):
                     self._extra_fields_detected = True
@@ -694,6 +694,35 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
 
             self.cache.add(FACTOR_VALUES_CACHE_KEY, factor_values.to_json().encode())
 
+        # Realized IC: live only (not during cache replay)
+        if self._cached_results is None and self._prev_results is not None:
+            self._publish_realized_ic(ts, results)
+        self._prev_results = results
+
+    def _publish_realized_ic(self, ts: int, results: dict[str, dict[str, float]]) -> None:
+        """Compute realized IC and write to cache for Grafana monitoring."""
+        if self._engine is None:
+            return
+
+        panel_fields = self._engine._buffer.to_panel()
+        close = panel_fields.get("close")
+        if close is None or not isinstance(close, pd.DataFrame) or len(close) < 2:
+            return
+
+        cols = close.columns.tolist()
+        vals_cur = close.values[-1]
+        vals_prev = close.values[-2]
+        close_cur = {
+            cols[i]: float(vals_cur[i]) for i in range(len(cols)) if np.isfinite(vals_cur[i])
+        }
+        close_prev = {
+            cols[i]: float(vals_prev[i]) for i in range(len(cols)) if np.isfinite(vals_prev[i])
+        }
+
+        ic = compute_factor_ic(self._prev_results, close_cur, close_prev)
+        payload = json.dumps({"ts": ts, "ic": ic})
+        self.cache.add(FACTOR_IC_CACHE_KEY, payload.encode())
+
     def _inject_broadcast_staged(self, ts: int) -> None:
         """Inject broadcast fields into Buffer staging before flush.
 
@@ -788,10 +817,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             self.log.warning(f"Failed to cache factor snapshots: {e}")
 
         if self._config.factor_cache_path:
-            from nautilus_quants.factors.cache import (
-                compute_config_hash,
-                save_snapshots_as_cache,
-            )
+            from nautilus_quants.factors.cache import compute_config_hash, save_snapshots_as_cache
 
             try:
                 factor_cfg = load_factor_config(
@@ -817,6 +843,7 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
             self._engine.reset()
         self._pending_ts = 0
         self._last_flushed_ts = 0
+        self._prev_results = None
         self._pending_instruments.clear()
         self._expected_instruments.clear()
         self._cancel_flush_alert()
