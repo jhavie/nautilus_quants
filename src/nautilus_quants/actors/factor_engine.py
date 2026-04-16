@@ -720,9 +720,8 @@ class FactorEngineActor(BarSubscriptionMixin, Actor):
         }
 
         ic = compute_factor_ic(self._prev_results, close_cur, close_prev)
-        if ic:
-            payload = json.dumps({"ts": ts, "ic": ic})
-            self.cache.add(FACTOR_IC_CACHE_KEY, payload.encode())
+        payload = json.dumps({"ts": ts, "ic": ic})
+        self.cache.add(FACTOR_IC_CACHE_KEY, payload.encode())
 
     def _inject_broadcast_staged(self, ts: int) -> None:
         """Inject broadcast fields into Buffer staging before flush.

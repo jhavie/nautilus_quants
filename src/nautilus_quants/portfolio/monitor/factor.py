@@ -16,8 +16,28 @@ from typing import Any
 import numpy as np
 
 
+def _avg_rank(arr: np.ndarray) -> np.ndarray:
+    """Compute tie-aware average ranks (same as scipy rankdata, no dependency)."""
+    order = np.argsort(arr, kind="mergesort")
+    ranks = np.empty_like(order, dtype=np.float64)
+    ranks[order] = np.arange(1, len(arr) + 1, dtype=np.float64)
+    # Average ranks for tied values
+    i = 0
+    n = len(arr)
+    while i < n:
+        j = i + 1
+        while j < n and arr[order[j]] == arr[order[i]]:
+            j += 1
+        if j > i + 1:
+            avg = (ranks[order[i]] + ranks[order[j - 1]]) / 2.0
+            for k in range(i, j):
+                ranks[order[k]] = avg
+        i = j
+    return ranks
+
+
 def _spearman(a: list[float], b: list[float]) -> float:
-    """Fast Spearman rank correlation — no scipy dependency.
+    """Fast Spearman rank correlation with tie-aware average ranks.
 
     Returns NaN if either input is constant (zero variance in ranks).
     """
@@ -26,14 +46,17 @@ def _spearman(a: list[float], b: list[float]) -> float:
     # Constant input → undefined correlation
     if np.ptp(arr_a) == 0 or np.ptp(arr_b) == 0:
         return float("nan")
-    ra = np.argsort(np.argsort(arr_a)).astype(np.float64)
-    rb = np.argsort(np.argsort(arr_b)).astype(np.float64)
-    n = len(arr_a)
-    denom = n * (n * n - 1)
-    if denom == 0:
+    ra = _avg_rank(arr_a)
+    rb = _avg_rank(arr_b)
+    # Pearson correlation of ranks
+    ra_mean = np.mean(ra)
+    rb_mean = np.mean(rb)
+    da = ra - ra_mean
+    db = rb - rb_mean
+    denom = np.sqrt(np.dot(da, da) * np.dot(db, db))
+    if denom < 1e-15:
         return float("nan")
-    d = ra - rb
-    return 1.0 - 6.0 * float(np.dot(d, d)) / denom
+    return float(np.dot(da, db) / denom)
 
 
 def compute_factor_health(

@@ -303,3 +303,17 @@ class TestComputeFactorIc:
         result = compute_factor_ic(prev_factors, close_cur, close_prev)
 
         assert "stuck" not in result
+
+    def test_tied_values_handled_correctly(self) -> None:
+        """Tied factor values use average ranks, not ordinal ranks."""
+        # [1,1,2] vs [1,2,3]: ordinal gives 1.0, average ranks give ~0.866
+        prev_factors = {"alpha001": {"A": 1.0, "B": 1.0, "C": 2.0}}
+        close_prev = {"A": 100, "B": 100, "C": 100}
+        close_cur = {"A": 101, "B": 102, "C": 103}
+
+        result = compute_factor_ic(prev_factors, close_cur, close_prev)
+
+        assert "alpha001" in result
+        # With average ranks: should be ~0.866, NOT 1.0
+        assert result["alpha001"] < 1.0
+        assert result["alpha001"] == pytest.approx(0.866, abs=0.01)
