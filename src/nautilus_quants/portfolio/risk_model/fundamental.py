@@ -173,6 +173,9 @@ class FundamentalRiskModel(RiskModel):
             specific_variance=var_u,
             model_type="fundamental",
             sector_map=dict(cfg.sector_map) if cfg.sector_map else None,
+            factor_returns_history=factor_returns,  # (T, K)
+            specific_returns_history=residuals,  # (T, N)
+            instrument_returns=r_values,  # (T, N)
         )
 
     @property

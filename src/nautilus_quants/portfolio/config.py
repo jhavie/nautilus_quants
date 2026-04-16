@@ -22,10 +22,6 @@ import yaml
 
 from nautilus_quants.factors.config import FactorDefinition
 from nautilus_quants.portfolio.optimizer.base import OptimizerConstraints
-from nautilus_quants.portfolio.optimizer.mean_variance import (
-    MeanVarianceConfig,
-    MeanVarianceOptimizer,
-)
 from nautilus_quants.portfolio.risk_model.base import (
     FundamentalFactorSpec,
     FundamentalModelConfig,
@@ -88,7 +84,7 @@ class PortfolioConfig:
     """
 
     risk_model: RiskModelSectionConfig
-    optimizer: MeanVarianceConfig
+    optimizer: Any  # MeanVarianceConfig — lazy imported to avoid cvxpy at load time
     constraints: OptimizerConstraints
     policy: PolicySectionConfig
 
@@ -172,7 +168,15 @@ def _parse_risk_model_section(data: dict[str, Any]) -> RiskModelSectionConfig:
     )
 
 
-def _parse_optimizer_section(data: dict[str, Any]) -> MeanVarianceConfig:
+def _parse_optimizer_section(data: dict[str, Any]) -> Any:
+    # Graceful degradation: cvxpy is only needed when OptimizedSelectionPolicy
+    # is active. For monitoring-only deployments (RiskModelActor without MVO),
+    # skip optimizer parsing entirely if cvxpy is not installed.
+    try:
+        from nautilus_quants.portfolio.optimizer.mean_variance import MeanVarianceConfig
+    except ImportError:
+        return None
+
     return MeanVarianceConfig(
         risk_aversion=float(data.get("risk_aversion", 1.0)),
         solver=str(data.get("solver", "ECOS")),
@@ -288,6 +292,11 @@ def build_risk_model(cfg: RiskModelSectionConfig) -> RiskModel:
     raise ValueError(f"unknown risk_model type/active_model: {cfg.type}/{cfg.active_model}")
 
 
-def build_optimizer(cfg: MeanVarianceConfig) -> MeanVarianceOptimizer:
-    """Instantiate the MVO optimizer. (Only MVO supported at present.)"""
+def build_optimizer(cfg: Any) -> Any:
+    """Instantiate the MVO optimizer. (Only MVO supported at present.)
+
+    Lazy import to avoid requiring cvxpy at module load time.
+    """
+    from nautilus_quants.portfolio.optimizer.mean_variance import MeanVarianceOptimizer
+
     return MeanVarianceOptimizer(cfg)

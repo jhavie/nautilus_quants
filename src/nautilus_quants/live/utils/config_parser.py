@@ -142,6 +142,7 @@ def inject_data_configs(
         should_inject_bar_types = (
             "bar_types" in actor_config
             or actor_path.endswith("factor_engine:FactorEngineActor")
+            or actor_path.endswith("risk_model:RiskModelActor")
         )
         if should_inject_bar_types and (
             "bar_types" not in actor_config or not actor_config["bar_types"]

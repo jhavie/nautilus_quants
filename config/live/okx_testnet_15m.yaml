@@ -1,11 +1,8 @@
-# OKX Testnet 5m CS Strategy
+# OKX Testnet 30m Alpha101 CS Strategy (46-instrument, TopK 15/15)
 #
-# Usage:
-#   python -m nautilus_quants.live run config/live/okx_testnet_15m.yaml --dry-run
-#   python -m nautilus_quants.live run config/live/okx_testnet_15m.yaml
-#
-# Required environment variables:
-#   OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
+# NOTE: OKX demo/testnet supports only ~46 USDT-SWAP instruments (vs 290 mainnet).
+# RiskModelActor disabled — image 0.5.2 lacks cvxpy/scikit-learn.
+# Re-enable after deploying new image with PR #127.
 
 venue:
   name: "OKX"
@@ -15,27 +12,55 @@ venue:
   is_demo: true
 
 instruments:
-  bar_spec: "5m"
+  bar_spec: "30m"
+  # 46 instruments verified on OKX demo/testnet (2026-04-16)
   instrument_ids:
-    - "BTC-USDT-SWAP.OKX"
-    - "ETH-USDT-SWAP.OKX"
-    - "SOL-USDT-SWAP.OKX"
-    - "DOGE-USDT-SWAP.OKX"
-    - "ADA-USDT-SWAP.OKX"
-    - "LINK-USDT-SWAP.OKX"
     - "AAVE-USDT-SWAP.OKX"
-    - "OP-USDT-SWAP.OKX"
+    - "ADA-USDT-SWAP.OKX"
+    - "ALGO-USDT-SWAP.OKX"
     - "ARB-USDT-SWAP.OKX"
-    - "BNB-USDT-SWAP.OKX"
-    - "BCH-USDT-SWAP.OKX"
-    - "ETC-USDT-SWAP.OKX"
-    - "LTC-USDT-SWAP.OKX"
-    - "PEPE-USDT-SWAP.OKX"
-    - "FLOKI-USDT-SWAP.OKX"
-    - "SHIB-USDT-SWAP.OKX"
     - "ATOM-USDT-SWAP.OKX"
     - "AVAX-USDT-SWAP.OKX"
+    - "AXS-USDT-SWAP.OKX"
+    - "BAND-USDT-SWAP.OKX"
+    - "BCH-USDT-SWAP.OKX"
+    - "BNB-USDT-SWAP.OKX"
+    - "BTC-USDT-SWAP.OKX"
+    - "CELO-USDT-SWAP.OKX"
+    - "CFX-USDT-SWAP.OKX"
+    - "CHZ-USDT-SWAP.OKX"
+    - "COMP-USDT-SWAP.OKX"
+    - "CRV-USDT-SWAP.OKX"
+    - "DOGE-USDT-SWAP.OKX"
     - "DOT-USDT-SWAP.OKX"
+    - "ENA-USDT-SWAP.OKX"
+    - "ETC-USDT-SWAP.OKX"
+    - "ETH-USDT-SWAP.OKX"
+    - "ETHFI-USDT-SWAP.OKX"
+    - "FIL-USDT-SWAP.OKX"
+    - "FLOKI-USDT-SWAP.OKX"
+    - "HBAR-USDT-SWAP.OKX"
+    - "ICP-USDT-SWAP.OKX"
+    - "IMX-USDT-SWAP.OKX"
+    - "INJ-USDT-SWAP.OKX"
+    - "IOTA-USDT-SWAP.OKX"
+    - "JUP-USDT-SWAP.OKX"
+    - "KSM-USDT-SWAP.OKX"
+    - "LDO-USDT-SWAP.OKX"
+    - "LINK-USDT-SWAP.OKX"
+    - "LRC-USDT-SWAP.OKX"
+    - "LTC-USDT-SWAP.OKX"
+    - "NEAR-USDT-SWAP.OKX"
+    - "NEO-USDT-SWAP.OKX"
+    - "OP-USDT-SWAP.OKX"
+    - "PEPE-USDT-SWAP.OKX"
+    - "QTUM-USDT-SWAP.OKX"
+    - "SHIB-USDT-SWAP.OKX"
+    - "SOL-USDT-SWAP.OKX"
+    - "SUI-USDT-SWAP.OKX"
+    - "TON-USDT-SWAP.OKX"
+    - "TRX-USDT-SWAP.OKX"
+    - "XRP-USDT-SWAP.OKX"
 
 engine:
   trader_id: "TESTNET-ALPHA101-001"
@@ -45,13 +70,13 @@ engine:
       type: "redis"
       host: "10.100.0.2"
       port: 30379
-      timeout: 20
+      timeout: 60
     encoding: "msgpack"
     buffer_interval_ms: 100
     bulk_read_batch_size: 1000
     use_trader_prefix: true
     use_instance_id: false
-    flush_on_start: false
+    flush_on_start: true
     persist_account_events: true
     bar_capacity: 10000
     tick_capacity: 10000
@@ -59,10 +84,45 @@ engine:
   logging:
     log_level: "INFO"
     log_level_file: "DEBUG"
-    log_directory: "logs/testnet_15m"
+    log_directory: "logs/testnet_30m"
     use_pyo3: true
+
+  exec_engine:
+    reconciliation: true
+    reconciliation_lookback_mins: 240
+    filter_position_reports: false
+    generate_missing_orders: true
+    open_check_interval_secs: 10.0
+    open_check_open_only: false
+    open_check_lookback_mins: 15
+    open_check_threshold_ms: 5000
+    open_check_missing_retries: 5
+    position_check_interval_secs: 30.0
+    position_check_lookback_mins: 60
+    position_check_threshold_ms: 5000
+    position_check_retries: 5
+
   risk_engine:
     bypass: false
+
+  controller:
+    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
+    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    config:
+      interval: "30m"
+      venue_name: "OKX"
+      currency: "USDT"
+      min_equity_ratio: 0.5
+      guarded_strategy_ids: []
+      drawdown_rules:
+        - name: "monthly"
+          drawdown_window: "30d"
+          drawdown_ratio: 0.8
+          cooldown_period: "12h"
+        - name: "daily"
+          drawdown_window: "1d"
+          drawdown_ratio: 0.9
+          cooldown_period: "2h"
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
@@ -73,14 +133,24 @@ engine:
         publish_signals: true
         flush_timeout_secs: 60
 
+    - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
+      config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
+      config:
+        portfolio_config_path: "config/portfolio/portfolio.yaml"
+        update_interval_bars: 2
+
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
       config:
-        n_long: 8
-        n_short: 8
-        position_value: 2000
         rebalance_interval: 1
         composite_factor: "alpha101"
+        selection_policy: "TopKDropoutSelectionPolicy"
+        position_mode: "fixed"
+        position_value: 50
+        topk_long: 20
+        topk_short: 20
+        n_drop_long: 4
+        n_drop_short: 4
 
     - actor_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActor"
       config_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActorConfig"
@@ -89,15 +159,16 @@ engine:
         currency: "USDT"
         interval_secs: 15
         strategy_ids: ["CSStrategy-000"]
-        log_directory: "logs/testnet_15m"
+        log_directory: "logs/testnet_30m"
 
   strategies:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
       config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
       config:
-        instrument_ids: []  # Auto-injected
+        instrument_ids: []
         oms_type: "NETTING"
         execution_policy: "PostLimitExecutionPolicy"
+        use_hyphens_in_client_order_ids: false
 
   exec_algorithms:
     - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
@@ -113,3 +184,6 @@ engine:
         enable_residual_sweep: true
         residual_sweep_min_notional_fallback: 5.0
         max_sweep_retries: 3
+        max_transient_retries: 3
+        transient_retry_delay_secs: 3.0
+        market_timeout_secs: 1500.0
