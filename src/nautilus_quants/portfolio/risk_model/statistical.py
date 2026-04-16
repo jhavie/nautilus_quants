@@ -136,6 +136,9 @@ class StatisticalRiskModel(RiskModel):
             factor_covariance=factor_cov,
             specific_variance=var_u,
             model_type="statistical",
+            factor_returns_history=scores,  # (T, K)
+            specific_returns_history=residuals,  # (T, N)
+            instrument_returns=x,  # (T, N)
         )
 
     # ------------------------------------------------------------------
@@ -172,6 +175,7 @@ class StatisticalRiskModel(RiskModel):
             factor_covariance=None,
             specific_variance=np.diag(covariance).copy(),
             model_type="statistical",
+            instrument_returns=x,  # (T, N) for VaR
         )
 
     @staticmethod

@@ -90,3 +90,54 @@ def compute_portfolio_exposure(
         "factor_exposures": factor_exposures,
         "sector_exposures": sector_exposures,
     }
+
+
+# ---------------------------------------------------------------------------
+# Breach detection
+# ---------------------------------------------------------------------------
+
+
+def check_factor_limits(
+    factor_exposures: dict[str, float],
+    limits: dict[str, float] | None,
+) -> list[dict[str, object]]:
+    """Check factor exposures against configured limits.
+
+    Returns list of breaches: ``[{kind, name, limit, actual}, ...]``.
+    """
+    if not limits or not factor_exposures:
+        return []
+    breaches = []
+    for name, limit in limits.items():
+        actual = factor_exposures.get(name)
+        if actual is not None and abs(actual) > limit:
+            breaches.append({
+                "kind": "factor",
+                "name": name,
+                "limit": limit,
+                "actual": round(actual, 6),
+            })
+    return breaches
+
+
+def check_sector_limits(
+    sector_exposures: dict[str, float],
+    limits: dict[str, float] | None,
+) -> list[dict[str, object]]:
+    """Check sector exposures against configured limits.
+
+    Returns list of breaches: ``[{kind, name, limit, actual}, ...]``.
+    """
+    if not limits or not sector_exposures:
+        return []
+    breaches = []
+    for name, limit in limits.items():
+        actual = sector_exposures.get(name)
+        if actual is not None and actual > limit:
+            breaches.append({
+                "kind": "sector",
+                "name": name,
+                "limit": limit,
+                "actual": round(actual, 6),
+            })
+    return breaches

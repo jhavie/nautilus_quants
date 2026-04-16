@@ -23,6 +23,8 @@ import json
 import math
 import re
 import time
+
+import numpy as np
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -36,7 +38,15 @@ from nautilus_trader.model.objects import Currency
 
 from nautilus_quants.execution.post_limit.state import OrderExecutionStateStore
 from nautilus_quants.factors.factor_values import FactorValues
-from nautilus_quants.portfolio.monitor.exposure import compute_portfolio_exposure
+from nautilus_quants.portfolio.monitor.attribution import compute_pnl_attribution
+from nautilus_quants.portfolio.monitor.concentration import compute_concentration
+from nautilus_quants.portfolio.monitor.exposure import (
+    check_factor_limits,
+    check_sector_limits,
+    compute_portfolio_exposure,
+)
+from nautilus_quants.portfolio.monitor.risk_decomposition import compute_risk_budget
+from nautilus_quants.portfolio.monitor.var import compute_historical_var
 from nautilus_quants.portfolio.types import RiskModelOutput, deserialize_risk_output
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 from nautilus_quants.utils.cache_keys import (
@@ -90,6 +100,13 @@ class SnapshotAggregatorActorConfig(ActorConfig, frozen=True):
     strategy_ids: list[str] = []
     log_directory: str = "logs"
     max_log_entries: int = 50
+    # --- Risk exposure monitoring (feature/048) ---
+    risk_factor_limits: dict[str, float] | None = None
+    risk_sector_limits: dict[str, float] | None = None
+    risk_attribution_enabled: bool = True
+    risk_var_enabled: bool = True
+    risk_var_alpha: float = 0.05
+    risk_var_lookback_bars: int = 180
 
 
 class SnapshotAggregatorActor(Actor):
@@ -488,7 +505,7 @@ class SnapshotAggregatorActor(Actor):
         weights = self._collect_position_weights()
         exposure = compute_portfolio_exposure(weights, output)
 
-        return {
+        snapshot: dict[str, Any] = {
             "ts_ns": ts_wall,
             "model_type": output.model_type,
             "model_timestamp_ns": output.timestamp_ns,
@@ -502,10 +519,76 @@ class SnapshotAggregatorActor(Actor):
             "net": exposure["net"],
             "long": exposure["long"],
             "short": exposure["short"],
-            # Named-factor and sector exposures (Grafana defines alert rules)
+            # Named-factor and sector exposures
             "factor_exposures": exposure["factor_exposures"],
             "sector_exposures": exposure["sector_exposures"],
         }
+
+        # --- Breaches (feature/048) ---
+        cfg = self.config
+        factor_breaches = check_factor_limits(
+            exposure["factor_exposures"], cfg.risk_factor_limits
+        )
+        sector_breaches = check_sector_limits(
+            exposure["sector_exposures"], cfg.risk_sector_limits
+        )
+        snapshot["breaches"] = factor_breaches + sector_breaches
+
+        # --- Concentration (feature/048) ---
+        snapshot["concentration"] = compute_concentration(weights)
+
+        # --- P&L attribution (feature/048) ---
+        w_vec = self._weights_to_vector(weights, output.instruments)
+        if (
+            cfg.risk_attribution_enabled
+            and output.is_decomposed
+            and output.factor_returns_history is not None
+            and output.specific_returns_history is not None
+            and output.factor_names
+        ):
+            f_t = output.factor_returns_history[-1]  # latest period
+            u_t = output.specific_returns_history[-1]
+            snapshot["pnl_attribution"] = compute_pnl_attribution(
+                w_vec, output.factor_exposures, f_t, u_t, output.factor_names,
+            )
+
+        # --- Risk decomposition (feature/048) ---
+        if (
+            output.is_decomposed
+            and output.factor_covariance is not None
+            and output.specific_variance is not None
+            and output.factor_names
+        ):
+            snapshot["risk_decomposition"] = compute_risk_budget(
+                w_vec,
+                output.factor_exposures,
+                output.factor_covariance,
+                output.specific_variance,
+                output.factor_names,
+            )
+
+        # --- Historical VaR / CVaR (feature/048) ---
+        if cfg.risk_var_enabled and output.instrument_returns is not None:
+            equity = compute_mtm_equity(self.portfolio, self._venue, self._currency)
+            snapshot["var"] = compute_historical_var(
+                instrument_returns=output.instrument_returns,
+                weights=w_vec,
+                alpha=cfg.risk_var_alpha,
+                lookback=cfg.risk_var_lookback_bars,
+                equity=equity,
+            )
+
+        return snapshot
+
+    @staticmethod
+    def _weights_to_vector(
+        weights: dict[str, float],
+        instruments: tuple[str, ...],
+    ) -> np.ndarray:
+        """Align dict weights to the instrument order of RiskModelOutput."""
+        return np.array(
+            [weights.get(inst, 0.0) for inst in instruments], dtype=np.float64,
+        )
 
     def _collect_position_weights(self) -> dict[str, float]:
         """Compute current portfolio weights as fraction of equity (signed)."""

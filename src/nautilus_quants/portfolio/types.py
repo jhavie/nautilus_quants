@@ -66,6 +66,13 @@ class RiskModelOutput:
     # downstream consumers (SnapshotAggregator) that want to compute
     # sector-level exposures without re-reading portfolio.yaml.
     sector_map: dict[str, str] | None = None
+    # --- Attribution fields (feature/048) ---
+    # Per-period factor returns from WLS/PCA: f_t for each t.
+    factor_returns_history: np.ndarray | None = None  # (T, K)
+    # Per-period idiosyncratic residuals: u_t for each t.
+    specific_returns_history: np.ndarray | None = None  # (T, N)
+    # Raw instrument returns (preprocessed) — used for Historical VaR.
+    instrument_returns: np.ndarray | None = None  # (T, N)
 
     @property
     def is_decomposed(self) -> bool:
@@ -120,6 +127,21 @@ def serialize_risk_output(output: RiskModelOutput) -> bytes:
         ),
         "model_type": output.model_type,
         "sector_map": dict(output.sector_map) if output.sector_map else None,
+        "factor_returns_history": (
+            output.factor_returns_history.tolist()
+            if output.factor_returns_history is not None
+            else None
+        ),
+        "specific_returns_history": (
+            output.specific_returns_history.tolist()
+            if output.specific_returns_history is not None
+            else None
+        ),
+        "instrument_returns": (
+            output.instrument_returns.tolist()
+            if output.instrument_returns is not None
+            else None
+        ),
     }
     return json.dumps(payload).encode("utf-8")
 
@@ -160,4 +182,19 @@ def deserialize_risk_output(payload: bytes) -> RiskModelOutput:
         ),
         model_type=str(data.get("model_type", "statistical")),
         sector_map=dict(data["sector_map"]) if data.get("sector_map") else None,
+        factor_returns_history=(
+            np.asarray(data["factor_returns_history"], dtype=np.float64)
+            if data.get("factor_returns_history") is not None
+            else None
+        ),
+        specific_returns_history=(
+            np.asarray(data["specific_returns_history"], dtype=np.float64)
+            if data.get("specific_returns_history") is not None
+            else None
+        ),
+        instrument_returns=(
+            np.asarray(data["instrument_returns"], dtype=np.float64)
+            if data.get("instrument_returns") is not None
+            else None
+        ),
     )
