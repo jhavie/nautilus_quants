@@ -89,6 +89,7 @@ engine:
 
   exec_engine:
     reconciliation: true
+    reconciliation_lookback_mins: 240
     filter_position_reports: false
     generate_missing_orders: true
     open_check_interval_secs: 10.0
@@ -132,13 +133,11 @@ engine:
         publish_signals: true
         flush_timeout_secs: 60
 
-    # RiskModelActor disabled — image 0.5.2 lacks cvxpy/scikit-learn.
-    # Uncomment after deploying new image with PR #127 merged.
-    # - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
-    #   config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
-    #   config:
-    #     portfolio_config_path: "config/portfolio/portfolio.yaml"
-    #     update_interval_bars: 2
+    - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
+      config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
+      config:
+        portfolio_config_path: "config/portfolio/portfolio.yaml"
+        update_interval_bars: 2
 
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
@@ -147,11 +146,11 @@ engine:
         composite_factor: "alpha101"
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
-        position_value: 30
-        topk_long: 15
-        topk_short: 15
-        n_drop_long: 3
-        n_drop_short: 3
+        position_value: 50
+        topk_long: 20
+        topk_short: 20
+        n_drop_long: 4
+        n_drop_short: 4
 
     - actor_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActor"
       config_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActorConfig"
