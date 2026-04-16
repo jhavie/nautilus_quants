@@ -37,10 +37,12 @@ from nautilus_trader.model.objects import Currency
 from nautilus_quants.execution.post_limit.state import OrderExecutionStateStore
 from nautilus_quants.factors.factor_values import FactorValues
 from nautilus_quants.portfolio.monitor.exposure import compute_portfolio_exposure
+from nautilus_quants.portfolio.monitor.factor import compute_factor_health
 from nautilus_quants.portfolio.types import RiskModelOutput, deserialize_risk_output
 from nautilus_quants.strategies.cs.types import RebalanceOrders
 from nautilus_quants.utils.cache_keys import (
     EXECUTION_STATES_CACHE_KEY,
+    FACTOR_IC_CACHE_KEY,
     RISK_MODEL_STATE_CACHE_KEY,
     SNAPSHOT_EXECUTION_CACHE_KEY,
     SNAPSHOT_FACTOR_CACHE_KEY,
@@ -116,6 +118,10 @@ class SnapshotAggregatorActor(Actor):
         self._last_factors_ts: int = 0
         self._last_rebalance: RebalanceOrders | None = None
         self._last_rebalance_ts: int = 0
+
+        # Factor health: previous factor values for turnover/stuck computation
+        self._prev_factors_dict: dict[str, dict[str, float]] | None = None
+        self._prev_factors_ts: int = 0
 
         # Log tail state: incremental reading + ERROR retention
         self._log_file_path: str = ""
@@ -360,7 +366,7 @@ class SnapshotAggregatorActor(Actor):
             sorted_items = sorted(numeric.items(), key=lambda x: (-x[1], x[0]))
             ranks[fname] = {inst: rank for rank, (inst, _) in enumerate(sorted_items, 1)}
 
-        return {
+        snapshot: dict[str, Any] = {
             "ts_snapshot": self._last_factors_ts,
             "ts_wall": ts_wall,
             "factors": factors,
@@ -370,6 +376,26 @@ class SnapshotAggregatorActor(Actor):
                 "instrument_count": len(instruments),
             },
         }
+
+        # Factor health: anomaly + dispersion + kurtosis + turnover + stuck
+        previous = None
+        if self._prev_factors_ts != 0 and self._prev_factors_ts != self._last_factors_ts:
+            previous = self._prev_factors_dict
+        health = compute_factor_health(factors, previous)
+        self._prev_factors_dict = factors
+        self._prev_factors_ts = self._last_factors_ts
+        snapshot["health"] = health
+        snapshot["staleness_secs"] = (ts_wall - self._last_factors_ts) / 1e9
+
+        # Realized IC (from FactorEngineActor cache)
+        ic_raw = self.cache.get(FACTOR_IC_CACHE_KEY)
+        if ic_raw is not None:
+            try:
+                snapshot["ic"] = json.loads(ic_raw).get("ic", {})
+            except Exception:
+                pass
+
+        return snapshot
 
     # -------------------------------------------------------------------------
     # Strategy snapshot
