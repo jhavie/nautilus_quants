@@ -1,12 +1,8 @@
-# OKX Testnet 30m Alpha101 CS Strategy (80-instrument, TopK 30/30)
+# OKX Testnet 30m Alpha101 CS Strategy (46-instrument, TopK 15/15)
 #
-# Usage:
-#   python -m nautilus_quants.live run config/live/okx_testnet_15m.yaml --dry-run
-#   python -m nautilus_quants.live run config/live/okx_testnet_15m.yaml
-#
-# Required environment variables:
-#   OKX_API_KEY, OKX_API_SECRET, OKX_API_PASSPHRASE
-#   (Use testnet API keys from OKX)
+# NOTE: OKX demo/testnet supports only ~46 USDT-SWAP instruments (vs 290 mainnet).
+# RiskModelActor disabled — image 0.5.2 lacks cvxpy/scikit-learn.
+# Re-enable after deploying new image with PR #127.
 
 venue:
   name: "OKX"
@@ -17,88 +13,53 @@ venue:
 
 instruments:
   bar_spec: "30m"
-  # 48 Tier1 (blue-chip) + 32 Tier2 (mid-cap) = 80 instruments
-  # Verified on OKX USDT-SWAP live (2026-04-16). Excludes stock/commodity/stablecoin contracts.
+  # 46 instruments verified on OKX demo/testnet (2026-04-16)
   instrument_ids:
     - "AAVE-USDT-SWAP.OKX"
     - "ADA-USDT-SWAP.OKX"
     - "ALGO-USDT-SWAP.OKX"
-    - "APE-USDT-SWAP.OKX"
-    - "APT-USDT-SWAP.OKX"
-    - "AR-USDT-SWAP.OKX"
     - "ARB-USDT-SWAP.OKX"
     - "ATOM-USDT-SWAP.OKX"
     - "AVAX-USDT-SWAP.OKX"
     - "AXS-USDT-SWAP.OKX"
     - "BAND-USDT-SWAP.OKX"
-    - "BAT-USDT-SWAP.OKX"
     - "BCH-USDT-SWAP.OKX"
-    - "BERA-USDT-SWAP.OKX"
-    - "BLUR-USDT-SWAP.OKX"
     - "BNB-USDT-SWAP.OKX"
-    - "BONK-USDT-SWAP.OKX"
     - "BTC-USDT-SWAP.OKX"
     - "CELO-USDT-SWAP.OKX"
     - "CFX-USDT-SWAP.OKX"
     - "CHZ-USDT-SWAP.OKX"
     - "COMP-USDT-SWAP.OKX"
     - "CRV-USDT-SWAP.OKX"
-    - "DASH-USDT-SWAP.OKX"
     - "DOGE-USDT-SWAP.OKX"
     - "DOT-USDT-SWAP.OKX"
-    - "DYDX-USDT-SWAP.OKX"
-    - "EGLD-USDT-SWAP.OKX"
-    - "EIGEN-USDT-SWAP.OKX"
     - "ENA-USDT-SWAP.OKX"
-    - "ENJ-USDT-SWAP.OKX"
-    - "ENS-USDT-SWAP.OKX"
     - "ETC-USDT-SWAP.OKX"
     - "ETH-USDT-SWAP.OKX"
     - "ETHFI-USDT-SWAP.OKX"
     - "FIL-USDT-SWAP.OKX"
     - "FLOKI-USDT-SWAP.OKX"
-    - "FLOW-USDT-SWAP.OKX"
-    - "GALA-USDT-SWAP.OKX"
-    - "GRT-USDT-SWAP.OKX"
     - "HBAR-USDT-SWAP.OKX"
-    - "HYPE-USDT-SWAP.OKX"
     - "ICP-USDT-SWAP.OKX"
     - "IMX-USDT-SWAP.OKX"
     - "INJ-USDT-SWAP.OKX"
     - "IOTA-USDT-SWAP.OKX"
-    - "JTO-USDT-SWAP.OKX"
     - "JUP-USDT-SWAP.OKX"
     - "KSM-USDT-SWAP.OKX"
     - "LDO-USDT-SWAP.OKX"
     - "LINK-USDT-SWAP.OKX"
     - "LRC-USDT-SWAP.OKX"
     - "LTC-USDT-SWAP.OKX"
-    - "MANA-USDT-SWAP.OKX"
     - "NEAR-USDT-SWAP.OKX"
     - "NEO-USDT-SWAP.OKX"
-    - "ONDO-USDT-SWAP.OKX"
-    - "ONE-USDT-SWAP.OKX"
-    - "ONT-USDT-SWAP.OKX"
     - "OP-USDT-SWAP.OKX"
-    - "ORDI-USDT-SWAP.OKX"
-    - "PENDLE-USDT-SWAP.OKX"
     - "PEPE-USDT-SWAP.OKX"
-    - "POL-USDT-SWAP.OKX"
-    - "PYTH-USDT-SWAP.OKX"
     - "QTUM-USDT-SWAP.OKX"
-    - "RENDER-USDT-SWAP.OKX"
-    - "SEI-USDT-SWAP.OKX"
     - "SHIB-USDT-SWAP.OKX"
-    - "SNX-USDT-SWAP.OKX"
     - "SOL-USDT-SWAP.OKX"
-    - "STX-USDT-SWAP.OKX"
     - "SUI-USDT-SWAP.OKX"
-    - "TAO-USDT-SWAP.OKX"
-    - "TIA-USDT-SWAP.OKX"
     - "TON-USDT-SWAP.OKX"
     - "TRX-USDT-SWAP.OKX"
-    - "UNI-USDT-SWAP.OKX"
-    - "WIF-USDT-SWAP.OKX"
     - "XRP-USDT-SWAP.OKX"
 
 engine:
@@ -171,11 +132,13 @@ engine:
         publish_signals: true
         flush_timeout_secs: 60
 
-    - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
-      config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
-      config:
-        portfolio_config_path: "config/portfolio/portfolio.yaml"
-        update_interval_bars: 2  # every 2 bars = 1h @30m
+    # RiskModelActor disabled — image 0.5.2 lacks cvxpy/scikit-learn.
+    # Uncomment after deploying new image with PR #127 merged.
+    # - actor_path: "nautilus_quants.actors.risk_model:RiskModelActor"
+    #   config_path: "nautilus_quants.actors.risk_model:RiskModelActorConfig"
+    #   config:
+    #     portfolio_config_path: "config/portfolio/portfolio.yaml"
+    #     update_interval_bars: 2
 
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
@@ -184,11 +147,11 @@ engine:
         composite_factor: "alpha101"
         selection_policy: "TopKDropoutSelectionPolicy"
         position_mode: "fixed"
-        position_value: 15
-        topk_long: 30
-        topk_short: 30
-        n_drop_long: 5
-        n_drop_short: 5
+        position_value: 30
+        topk_long: 15
+        topk_short: 15
+        n_drop_long: 3
+        n_drop_short: 3
 
     - actor_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActor"
       config_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActorConfig"
@@ -203,10 +166,10 @@ engine:
     - strategy_path: "nautilus_quants.strategies.cs.strategy:CSStrategy"
       config_path: "nautilus_quants.strategies.cs.config:CSStrategyConfig"
       config:
-        instrument_ids: []  # Auto-injected
+        instrument_ids: []
         oms_type: "NETTING"
         execution_policy: "PostLimitExecutionPolicy"
-        use_hyphens_in_client_order_ids: false  # OKX doesn't allow hyphens in clOrdId
+        use_hyphens_in_client_order_ids: false
 
   exec_algorithms:
     - exec_algorithm_path: "nautilus_quants.execution.post_limit.algorithm:PostLimitExecAlgorithm"
