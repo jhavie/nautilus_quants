@@ -30,6 +30,7 @@ SLUG_MAP: dict[str, str] = {
     "ANIME": "anime",
     "ANKR": "ankr",
     "ANT": "aragon",
+    "APE": "apecoin-ape",
     "APT": "aptos",
     "AR": "arweave",
     "ARB": "arb-arbitrum",
@@ -79,6 +80,7 @@ SLUG_MAP: dict[str, str] = {
     "FIL": "file-coin",
     "FLM": "flamingo",
     "FLOKI": "bnb-floki-inu",             # SanAPI stores FLOKI FR/OI here (vs floki-inu-v2 which has no FR/OI)
+    "FLOW": "flow",
     "FTM": "fantom",
     "GALA": "gala-v2",
     "GRT": "the-graph",
@@ -86,7 +88,9 @@ SLUG_MAP: dict[str, str] = {
     "HBAR": "hedera-hashgraph",
     "HOT": "holo",
     "HUMA": "sol-huma-finance",
+    "ICP": "internet-computer",
     "ICX": "icon",
+    "INJ": "injective-protocol",
     "IOST": "iostoken",
     "IOTA": "iota",
     "IOTX": "iotex",
@@ -96,6 +100,7 @@ SLUG_MAP: dict[str, str] = {
     "KLAY": "klaytn",
     "KSM": "kusama",
     "LINA": "linear",
+    "LDO": "lido-dao",
     "LINK": "chainlink",
     "LPT": "livepeer",
     "LRC": "loopring",
@@ -116,11 +121,13 @@ SLUG_MAP: dict[str, str] = {
     "ONDO": "ondo-finance",
     "ONE": "harmony",
     "ONT": "ontology",
+    "OP": "o-optimism",                   # Optimism — FR+OI 1176 in SanAPI
     "ORDI": "ordi",                       # ORDI token (vs ordinals inscriptions)
     "PENGU": "pudgy-penguins",
     "PEOPLE": "constitutiondao",
     "PEPE": "pepe",
     "PNUT": "peanut-the-squirrel",
+    "POL": "polygon-ecosystem-token",     # Polygon — Binance Futures rebranded MATICUSDT → POLUSDT (2024-09), shares Santiment slug with legacy MATIC
     "PYTH": "pyth-network",
     "QTUM": "qtum",
     "REEF": "reef",
