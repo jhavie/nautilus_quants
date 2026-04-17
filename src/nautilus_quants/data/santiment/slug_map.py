@@ -181,20 +181,28 @@ UNAVAILABLE_IN_SANTIMENT: frozenset[str] = frozenset({
     "DEFI",   # Binance futures "DEFI index" — not a real Santiment project
 })
 
-# ── Tickers with a valid slug but no FR/OI coverage in SanAPI ──────────
-# (Verified 2026-04-17 across every allProjects candidate slug).
+# ── Tickers with a valid slug but no / partial FR+OI in SanAPI ─────────
+# Verified 2026-04-17 across every allProjects candidate slug, 4h bars
+# over 2025-09-01 → 2026-03-15 (1176 bars expected).
 # These still have volume_usd / social_volume_total, so they are kept in
-# SLUG_MAP. Strategies that depend on san_funding_rate or san_open_interest
-# should expect NaN for these tickers and either mask them out or ffill.
+# SLUG_MAP. Strategies depending on san_funding_rate / san_open_interest
+# should expect NaN or stale values for these tickers.
 FR_OI_MISSING_IN_SANTIMENT: frozenset[str] = frozenset({
-    # Older Binance tickers SanAPI recently dropped FR/OI for:
+    # ── FR + OI both empty (0 rows) ──
+    # Older Binance tickers whose derivatives data SanAPI has dropped:
     "ADA", "ALICE", "ANT", "ATA", "GALA", "KLAY", "LINA", "OCEAN", "OMG",
     "REEF", "SNX", "STMX", "XEC",
-    "BLZ", "FTM",   # FR available, OI dropped
-    # 2024-2025 new coins SanAPI has not backfilled FR/OI yet:
+    # 2024-2025 new coins SanAPI has not backfilled derivatives for:
     "HUMA", "BABY", "MEME", "BONK", "SAHARA",
-    # Partial coverage (~5 days / last-30-bars only — not usable for 6mo OOS):
-    "ETHFI", "PNUT", "ANIME", "AGLD", "ARKM", "W", "REN",
+    # FR available but OI dropped:
+    "BLZ", "FTM",
+    # ── Partial FR coverage (< ~85% of window) ──
+    # Last-30-bars only (≈5 days at 4h) — new coins SanAPI just started:
+    "ETHFI", "PNUT", "ANIME", "AGLD", "ARKM", "W",
+    # Older tickers SanAPI partially rebackfilled:
+    "C98", "PEOPLE",
+    # Older tickers under active drop (69 / 255 / 598 rows):
+    "BAL", "REN", "XEM", "ALPHA",
 })
 
 # ── Per-metric availability (verified 2026-04-12, 4h, 1yr) ───────────
