@@ -121,6 +121,7 @@ SLUG_MAP: dict[str, str] = {
     "PEOPLE": "constitutiondao",
     "PEPE": "pepe",
     "PNUT": "peanut-the-squirrel",
+    "POL": "polygon-ecosystem-token",     # Polygon — Binance Futures rebranded MATICUSDT → POLUSDT (2024-09), shares Santiment slug with legacy MATIC
     "PYTH": "pyth-network",
     "QTUM": "qtum",
     "REEF": "reef",
