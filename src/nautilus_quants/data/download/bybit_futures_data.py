@@ -107,6 +107,10 @@ class BybitFundingRateDownloader:
             else:
                 checkpoint = None
 
+        # Snapshot resume baseline before loop (checkpoint is reassigned on each
+        # batch save below; re-reading its total_rows would double-count).
+        initial_checkpoint_rows = checkpoint.total_rows if checkpoint else 0
+
         # Output file
         start_fmt = start_date.replace("-", "")
         end_fmt = end_date.replace("-", "")
@@ -180,9 +184,7 @@ class BybitFundingRateDownloader:
 
                     batch.append({"ts": ts})
                     if len(batch) >= self.batch_size:
-                        total_rows = (
-                            checkpoint.total_rows if checkpoint else 0
-                        ) + rows_downloaded
+                        total_rows = initial_checkpoint_rows + rows_downloaded
                         new_cp = DownloadCheckpoint(
                             symbol=checkpoint_key, timeframe=timeframe_key,
                             exchange="bybit", market_type="futures",
@@ -197,9 +199,7 @@ class BybitFundingRateDownloader:
 
             # Final checkpoint
             if batch:
-                total_rows = (
-                    checkpoint.total_rows if checkpoint else 0
-                ) + rows_downloaded
+                total_rows = initial_checkpoint_rows + rows_downloaded
                 self.checkpoint_manager.save(DownloadCheckpoint(
                     symbol=checkpoint_key, timeframe=timeframe_key,
                     exchange="bybit", market_type="futures",
@@ -319,6 +319,10 @@ class BybitOpenInterestDownloader:
             else:
                 checkpoint = None
 
+        # Snapshot resume baseline before loop (checkpoint is reassigned on each
+        # batch save below; re-reading its total_rows would double-count).
+        initial_checkpoint_rows = checkpoint.total_rows if checkpoint else 0
+
         # Output file
         start_fmt = start_date.replace("-", "")
         end_fmt = end_date.replace("-", "")
@@ -395,9 +399,7 @@ class BybitOpenInterestDownloader:
 
                     batch.append({"ts": ts})
                     if len(batch) >= self.batch_size:
-                        total_rows = (
-                            checkpoint.total_rows if checkpoint else 0
-                        ) + rows_downloaded
+                        total_rows = initial_checkpoint_rows + rows_downloaded
                         new_cp = DownloadCheckpoint(
                             symbol=checkpoint_key, timeframe=timeframe_key,
                             exchange="bybit", market_type="futures",
@@ -412,9 +414,7 @@ class BybitOpenInterestDownloader:
 
             # Final checkpoint
             if batch:
-                total_rows = (
-                    checkpoint.total_rows if checkpoint else 0
-                ) + rows_downloaded
+                total_rows = initial_checkpoint_rows + rows_downloaded
                 self.checkpoint_manager.save(DownloadCheckpoint(
                     symbol=checkpoint_key, timeframe=timeframe_key,
                     exchange="bybit", market_type="futures",
