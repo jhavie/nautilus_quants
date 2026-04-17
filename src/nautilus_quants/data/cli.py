@@ -1483,6 +1483,7 @@ def santiment_download(
 
     run_id = generate_run_id()
     log_dir = create_log_dir(config.paths.logs, run_id)
+    _setup_santiment_logging(ctx.obj.get("verbose", False), log_dir=log_dir)
     start_time = datetime.now()
 
     click.echo("=" * 70)
@@ -1543,6 +1544,8 @@ def santiment_transform(
     symbol: Optional[str],
 ) -> None:
     """Transform Santiment CSV data to Parquet format."""
+    _setup_santiment_logging(ctx.obj.get("verbose", False))   # stdout only, no log_dir
+
     from nautilus_quants.data.config import (
         ConfigurationError,
         load_santiment_config,
@@ -1612,6 +1615,41 @@ def santiment_transform(
 
     if has_errors:
         ctx.exit(EXIT_TRANSFORM_ERROR)
+
+
+def _setup_santiment_logging(verbose: bool, log_dir: Optional[Path] = None) -> None:
+    """Route santiment downloader's logger.info to stdout (and optionally a file).
+
+    santiment.py emits per-metric and per-ticker progress via logger.info, but the
+    data CLI never configures a root logger, so INFO is dropped by Python's default
+    (WARNING) level. Attach a stdout StreamHandler so progress shows in console; if
+    log_dir is provided (download path), also attach a FileHandler writing to
+    ``{log_dir}/santiment.log`` so runs leave an on-disk trace (previously the
+    log directory advertised by ``click.echo`` was created empty).
+    """
+    import logging
+    import sys
+
+    lg = logging.getLogger("nautilus_quants.data.download.santiment")
+
+    # stdout handler (idempotent: only add if none attached yet)
+    if not any(
+        isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout
+        for h in lg.handlers
+    ):
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(logging.Formatter("%(message)s"))
+        lg.addHandler(sh)
+
+    # file handler — only when log_dir supplied and no FileHandler already attached
+    if log_dir is not None and not any(isinstance(h, logging.FileHandler) for h in lg.handlers):
+        log_file = Path(log_dir) / "santiment.log"
+        fh = logging.FileHandler(log_file)
+        fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s"))
+        lg.addHandler(fh)
+
+    lg.setLevel(logging.DEBUG if verbose else logging.INFO)
+    lg.propagate = False
 
 
 def _load_config_with_overrides(

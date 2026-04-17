@@ -353,6 +353,10 @@ class BinanceDownloader:
                     # Request params changed, start fresh
                     checkpoint = None
 
+        # Snapshot resume baseline before loop (checkpoint is reassigned on each save
+        # below; using checkpoint.total_rows there would double-count rows_downloaded).
+        initial_checkpoint_rows = checkpoint.total_rows if checkpoint else 0
+
         # Create output file path
         file_path = _get_output_path(
             self.output_dir, symbol, timeframe, start_date, end_date
@@ -441,9 +445,7 @@ class BinanceDownloader:
 
                     # Save checkpoint every batch_size klines
                     if len(batch) >= self.batch_size:
-                        total_rows = (
-                            checkpoint.total_rows if checkpoint else 0
-                        ) + rows_downloaded
+                        total_rows = initial_checkpoint_rows + rows_downloaded
                         new_checkpoint = DownloadCheckpoint(
                             symbol=symbol,
                             timeframe=timeframe,
@@ -464,9 +466,7 @@ class BinanceDownloader:
 
             # Save final checkpoint
             if batch:
-                total_rows = (
-                    checkpoint.total_rows if checkpoint else 0
-                ) + rows_downloaded
+                total_rows = initial_checkpoint_rows + rows_downloaded
                 final_checkpoint = DownloadCheckpoint(
                     symbol=symbol,
                     timeframe=timeframe,

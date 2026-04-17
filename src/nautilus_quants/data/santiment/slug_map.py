@@ -1,10 +1,12 @@
 # Copyright (c) 2025 nautilus_quants
 # SPDX-License-Identifier: MIT
 """
-Santiment slug mapping — verified 2026-04-12 against SANBASE PRO.
+Santiment slug mapping — verified 2026-04-17 against SANBASE PRO.
 
 Maps crypto tickers to Santiment project slugs for san.get() queries.
-Only includes tickers whose data availability was empirically confirmed.
+Slugs resolved via allProjects GraphQL query; multi-candidate tickers
+(e.g. STRK, TON, TRUMP, WLD, ZRO, FLOKI, GTC, ORDI) choose the Ethereum
+mainnet variant when available, otherwise the canonical issuer project.
 """
 from __future__ import annotations
 
@@ -13,23 +15,36 @@ SLUG_MAP: dict[str, str] = {
     "1INCH": "1inch",
     "AAVE": "aave",
     "ADA": "cardano",
+    "AGLD": "adventure-gold",
+    "AIXBT": "aixbt",
     "ALGO": "algorand",
+    "ALICE": "myneighboralice",
     "ALPHA": "alpha-finance-lab",
+    "ANIME": "anime",
     "ANKR": "ankr",
+    "ANT": "aragon",
+    "APT": "aptos",
     "AR": "arweave",
+    "ARB": "arb-arbitrum",
+    "ARKM": "arkham",
     "ARPA": "arpa-chain",
+    "ATA": "automata-network",
     "ATOM": "cosmos",
     "AUDIO": "audius",
     "AVAX": "avalanche",
     "AXS": "axie-infinity",
+    "BABY": "babylon",
     "BAKE": "bakerytoken",
     "BAL": "balancer",
     "BAND": "band-protocol",
     "BAT": "basic-attention-token",
     "BCH": "bitcoin-cash",
     "BEL": "bella-protocol",
+    "BERA": "berachain",
     "BLZ": "bluzelle",
     "BNB": "binance-coin",
+    "BOME": "book-of-meme",
+    "BONK": "bonk1",
     "BTC": "bitcoin",
     "C98": "coin98",
     "CELO": "celo",
@@ -47,20 +62,33 @@ SLUG_MAP: dict[str, str] = {
     "DOT": "polkadot-new",
     "DUSK": "dusk-network",
     "DYDX": "dydx",
+    "EGLD": "elrond-egld",
+    "EIGEN": "eigenlayer",
     "ENJ": "enjin-coin",
     "ENS": "ethereum-name-service",
     "ETC": "ethereum-classic",
     "ETH": "ethereum",
+    "ETHFI": "ether-fi-ethfi",
+    "FIL": "file-coin",
+    "FLM": "flamingo",
+    "FLOKI": "floki-inu-v2",             # Ethereum variant (vs bnb-floki-inu)
     "FTM": "fantom",
+    "GALA": "gala-v2",
     "GRT": "the-graph",
+    "GTC": "gitcoin",                     # vs game (Game.com)
     "HBAR": "hedera-hashgraph",
     "HOT": "holo",
+    "HUMA": "sol-huma-finance",
     "ICX": "icon",
     "IOST": "iostoken",
     "IOTA": "iota",
     "IOTX": "iotex",
+    "JTO": "jito",
+    "JUP": "jupiter-ag",
     "KAVA": "kava",
+    "KLAY": "klaytn",
     "KSM": "kusama",
+    "LINA": "linear",
     "LINK": "chainlink",
     "LPT": "livepeer",
     "LRC": "loopring",
@@ -68,33 +96,64 @@ SLUG_MAP: dict[str, str] = {
     "MANA": "decentraland",
     "MASK": "mask-network",
     "MATIC": "polygon-ecosystem-token",
+    "MEME": "meme",
     "MKR": "maker",
+    "MORPHO": "morpho",
     "MTL": "metal",
     "NEAR": "near-protocol",
     "NEO": "neo",
     "NKN": "nkn",
+    "OCEAN": "ocean-protocol",
     "OGN": "origin-protocol",
     "OMG": "omisego",
+    "ONDO": "ondo-finance",
     "ONE": "harmony",
     "ONT": "ontology",
+    "ORDI": "ordi",                       # ORDI token (vs ordinals inscriptions)
+    "PENGU": "pudgy-penguins",
     "PEOPLE": "constitutiondao",
+    "PEPE": "pepe",
+    "PNUT": "peanut-the-squirrel",
+    "PYTH": "pyth-network",
     "QTUM": "qtum",
+    "REEF": "reef",
+    "REN": "ren",
+    "RENDER": "render",
+    "RESOLV": "resolv",
+    "RLC": "rlc",
     "ROSE": "oasis-network",
     "RSR": "reserve-rights",
     "RUNE": "thorchain",
     "RVN": "ravencoin",
+    "SAHARA": "sahara-ai",
     "SAND": "the-sandbox",
+    "SATS": "sats-ordinals",
+    "SFP": "bnb-safepal",
     "SHIB": "shiba-inu",
+    "SKL": "skale-network",
     "SNX": "synthetix-network-token",
     "SOL": "solana",
+    "STMX": "stormx",
     "STORJ": "storj",
+    "STRK": "starknet-token",             # Starknet (vs strike)
+    "SUI": "sui",
     "SUSHI": "sushi",
     "SXP": "swipe",
+    "THETA": "theta",
+    "TIA": "celestia",
+    "TON": "toncoin",                     # Toncoin (vs tontoken)
     "TRB": "tellor",
+    "TRUMP": "official-trump",            # OFFICIAL TRUMP (vs maga)
     "TRX": "tron",
     "UNI": "uniswap",
     "VET": "vechain",
+    "VIRTUAL": "virtual-protocol",
+    "W": "wormhole",
     "WAVES": "waves",
+    "WIF": "dogwifhat",
+    "WLD": "worldcoin-org",               # Ethereum variant (vs o-worldcoin-org)
+    "WLFI": "world-liberty-financial-wlfi",
+    "XEC": "ecash",
     "XEM": "nem",
     "XLM": "stellar",
     "XMR": "monero",
@@ -102,9 +161,18 @@ SLUG_MAP: dict[str, str] = {
     "XTZ": "tezos",
     "YFI": "yearn-finance",
     "ZEC": "zcash",
+    "ZEN": "zencash",
     "ZIL": "zilliqa",
+    "ZK": "zksync",
+    "ZRO": "layerzero",                   # Ethereum variant (vs arb-/o-layerzero)
     "ZRX": "0x",
 }
+
+# ── Tickers confirmed NOT available in Santiment (2026-04-17) ─────────
+# Listed here so data_santiment.yaml maintainers know to exclude them.
+UNAVAILABLE_IN_SANTIMENT: frozenset[str] = frozenset({
+    "DEFI",   # Binance futures "DEFI index" — not a real Santiment project
+})
 
 # ── Per-metric availability (verified 2026-04-12, 4h, 1yr) ───────────
 
