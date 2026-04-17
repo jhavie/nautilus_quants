@@ -1444,6 +1444,8 @@ def santiment_download(
     force: bool,
 ) -> None:
     """Download funding rate and open interest data from SanAPI."""
+    _setup_santiment_console_logger(ctx.obj.get("verbose", False))
+
     from nautilus_quants.data.config import (
         ConfigurationError,
         load_santiment_config,
@@ -1543,6 +1545,8 @@ def santiment_transform(
     symbol: Optional[str],
 ) -> None:
     """Transform Santiment CSV data to Parquet format."""
+    _setup_santiment_console_logger(ctx.obj.get("verbose", False))
+
     from nautilus_quants.data.config import (
         ConfigurationError,
         load_santiment_config,
@@ -1612,6 +1616,27 @@ def santiment_transform(
 
     if has_errors:
         ctx.exit(EXIT_TRANSFORM_ERROR)
+
+
+def _setup_santiment_console_logger(verbose: bool) -> None:
+    """Route santiment downloader's logger.info to stdout with ticker-level progress.
+
+    santiment.py emits per-metric and per-ticker progress via logger.info, but the
+    data CLI never configures a root logger, so INFO is dropped by Python's default
+    (WARNING) level and the user sees nothing between header and summary. Attaching
+    a StreamHandler to the specific module logger shows progress without affecting
+    other loggers.
+    """
+    import logging
+    import sys
+
+    lg = logging.getLogger("nautilus_quants.data.download.santiment")
+    if not any(isinstance(h, logging.StreamHandler) for h in lg.handlers):
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        lg.addHandler(handler)
+    lg.setLevel(logging.DEBUG if verbose else logging.INFO)
+    lg.propagate = False
 
 
 def _load_config_with_overrides(
