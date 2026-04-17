@@ -4,9 +4,16 @@
 Santiment slug mapping — verified 2026-04-17 against SANBASE PRO.
 
 Maps crypto tickers to Santiment project slugs for san.get() queries.
-Slugs resolved via allProjects GraphQL query; multi-candidate tickers
-(e.g. STRK, TON, TRUMP, WLD, ZRO, FLOKI, GTC, ORDI) choose the Ethereum
-mainnet variant when available, otherwise the canonical issuer project.
+Slugs resolved via allProjects GraphQL query.
+
+Multi-candidate ticker selection rule: SanAPI stores funding_rate /
+open_interest per-slug (NOT aggregated across a ticker's multiple
+projects). For tickers with several slugs sharing a ticker symbol
+(e.g. STRK, TON, TRUMP, WLD, ZRO, FLOKI, GTC, ORDI, LINA), we pick
+the slug that actually has non-empty funding_rate data — which is
+sometimes the chain-specific variant (WLD → o-worldcoin-org) and
+sometimes a legacy sibling project that SanAPI reuses as the data
+anchor (STRK → strike, TRUMP → maga).
 """
 from __future__ import annotations
 
@@ -53,7 +60,7 @@ SLUG_MAP: dict[str, str] = {
     "CHZ": "chiliz",
     "COMP": "compound",
     "COTI": "coti",
-    "CRV": "curve",
+    "CRV": "arb-curve",                   # SanAPI stores CRV FR/OI here (vs curve which has no FR/OI)
     "CTSI": "cartesi",
     "DASH": "dash",
     "DENT": "dent",
@@ -71,11 +78,11 @@ SLUG_MAP: dict[str, str] = {
     "ETHFI": "ether-fi-ethfi",
     "FIL": "file-coin",
     "FLM": "flamingo",
-    "FLOKI": "floki-inu-v2",             # Ethereum variant (vs bnb-floki-inu)
+    "FLOKI": "bnb-floki-inu",             # SanAPI stores FLOKI FR/OI here (vs floki-inu-v2 which has no FR/OI)
     "FTM": "fantom",
     "GALA": "gala-v2",
     "GRT": "the-graph",
-    "GTC": "gitcoin",                     # vs game (Game.com)
+    "GTC": "game",                        # SanAPI stores GTC (Gitcoin) FR/OI under `game` slug (vs gitcoin which has no FR/OI)
     "HBAR": "hedera-hashgraph",
     "HOT": "holo",
     "HUMA": "sol-huma-finance",
@@ -135,23 +142,23 @@ SLUG_MAP: dict[str, str] = {
     "SOL": "solana",
     "STMX": "stormx",
     "STORJ": "storj",
-    "STRK": "starknet-token",             # Starknet (vs strike)
+    "STRK": "strike",                     # SanAPI stores STRK (Starknet) FR/OI under `strike` slug (vs starknet-token which has no FR/OI)
     "SUI": "sui",
-    "SUSHI": "sushi",
+    "SUSHI": "arb-sushi",                 # SanAPI stores SUSHI FR/OI here (vs sushi which has no FR/OI)
     "SXP": "swipe",
     "THETA": "theta",
     "TIA": "celestia",
     "TON": "toncoin",                     # Toncoin (vs tontoken)
     "TRB": "tellor",
-    "TRUMP": "official-trump",            # OFFICIAL TRUMP (vs maga)
+    "TRUMP": "maga",                      # SanAPI stores TRUMP FR/OI under `maga` slug (vs official-trump which has no FR/OI)
     "TRX": "tron",
-    "UNI": "uniswap",
+    "UNI": "p-uniswap",                   # Polygon variant — SanAPI stores UNI FR/OI here (vs uniswap which has no FR/OI)
     "VET": "vechain",
     "VIRTUAL": "virtual-protocol",
     "W": "wormhole",
     "WAVES": "waves",
     "WIF": "dogwifhat",
-    "WLD": "worldcoin-org",               # Ethereum variant (vs o-worldcoin-org)
+    "WLD": "o-worldcoin-org",             # Optimism variant — SanAPI stores WLD FR/OI here (vs worldcoin-org which has no FR/OI)
     "WLFI": "world-liberty-financial-wlfi",
     "XEC": "ecash",
     "XEM": "nem",
@@ -164,7 +171,7 @@ SLUG_MAP: dict[str, str] = {
     "ZEN": "zencash",
     "ZIL": "zilliqa",
     "ZK": "zksync",
-    "ZRO": "layerzero",                   # Ethereum variant (vs arb-/o-layerzero)
+    "ZRO": "arb-layerzero",               # Arbitrum variant — SanAPI stores ZRO FR/OI here (vs layerzero which has no FR/OI)
     "ZRX": "0x",
 }
 
@@ -172,6 +179,30 @@ SLUG_MAP: dict[str, str] = {
 # Listed here so data_santiment.yaml maintainers know to exclude them.
 UNAVAILABLE_IN_SANTIMENT: frozenset[str] = frozenset({
     "DEFI",   # Binance futures "DEFI index" — not a real Santiment project
+})
+
+# ── Tickers with a valid slug but no / partial FR+OI in SanAPI ─────────
+# Verified 2026-04-17 across every allProjects candidate slug, 4h bars
+# over 2025-09-01 → 2026-03-15 (1176 bars expected).
+# These still have volume_usd / social_volume_total, so they are kept in
+# SLUG_MAP. Strategies depending on san_funding_rate / san_open_interest
+# should expect NaN or stale values for these tickers.
+FR_OI_MISSING_IN_SANTIMENT: frozenset[str] = frozenset({
+    # ── FR + OI both empty (0 rows) ──
+    # Older Binance tickers whose derivatives data SanAPI has dropped:
+    "ADA", "ALICE", "ANT", "ATA", "GALA", "KLAY", "LINA", "OCEAN", "OMG",
+    "REEF", "SNX", "STMX", "XEC",
+    # 2024-2025 new coins SanAPI has not backfilled derivatives for:
+    "HUMA", "BABY", "MEME", "BONK", "SAHARA",
+    # FR available but OI dropped:
+    "BLZ", "FTM",
+    # ── Partial FR coverage (< ~85% of window) ──
+    # Last-30-bars only (≈5 days at 4h) — new coins SanAPI just started:
+    "ETHFI", "PNUT", "ANIME", "AGLD", "ARKM", "W",
+    # Older tickers SanAPI partially rebackfilled:
+    "C98", "PEOPLE",
+    # Older tickers under active drop (69 / 255 / 598 rows):
+    "BAL", "REN", "XEM", "ALPHA",
 })
 
 # ── Per-metric availability (verified 2026-04-12, 4h, 1yr) ───────────
