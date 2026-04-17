@@ -194,8 +194,9 @@ FR_OI_MISSING_IN_SANTIMENT: frozenset[str] = frozenset({
     "REEF", "SNX", "STMX", "XEC",
     # 2024-2025 new coins SanAPI has not backfilled derivatives for:
     "HUMA", "BABY", "MEME", "BONK", "SAHARA",
-    # FR available but OI dropped:
-    "BLZ", "FTM",
+    # FR available but OI dropped / mostly empty:
+    "BLZ", "FTM",   # OI rows=0
+    "MKR",          # OI rows=111 (~9% of window)
     # ── Partial FR coverage (< ~85% of window) ──
     # Last-30-bars only (≈5 days at 4h) — new coins SanAPI just started:
     "ETHFI", "PNUT", "ANIME", "AGLD", "ARKM", "W",
