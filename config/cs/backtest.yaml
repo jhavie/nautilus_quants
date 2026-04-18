@@ -153,29 +153,54 @@ engine:
   risk_engine:
     bypass: true
 
-  # controller:
-    # controller_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardController"
-    # config_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardControllerConfig"
-    # config:
-    #   interval: "1h"
-    #   venue_name: "BINANCE"
-    #   currency: "USDT"
-    #   guarded_strategy_ids: []
-    #   countdown_period: "5m"
-    #   cancel_on_recovery: true
-    #   anomaly_rules:
-    #     - name: "monthly"
-    #       kind: "equity_drawdown"
-    #       equity_basis: "mark_to_market"
-    #       drawdown_window: "30d"
-    #       drawdown_ratio: 0.8
-    #       cooldown_period: "72h"
-    #     - name: "daily"
-    #       kind: "equity_drawdown"
-    #       equity_basis: "mark_to_market"
-    #       drawdown_window: "1d"
-    #       drawdown_ratio: 0.95
-    #       cooldown_period: "24h"
+  controller:
+    controller_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardController"
+    config_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardControllerConfig"
+    config:
+      interval: "1h"
+      venue_name: "BINANCE"
+      currency: "USDT"
+      guarded_strategy_ids: []
+      snapshot_staleness_secs: 7200    # backtest ticks infrequently; keep generous
+      countdown_period: "5m"
+      cancel_on_recovery: true
+      anomaly_rules:
+        # --- v1.1: position count must match plan exactly (strict) ---
+        # DecisionEngine: topk_long=40, topk_short=40 → 40 long + 40 short
+        - name: "position_count"
+          kind: "position_count"
+          expected_long: 40
+          expected_short: 40
+          tolerance: 0
+          sustained_periods: 3
+          cooldown_period: "4h"
+
+        # --- v1.2: per-position notional within ±10% of plan (strict) ---
+        # DecisionEngine: position_mode=fixed, position_value=250 USDT/pos
+        - name: "per_position_notional"
+          kind: "notional_drift"
+          target_notional_usd: 250.0
+          max_drift_ratio: 1.1           # upper = 275 USDT
+          min_drift_ratio: 0.9           # lower = 225 USDT
+          min_violators: 3
+          sustained_periods: 2
+          cooldown_period: "4h"
+
+        # --- v1.3: equity drawdown (mtm) — monthly / daily ---
+        - name: "monthly"
+          kind: "equity_drawdown"
+          equity_basis: "mark_to_market"
+          drawdown_window: "30d"
+          drawdown_ratio: 0.8
+          sustained_periods: 1
+          cooldown_period: "72h"
+        - name: "daily"
+          kind: "equity_drawdown"
+          equity_basis: "mark_to_market"
+          drawdown_window: "1d"
+          drawdown_ratio: 0.95
+          sustained_periods: 1
+          cooldown_period: "24h"
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
@@ -195,6 +220,18 @@ engine:
         interval: "4h"
         venue_name: "BINANCE"
         currency: "USDT"
+
+    # Required by AnomalyGuardController: publishes snapshot:venue
+    # (positions / long_count / short_count / notional_value) to cache
+    # every ``interval_secs`` of simulated time.
+    - actor_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActor"
+      config_path: "nautilus_quants.actors.snapshot_aggregator:SnapshotAggregatorActorConfig"
+      config:
+        venue_name: "BINANCE"
+        currency: "USDT"
+        interval_secs: 3600            # backtest-friendly: once per hour of sim time
+        strategy_ids: ["CSStrategy-000"]
+        log_directory: "logs/performance"
 
     - actor_path: "nautilus_quants.strategies.cs.decision_engine:DecisionEngineActor"
       config_path: "nautilus_quants.strategies.cs.config:DecisionEngineActorConfig"
