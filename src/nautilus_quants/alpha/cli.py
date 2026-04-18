@@ -549,7 +549,7 @@ _ENV_OPTION = click.option(
     "--env",
     "env_name",
     default=None,
-    type=click.Choice(["test", "dev", "prod"]),
+    type=click.Choice(["test", "test_rc", "dev", "dev_rc", "prod"]),
     help="Registry environment (default: test).",
 )
 _DB_DIR_OPTION = click.option(

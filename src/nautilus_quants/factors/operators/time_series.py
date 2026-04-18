@@ -10,6 +10,7 @@ computing rolling statistics, delays, and other time-series transformations.
 from __future__ import annotations
 
 import math
+import warnings
 from collections import deque
 from typing import Any
 
@@ -603,7 +604,6 @@ class TsSkew(TimeSeriesOperator):
             # Suppress RuntimeWarning for all-NaN columns (warmup period).
             # np.errstate only handles floating-point exceptions; nanmean/nanstd
             # use warnings.warn() for empty slices, so we need both.
-            import warnings
             with warnings.catch_warnings(), np.errstate(invalid='ignore'):
                 warnings.simplefilter('ignore', RuntimeWarning)
                 mean = np.nanmean(win, axis=0)
@@ -665,7 +665,9 @@ class TsSlope(TimeSeriesOperator):
         for t in range(w - 1, T):
             win = values[t - w + 1:t + 1]
             has_nan = np.any(np.isnan(win), axis=0)
-            y_mean = np.nanmean(win, axis=0)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                y_mean = np.nanmean(win, axis=0)
             ss_xy = np.sum((x[:, None] - x_mean) * (win - y_mean), axis=0)
             r = ss_xy / ss_xx
             r[has_nan] = np.nan
@@ -713,7 +715,9 @@ class TsRsquare(TimeSeriesOperator):
         for t in range(w - 1, T):
             win = values[t - w + 1:t + 1]
             has_nan = np.any(np.isnan(win), axis=0)
-            y_mean = np.nanmean(win, axis=0)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                y_mean = np.nanmean(win, axis=0)
             x_dev = (x[:, None] - x_mean)
             y_dev = win - y_mean
             ss_xy = np.sum(x_dev * y_dev, axis=0)
@@ -767,7 +771,9 @@ class TsResidual(TimeSeriesOperator):
         for t in range(w - 1, T):
             win = values[t - w + 1:t + 1]
             has_nan = np.any(np.isnan(win), axis=0)
-            y_mean = np.nanmean(win, axis=0)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                y_mean = np.nanmean(win, axis=0)
             ss_xy = np.sum((x[:, None] - x_mean) * (win - y_mean), axis=0)
             slope = ss_xy / ss_xx
             intercept = y_mean - slope * x_mean
