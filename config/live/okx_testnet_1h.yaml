@@ -73,20 +73,25 @@ engine:
     bypass: false
 
   controller:
-    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
-    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    controller_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardController"
+    config_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardControllerConfig"
     config:
       interval: "1h"
       venue_name: "OKX"
       currency: "USDT"
-      min_equity_ratio: 0.7
       guarded_strategy_ids: []
-      drawdown_rules:
+      countdown_period: "5m"
+      cancel_on_recovery: true
+      anomaly_rules:
         - name: "monthly"
+          kind: "equity_drawdown"
+          equity_basis: "mark_to_market"
           drawdown_window: "30d"
           drawdown_ratio: 0.8
           cooldown_period: "72h"
         - name: "daily"
+          kind: "equity_drawdown"
+          equity_basis: "mark_to_market"
           drawdown_window: "1d"
           drawdown_ratio: 0.95
           cooldown_period: "24h"

@@ -185,15 +185,14 @@ engine:
     bypass: true
 
   controller:
-    controller_path: "nautilus_quants.controllers.equity_guard:EquityGuardController"
-    config_path: "nautilus_quants.controllers.equity_guard:EquityGuardControllerConfig"
+    controller_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardController"
+    config_path: "nautilus_quants.controllers.anomaly_guard:AnomalyGuardControllerConfig"
     config:
       interval: "1h"
       venue_name: "BINANCE"
       currency: "USDT"
-      min_equity_ratio: 0
       guarded_strategy_ids: []
-      drawdown_rules: []
+      anomaly_rules: []
 
   actors:
     - actor_path: "nautilus_quants.actors.factor_engine:FactorEngineActor"
