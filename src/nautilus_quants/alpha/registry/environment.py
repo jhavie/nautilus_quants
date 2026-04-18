@@ -10,7 +10,7 @@ from typing import Any
 
 from nautilus_quants.alpha.registry.models import RegistryConfig
 
-VALID_ENVS = {"test", "dev", "prod"}
+VALID_ENVS = {"test", "test_rc", "dev", "dev_rc", "prod"}
 DEFAULT_ENV = "test"
 DEFAULT_DB_DIR = "logs/registry"
 
