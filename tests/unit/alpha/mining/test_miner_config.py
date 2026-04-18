@@ -209,6 +209,24 @@ class TestBackwardCompat:
         assert cfg.model == "opus"
         assert cfg.hypothesis == "test"
 
+    def test_proxy_omitted_defaults_to_empty(self, tmp_yaml):
+        """Omitting mining.proxy yields empty string; _call_claude will skip env injection."""
+        p = tmp_yaml("""\
+            mining:
+              source: "llm_test"
+        """)
+        cfg = MiningConfig.from_yaml(p)
+        assert cfg.proxy == ""
+
+    def test_proxy_explicit_empty_string_means_no_proxy(self, tmp_yaml):
+        """Explicitly setting mining.proxy to "" also yields empty string."""
+        p = tmp_yaml("""\
+            mining:
+              proxy: ""
+        """)
+        cfg = MiningConfig.from_yaml(p)
+        assert cfg.proxy == ""
+
 
 # ── DirectionConfig frozen ───────────────────────────────────────
 

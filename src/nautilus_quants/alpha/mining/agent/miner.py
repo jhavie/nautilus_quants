@@ -80,7 +80,7 @@ class MiningConfig:
     bar_spec: str = "4h"
     model: str = "sonnet"
     source: str = "llm_claude"
-    proxy: str = "http://127.0.0.1:8888"
+    proxy: str = ""
     parallel: int = 3
     auto_analyze: bool = True
     hypothesis: str | None = None
@@ -141,7 +141,7 @@ class MiningConfig:
             bar_spec=bar_spec,
             model=model or mining.get("model", "sonnet"),
             source=mining.get("source", "llm_claude"),
-            proxy=mining.get("proxy", "http://127.0.0.1:8888"),
+            proxy=mining.get("proxy", ""),
             parallel=mining.get("parallel", 3),
             auto_analyze=auto_analyze,
             hypothesis=hypothesis,
@@ -520,10 +520,11 @@ class AlphaMiner:
         """
         env = os.environ.copy()
         proxy_url = self._config.proxy
-        env.setdefault("http_proxy", proxy_url)
-        env.setdefault("https_proxy", proxy_url)
-        env.setdefault("HTTP_PROXY", proxy_url)
-        env.setdefault("HTTPS_PROXY", proxy_url)
+        if proxy_url:  # empty string = no proxy, leave system env untouched
+            env.setdefault("http_proxy", proxy_url)
+            env.setdefault("https_proxy", proxy_url)
+            env.setdefault("HTTP_PROXY", proxy_url)
+            env.setdefault("HTTPS_PROXY", proxy_url)
 
         cmd = [
             "claude", "-p", prompt,
